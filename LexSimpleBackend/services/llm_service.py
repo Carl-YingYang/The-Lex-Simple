@@ -1,16 +1,20 @@
 import json
 import re
 import time
+import logging
+from datetime import datetime
 from core.config import settings
 from db.chroma_store import query_vector_db
 from db.sqlite_store import log_ai_transaction
-
 from services.prompts import (
     get_analyze_legal_text_prompt,
     get_dictionary_search_prompt,
     get_explain_statutory_text_prompt
 )
 from services.llm_config import get_ai_client, CHAT_MODEL, EXTRACT_MODEL
+
+# 🆕 COST LOGGER — para masukat kung ilang tokens ang nagastos per call
+_cost_logger = logging.getLogger("lex.cost")
 
 def extract_and_clean_json(raw_response: str) -> str:
     cleaned = re.sub(r'```(?:json)?\n?|```', '', raw_response).strip()
@@ -37,61 +41,66 @@ def recalculate_safety_score(ai_json: dict) -> dict:
     total_deductions = 0
     raw_clauses = ai_json.get("clauses", ai_json.get("findings", ai_json.get("results", [])))
     clauses_list = normalize_ai_keys(raw_clauses)
-    
     for clause in clauses_list:
         deduct = clause.get('score_deduction', 10)
         try:
             total_deductions += abs(int(deduct))
         except:
             total_deductions += 10
-
     ai_json['safety_score'] = max(0, starting_score - total_deductions)
     ai_json["clauses"] = clauses_list
     return ai_json
 
 def analyze_legal_text(ocr_text: str):
     try:
-        # Pinalaki natin ulit ang context window dahil kaya ng GPT-4o-mini ang mas mahaba
+        # Pinalaki natin ulit ang context window dahil kaya ng Llama 3 ang mas mahaba
         short_ocr = ocr_text[:6000] if len(ocr_text) > 6000 else ocr_text
-        
         search_results = query_vector_db(short_ocr, n_results=2)
         context_texts = []
         if search_results and search_results['documents']:
             for doc_list in search_results['documents']:
                 context_texts.extend(doc_list)
-        
         retrieved_context = "\n---\n".join(context_texts) if context_texts else "Philippine legal context."
         prompt = get_analyze_legal_text_prompt(retrieved_context, short_ocr)
-
-        # Mas sinusunod ng OpenAI ang JSON instructions, pero okay pa rin na may strict schema reminder
+        
         strict_schema = """
         Output MUST be in valid JSON:
         {"safety_score": 100, "clauses": [{"clause_title": "", "explanation": "In Taglish", "practical_advice": "In Taglish", "score_deduction": 10, "original_text": ""}]}
         """
-        
         client = get_ai_client()
-        # 💡 UPDATE: OpenAI Chat Completions syntax
+        # 💡 OPENAI COMPATIBLE SYNTAX (Works with Groq)
         completion = client.chat.completions.create(
             model=CHAT_MODEL,
             messages=[{"role": "user", "content": prompt + strict_schema}],
             temperature=0.1,
-            max_tokens=1500 
+            max_tokens=1500
         )
-
         raw_response = completion.choices[0].message.content
         print("\n[DEBUG] RAW RESPONSE RECEIVED\n")
-        
         clean_json_str = extract_and_clean_json(raw_response)
         ai_json = json.loads(clean_json_str)
         ai_json = recalculate_safety_score(ai_json)
-
         log_ai_transaction(short_ocr, json.dumps(ai_json))
-        return {"status": "success", "data": ai_json}
 
+        # 🆕 COST LOGGING — i-log yung token usage para sa cost tracking
+        try:
+            usage = completion.usage
+            _cost_logger.info(
+                f"llm_call | endpoint=/simplify | model={CHAT_MODEL} | "
+                f"prompt_tokens={usage.prompt_tokens} | "
+                f"completion_tokens={usage.completion_tokens} | "
+                f"total_tokens={usage.total_tokens} | "
+                f"timestamp={datetime.utcnow().isoformat()}"
+            )
+        except Exception as log_err:
+            print(f"[COST LOG ERROR] {log_err}")
+        return {"status": "success", "data": ai_json}
+        
     except Exception as e:
         print(f"Analyze Error: {e}")
-        return {"status": "error", "message": "May problema sa pag-process ng dokumento. Pakisubukan ulit."}
-
+        # 🛠️ DEBUGGING: Ibalik ang totoong error para makita mo sa Postman/curl
+        return {"status": "error", "message": f"Debug LLM Error: {str(e)}"}
+    
 def search_legal_dictionary(keyword: str):
     try:
         prompt = get_dictionary_search_prompt(keyword, "")

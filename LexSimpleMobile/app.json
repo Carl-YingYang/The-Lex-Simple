@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/Lex-Simpe-Logo.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false, 
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/Lex-Simpe-Logo.png",
       "resizeMode": "contain",
@@ -54,6 +54,9 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "apiUrl": "https://presuppurative-unconceitedly-peyton.ngrok-free.dev"
+    }
   }
 }

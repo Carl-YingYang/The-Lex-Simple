@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import ImageViewer from 'react-native-image-zoom-viewer';
+import { postEndpoint, postFileEndpoint } from '../../../services/AiEngine';
 
 // 🛠️ IMPORTS
 import { globalStyles, COLORS } from '../../../theme/globalStyles';
@@ -55,7 +56,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
   const [scoreInfoModalVisible, setScoreInfoModalVisible] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  const API_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev/simplify';
 
   const LOADING_MESSAGES = [
     "Extracting text offline...",
@@ -171,20 +171,11 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
 
     try {
       if (scanItem.type === 'document') {
-        const fileUrl = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev/simplify_file';
         const formData = new FormData();
         formData.append('file', { uri: scanItem.uri, name: scanItem.title || 'document.txt', type: 'application/octet-stream' } as any);
 
-        const response = await fetch(fileUrl, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'multipart/form-data', 'ngrok-skip-browser-warning': 'true' },
-          body: formData,
-        });
-
-        const rawResponse = await response.text();
-        let data;
-        try { data = JSON.parse(rawResponse); }
-        catch (parseError) { throw new Error("Server Error: Hindi JSON ang ibinalik ng server."); }
+        // 🆕 GUMAMIT NG CENTRALIZED FILE API ENGINE
+        const data = await postFileEndpoint('/simplify_file', formData);
 
         if (data.status === 'success') {
           setIsAnalyzing(false);
@@ -208,16 +199,8 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
 
         const locallySanitizedText = sanitizeLocalText(ocrResult.text);
 
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-          body: JSON.stringify({ text: locallySanitizedText }),
-        });
-
-        const rawResponse = await response.text();
-        let data;
-        try { data = JSON.parse(rawResponse); }
-        catch (parseError) { throw new Error("Server Error: Hindi JSON ang ibinalik ng server."); }
+        // 🆕 GUMAMIT NG CENTRALIZED API ENGINE
+        const data = await postEndpoint('/simplify', { text: locallySanitizedText });
 
         if (data.status === 'success') {
           setIsAnalyzing(false);
@@ -289,7 +272,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
               </View>
             </TouchableOpacity>
 
-            {/* 💡 THE FIX: Navigate na siya sa bagong screen instead of modal! (DRY Principle) */}
             <TouchableOpacity
               style={[globalStyles.result_noticeBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', marginBottom: 20 }]}
               onPress={() => navigation.navigate('SanitizedOcrScreen', { sanitizedText: result.sanitizedText })}
@@ -329,7 +311,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
           <Ionicons name="sparkles" size={26} color="white" />
         </TouchableOpacity>
 
-        {/* SCORE BREAKDOWN MODAL */}
         <Modal animationType="fade" transparent={true} visible={scoreInfoModalVisible} onRequestClose={() => setScoreInfoModalVisible(false)} statusBarTranslucent>
           <View style={globalStyles.result_modalBackdrop}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setScoreInfoModalVisible(false)} />
@@ -384,7 +365,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
           </View>
         </Modal>
 
-        {/* LEGAL BASIS MODAL */}
         <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)} statusBarTranslucent>
           <View style={globalStyles.result_modalBackdrop}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalVisible(false)} />
@@ -460,7 +440,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
           </View>
         </View>
 
-        {/* 💡 THE FIX: Navigate na siya sa bagong screen instead of modal! (DRY Principle) */}
         <TouchableOpacity
           style={[globalStyles.result_noticeBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', marginTop: 10, paddingVertical: 18 }]}
           onPress={() => navigation.navigate('SanitizedOcrScreen', { sanitizedText: sanitizeLocalText(scanItem.ocrText || ""), isOfflinePreview: true })}
@@ -492,7 +471,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
 
       </ScrollView>
 
-      {/* FULLSCREEN IMAGE VIEWER MODAL */}
       <Modal visible={!!fullscreenImage} transparent={true} animationType="fade" onRequestClose={() => setFullscreenImage(null)} statusBarTranslucent>
         <View style={styles.fullscreenDarkOverlay}>
           <TouchableOpacity style={styles.fullscreenCloseBtn} onPress={() => setFullscreenImage(null)}>
@@ -515,7 +493,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
   );
 }
 
-// 💡 LOCAL STYLES PARA SA SHARPER MARGINS AT LAYOUT
 const styles = StyleSheet.create({
   sharpScrollContent: {
     paddingHorizontal: 16,

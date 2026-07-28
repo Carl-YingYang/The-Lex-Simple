@@ -18,7 +18,13 @@ from typing import List, Dict, Optional
 # 💡 NA-IMPORT NA ANG SANITIZER MULA SA SERVICES!
 from services.sanitizer import sanitize_legal_text 
 
+# 🆕 IMPORT ANG BAGONG ORCHESTRATOR
+from orchestrator.pipeline import Orchestrator, ProcessRequest
+
 router = APIRouter()
+
+# 🆕 MODULE-LEVEL SINGLETON — gumawa lang ng isang instance
+_orchestrator = Orchestrator()
 
 # ============================================================================
 # 📌 1. DATA MODELS (Pydantic Structures)
@@ -50,13 +56,14 @@ def simplify_text(request: LegalRequest):
     if not request.text or len(request.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text is too short.")
     
-    # 💡 DOUBLE PROTECTION: Kahit nalinis na sa phone, dadaan pa rin sa backend sanitizer just in case!
-    safe_text = sanitize_legal_text(request.text)
-    result = analyze_legal_text(safe_text)
+    # 🆕 GUMAMIT NG ORCHESTRATOR — layered processing (rule engine muna, LLM fallback)
+    result = _orchestrator.process(ProcessRequest(text=request.text))
     
-    if isinstance(result, dict): 
-        result["sanitizedText"] = safe_text
-    return result
+    # 🆕 LOG YUNG ROUTING DECISION PARA SA COST ANALYSIS
+    print(f"[ORCHESTRATOR] /simplify routed to {result.source_layer}, "
+          f"llm_calls={result.llm_calls_made}")
+          
+    return result.data
 
 @router.post("/simplify_file")
 async def simplify_uploaded_file(file: UploadFile = File(...)):
@@ -82,19 +89,20 @@ async def simplify_uploaded_file(file: UploadFile = File(...)):
         if not extracted_text or len(extracted_text.strip()) < 20:
              return {"status": "error", "message": "File is empty or unreadable."}
 
-        # 💡 LILINISIN ANG TEXT MULA SA PDF/DOCX BAGO IPASA SA AI
-        safe_text = sanitize_legal_text(extracted_text)
-        result = analyze_legal_text(safe_text)
+        # 🆕 GUMAMIT NG ORCHESTRATOR PARA SA FILE PROCESSING RIN!
+        result = _orchestrator.process(ProcessRequest(text=extracted_text))
         
         if os.path.exists(file_location): os.remove(file_location)
-        if isinstance(result, dict):
-            result["sanitizedText"] = safe_text
-            result["extractedText"] = safe_text 
-        return result
+          
+        # 🆕 LOG YUNG ROUTING DECISION
+        print(f"[ORCHESTRATOR] /simplify_file routed to {result.source_layer}, "
+              f"llm_calls={result.llm_calls_made}")
+              
+        return result.data
+        
     except Exception as e:
         if os.path.exists(file_location): os.remove(file_location)
         return {"status": "error", "message": str(e)}
-
 
 # ============================================================================
 # 🤖 3. AI CHAT ASSISTANT (SMART ROUTING & ANTI-HALLUCINATION)

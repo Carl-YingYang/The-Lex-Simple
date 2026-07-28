@@ -3,6 +3,7 @@ import { View, Text, ActivityIndicator } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
+import { postFileEndpoint } from '../../../services/AiEngine';
 
 // 🛠️ IMPORTS
 import { globalStyles, COLORS } from '../../../theme/globalStyles';
@@ -16,8 +17,6 @@ export default function ConvertScreen({ navigation }: any) {
 
   const { showAlert, AlertRender } = useCustomAlert();
 
-  const API_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev/simplify_file';
-
   const LOADING_MESSAGES = [
     "Reading document file...",
     "Extracting text content...",
@@ -26,7 +25,6 @@ export default function ConvertScreen({ navigation }: any) {
     "Analyzing legal terms...",
     "Finalizing report..."
   ];
-
 
   useEffect(() => {
     if (hasInitialized.current) return;
@@ -149,25 +147,8 @@ export default function ConvertScreen({ navigation }: any) {
         type: file.mimeType || 'application/octet-stream',
       } as any);
 
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'multipart/form-data',
-          'ngrok-skip-browser-warning': 'true'
-        },
-        body: formData,
-      });
-
-      const rawResponse = await response.text();
-      let data;
-
-      try {
-        data = JSON.parse(rawResponse);
-      } catch (parseError) {
-        console.log("SERVER ERROR OUTPUT:", rawResponse);
-        throw new Error("Hindi ma-proseso ang dokumento. Siguraduhing tama ang format ng file.");
-      }
+      // 🆕 GUMAMIT NG CENTRALIZED FILE API ENGINE
+      const data = await postFileEndpoint('/simplify_file', formData);
 
       if (data.status === 'success') {
         setIsProcessing(false);
@@ -226,14 +207,11 @@ export default function ConvertScreen({ navigation }: any) {
       <ScreenLayout title="Document Converter">
         <View style={globalStyles.centerContainer}>
           <ActivityIndicator size="large" color={COLORS.primaryLight} />
-          {/* 💡 GINAGAMIT NA NATIN YUNG REUSABLE STYLE DITO */}
           <Text style={globalStyles.loadingSubText}>
             Opening File Manager...
           </Text>
         </View>
       </ScreenLayout>
-
-      {/* 💡 ALERT RENDERER NASA LABAS NA NG SCREEN LAYOUT */}
       <AlertRender />
     </>
   );

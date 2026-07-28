@@ -12,3 +12,10 @@ chroma_db/
 chroma_guides_db/
 *.sqlite3
 *.db
+
+# Idagdag sa LexSimpleBackend/.gitignore
+temp_uploads/
+*.log
+lex_guides.db
+ngrok*/
+ngrok.exe
