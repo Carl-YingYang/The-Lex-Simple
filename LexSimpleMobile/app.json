@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Lex Simple",
+    "slug": "lex-simple",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/Lex-Simpe-Logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false, 
+    "splash": {
+      "image": "./assets/Lex-Simpe-Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/Lex-Simpe-Logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.anonymous.lexsimple"
+    },
+    "edgeToEdgeEnabled": true,
+    "predictiveBackGestureEnabled": false,
+    "web": {
+      "favicon": "./assets/Lex-Simpe-Logo.png"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-sqlite",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Kailangan ng Lex-Simple ang mic para sa voice chat.",
+          "speechRecognitionPermission": "Kailangan ito para maintindihan ang iyong boses."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraParams": [
+              {
+                "key": "android.useAndroidX",
+                "value": "true"
+              },
+              {
+                "key": "android.enableJetifier",
+                "value": "true"
+              }
+            ]
+          }
+        }
+      ]
+    ]
+  }
+}
