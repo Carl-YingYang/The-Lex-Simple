@@ -2,10 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, Keyboard, ScrollView, Alert, StyleSheet, Animated, PanResponder, Modal, TouchableWithoutFeedback, LogBox } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from '../../../services/SpeechRecognitionSafe';
 import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { postEndpoint } from '../../../services/AiEngine';
@@ -224,18 +221,28 @@ export default function AskAiScreen({ route }: any) {
     Keyboard.dismiss();
     originalTextRef.current = inputText;
     setIsMicModalVisible(true);
+
     setTimeout(async () => {
       try {
         const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        if (!permission.granted) {
-          Alert.alert("Mic Permission", "Kailangan payagan ang microphone access sa settings.");
+        if (!permission || !permission.granted) {
+          Alert.alert("Mic Permission", "Kailangan payagan ang microphone access o gumamit ng Development Build para sa voice feature.");
           setIsMicModalVisible(false);
           return;
         }
-        await ExpoSpeechRecognitionModule.start({ lang: 'fil-PH', interimResults: true });
-      } catch (e) {
+
+        await ExpoSpeechRecognitionModule.start({
+          lang: 'fil-PH',
+          interimResults: true,
+        });
+      } catch (e: any) {
+        console.error("Crash during Mic Start:", e);
         setIsListening(false);
-        Alert.alert("Error", "Bumagsak ang Speech Module.");
+        Alert.alert(
+          "Hardware Limitation",
+          e.message || "Bumagsak ang Speech Module. Pwede mong gamitin ang keyboard na lang.",
+          [{ text: "OK", onPress: closeMicModal }]
+        );
       }
     }, 400);
   };

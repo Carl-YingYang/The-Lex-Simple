@@ -1,7 +1,10 @@
 import sqlite3
 
-# Gagawa siya ng file na 'lex_metadata.db' sa main folder natin
-DB_PATH = "./lex_metadata.db"
+# 🆕 IMPORT NG CENTRALIZED CONFIG
+from core.config import settings
+
+# 🆕 KUNIN ANG PATH MULA SA SETTINGS
+DB_PATH = settings.DB_PATH
 
 def init_db():
     """Gagawa ng tables para sa offline logs at metadata kung wala pa."""

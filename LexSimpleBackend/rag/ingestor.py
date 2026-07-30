@@ -7,6 +7,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from db.chroma_store import add_to_vector_db
 from db.sqlite_store import log_document_chunk
 
+# 🆕 IMPORT NG CENTRALIZED CONFIG
+from core.config import settings
+
 def clean_pdf_text(text: str) -> str:
     text = re.sub(r'---\s*PAGE\s*\d+\s*---', '', text, flags=re.IGNORECASE)
     text = re.sub(r'-\n', '', text)
@@ -16,7 +19,8 @@ def clean_pdf_text(text: str) -> str:
 
 def is_chunk_duplicate(chunk_text: str) -> bool:
     try:
-        conn = sqlite3.connect("./lex_metadata.db")
+        # 🆕 GUMAMIT NG SETTINGS PATH
+        conn = sqlite3.connect(settings.DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM documents WHERE chunk_text = ?", (chunk_text,))
         exists = cursor.fetchone() is not None
@@ -108,7 +112,8 @@ def process_pdf(file_path: str, custom_title: str):
 # 💼 BAGONG DEDICATED INGESTOR PARA SA LEGAL GUIDES (ISANG BUO)
 # =======================================================
 def setup_guides_db():
-    conn = sqlite3.connect("./lex_guides.db")
+    # 🆕 GUMAMIT NG SETTINGS PATH
+    conn = sqlite3.connect(settings.GUIDES_DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS guides (id TEXT PRIMARY KEY, title TEXT, chunk_text TEXT)''')
     conn.commit()
@@ -126,10 +131,12 @@ def process_guide_pdf(file_path: str, custom_title: str):
     # 💡 TINANGGAL NA ANG SPLITTER! ISANG BUONG TEXT NA LANG ANG ISE-SAVE!
     final_text = f"[{custom_title}]\n\n{full_text.strip()}"
     
-    chroma_client = chromadb.PersistentClient(path="./chroma_guides_db")
+    # 🆕 GUMAMIT NG SETTINGS PATH
+    chroma_client = chromadb.PersistentClient(path=settings.CHROMA_GUIDES_PATH)
     collection = chroma_client.get_or_create_collection(name="legal_guides")
     
-    conn = sqlite3.connect("./lex_guides.db")
+    # 🆕 GUMAMIT NG SETTINGS PATH
+    conn = sqlite3.connect(settings.GUIDES_DB_PATH)
     c = conn.cursor()
     
     # I-check kung may nai-save na tayong guide na may parehong title

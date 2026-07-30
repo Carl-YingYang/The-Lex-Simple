@@ -197,7 +197,9 @@ export default function ConvertScreen({ navigation }: any) {
   if (isProcessing) {
     return (
       <ScreenLayout title="Processing Document" showBackButton={false}>
-        <ProcessingLoader title="Analyzing Document" messages={LOADING_MESSAGES} />
+        <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center' }}>
+          <ProcessingLoader title="Analyzing Document" messages={LOADING_MESSAGES} />
+        </View>
       </ScreenLayout>
     );
   }
@@ -205,11 +207,9 @@ export default function ConvertScreen({ navigation }: any) {
   return (
     <>
       <ScreenLayout title="Document Converter">
-        <View style={globalStyles.centerContainer}>
+        <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color={COLORS.primaryLight} />
-          <Text style={globalStyles.loadingSubText}>
-            Opening File Manager...
-          </Text>
+          <Text style={globalStyles.loadingSubText}>Opening File Manager...</Text>
         </View>
       </ScreenLayout>
       <AlertRender />

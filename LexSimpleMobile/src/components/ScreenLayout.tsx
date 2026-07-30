@@ -31,7 +31,7 @@ export default function ScreenLayout({
 
       {/* ─── APP BAR ─── */}
       <View style={styles.appBar}>
-        
+
         {/* Soft indigo wash layered on top of the base bg */}
         <View style={styles.indigoOverlay} pointerEvents="none" />
 
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   appBarTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: 'white',              
+    color: 'white',
     textAlign: 'center',
     letterSpacing: 0.5,
   },

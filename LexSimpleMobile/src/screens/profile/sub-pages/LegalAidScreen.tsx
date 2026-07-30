@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, StyleSheet, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { COLORS, globalStyles } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - 40 - 16) / 2; // 2 columns with padding and gap
+
 export default function LegalAidScreen({ navigation }: any) {
   const [guides, setGuides] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  
+
   const [selectedGuide, setSelectedGuide] = useState<any>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
 
@@ -47,7 +50,7 @@ export default function LegalAidScreen({ navigation }: any) {
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
       const json = await response.json();
-      
+
       if (json.status === 'success') {
         await FileSystem.writeAsStringAsync(localFileUri, JSON.stringify(json.data));
         setGuides(json.data);
@@ -72,33 +75,33 @@ export default function LegalAidScreen({ navigation }: any) {
 
   const renderFormattedText = (rawText: string) => {
     const lines = rawText.split('\n');
-    
+
     return lines.map((line, index) => {
       let currentLine = line.trim();
       if (!currentLine) return null;
 
       if (currentLine.match(/^(Step \d+|Official Action:|Official Basis:|Proseso:|Proseso ng Pagsusuri:|Consultation Fee:|Documentary Requirements:|Kahalagahan:|Sino ang pwede:)/i)) {
-        return <Text key={index} style={globalStyles.legalAid_stepTitleText}>{currentLine}</Text>;
+        return <Text key={index} style={sleekStyles.stepTitle}>{currentLine}</Text>;
       }
 
       if (currentLine.match(/^(•|\d+\.|[A-Z]\.|o)\s/)) {
         let cleanBullet = currentLine.replace(/^(•|\d+\.|[A-Z]\.|o)\s/, '');
         return (
-          <View key={index} style={globalStyles.legalAid_bulletRow}>
-            <Text style={globalStyles.legalAid_bulletPoint}>•</Text>
-            <Text style={globalStyles.legalAid_bulletText}>{cleanBullet}</Text>
+          <View key={index} style={sleekStyles.bulletRow}>
+            <View style={sleekStyles.bulletDot} />
+            <Text style={sleekStyles.bulletText}>{cleanBullet}</Text>
           </View>
         );
       }
 
       if (currentLine.includes(':')) {
         const parts = currentLine.split(':');
-        if (parts.length === 2 && parts[0].length < 40) { 
+        if (parts.length === 2 && parts[0].length < 40) {
           return (
-            <View key={index} style={[globalStyles.legalAid_bulletRow, { marginLeft: 15 }]}>
-              <Text style={globalStyles.legalAid_bulletPoint}>◦</Text>
-              <Text style={globalStyles.legalAid_bulletText}>
-                <Text style={{ fontWeight: 'bold', color: 'white' }}>{parts[0].trim()}: </Text>
+            <View key={index} style={[sleekStyles.bulletRow, { marginLeft: 12 }]}>
+              <View style={[sleekStyles.bulletDot, { backgroundColor: COLORS.primaryLight }]} />
+              <Text style={sleekStyles.bulletText}>
+                <Text style={{ fontWeight: 'bold', color: COLORS.primaryLight }}>{parts[0].trim()}: </Text>
                 {parts[1].trim()}
               </Text>
             </View>
@@ -106,8 +109,7 @@ export default function LegalAidScreen({ navigation }: any) {
         }
       }
 
-      // 💡 NORMAL TEXT AY NAKA-JUSTIFY NA DIN!
-      return <Text key={index} style={globalStyles.legalAid_normalText}>{currentLine}</Text>;
+      return <Text key={index} style={sleekStyles.normalText}>{currentLine}</Text>;
     });
   };
 
@@ -123,74 +125,75 @@ export default function LegalAidScreen({ navigation }: any) {
 
   return (
     <ScreenLayout title="Legal Assistance" noPadding={true}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={globalStyles.legalAid_scrollContent}>
-        
-        <View style={globalStyles.legalAid_headerBox}>
-          <Ionicons name="briefcase" size={40} color={COLORS.primaryLight} />
-          <Text style={globalStyles.legalAid_title}>Need a Lawyer?</Text>
-          <Text style={globalStyles.legalAid_subtitle}>
-            Read our offline guides on how to get free legal aid from PAO and IBP, or how to hire a private attorney.
-          </Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
 
-          <TouchableOpacity style={globalStyles.legalAid_syncBtn} onPress={syncGuides} disabled={isSyncing}>
-            {isSyncing ? (
-               <ActivityIndicator size="small" color={COLORS.primaryLight} />
-            ) : (
-               <>
-                 <Ionicons name="cloud-download" size={16} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
-                 <Text style={globalStyles.legalAid_syncBtnText}>UPDATE GUIDES</Text>
-               </>
-            )}
-          </TouchableOpacity>
+        {/* 🚀 SLEEK HEADER BANNER (Parang Joyride Promo Banner) */}
+        <View style={sleekStyles.headerBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={sleekStyles.bannerTitle}>Need Legal Help?</Text>
+            <Text style={sleekStyles.bannerSubtitle}>
+              Find free legal aid or hire a private attorney.
+            </Text>
+            <TouchableOpacity style={sleekStyles.syncBtn} onPress={syncGuides} disabled={isSyncing}>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="sync-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={sleekStyles.syncBtnText}>UPDATE GUIDES</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={sleekStyles.bannerIconCircle}>
+            <Ionicons name="shield-checkmark" size={40} color="#fff" />
+          </View>
         </View>
 
+        {/* 🚀 GRID LAYOUT (Parang Joyride Categories) */}
+        <Text style={sleekStyles.sectionTitle}>SERVICES & GUIDES</Text>
+
         {guides.length === 0 ? (
-           <View style={globalStyles.legalAid_emptyBox}>
-             <Ionicons name="document-text-outline" size={30} color={COLORS.textMuted} />
-             <Text style={globalStyles.legalAid_emptyText}>No guides available yet. Tap "Update Guides" to download.</Text>
-           </View>
+          <View style={sleekStyles.emptyBox}>
+            <Ionicons name="document-text-outline" size={40} color={COLORS.textMuted} />
+            <Text style={sleekStyles.emptyText}>No guides available. Tap update to download.</Text>
+          </View>
         ) : (
-          guides.map((item, index) => (
-            <TouchableOpacity 
-              key={index}
-              activeOpacity={0.8} 
-              onPress={() => openGuide(item)}
-              style={globalStyles.legalAid_cardBtn}
-            >
-              <View style={globalStyles.legalAid_cardIconBg}>
-                <Ionicons name="document-text" size={20} color={COLORS.primaryLight} />
-              </View>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={globalStyles.legalAid_guideTitle}>{item.title}</Text>
-                <Text style={globalStyles.legalAid_guideSub}>Tap to read full guide</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          ))
+          <View style={sleekStyles.gridContainer}>
+            {guides.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                activeOpacity={0.8}
+                onPress={() => openGuide(item)}
+                style={sleekStyles.gridCard}
+              >
+                <View style={sleekStyles.cardIconBg}>
+                  <Ionicons name="briefcase-outline" size={28} color={COLORS.primaryLight} />
+                </View>
+                <Text style={sleekStyles.cardTitle} numberOfLines={2}>{item.title}</Text>
+                <Text style={sleekStyles.cardSub}>Tap to read</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
 
-        <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* ============================================================================== */}
-      {/* 💡 CENTERED HOVER MODAL (WITH SIDE MARGINS) */}
-      {/* ============================================================================== */}
-      <Modal visible={isModalVisible} animationType="fade" transparent={true} onRequestClose={closeGuide}>
-        <View style={globalStyles.legalAid_modalOverlay}>
-          <View style={globalStyles.legalAid_modalContainer}>
-            
-            <View style={globalStyles.legalAid_modalHeader}>
-              <Text style={globalStyles.legalAid_modalTitle}>{selectedGuide?.title}</Text>
-              <TouchableOpacity onPress={closeGuide} style={globalStyles.legalAid_closeBtn}>
-                <Ionicons name="close" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
+      {/* 🚀 FULL SCREEN READER (Sleek UI) */}
+      <Modal visible={isModalVisible} animationType="slide" onRequestClose={closeGuide}>
+        <View style={sleekStyles.fullScreenContainer}>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={globalStyles.legalAid_modalContent}>
-              {selectedGuide && renderFormattedText(selectedGuide.content)}
-            </ScrollView>
-
+          <View style={sleekStyles.fullScreenHeader}>
+            <TouchableOpacity onPress={closeGuide} style={sleekStyles.backBtn}>
+              <Ionicons name="arrow-back" size={26} color={COLORS.primaryLight} />
+            </TouchableOpacity>
+            <Text style={sleekStyles.fullScreenTitle} numberOfLines={2}>{selectedGuide?.title}</Text>
           </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 50 }}>
+            {selectedGuide && renderFormattedText(selectedGuide.content)}
+          </ScrollView>
+
         </View>
       </Modal>
 
@@ -198,3 +201,167 @@ export default function LegalAidScreen({ navigation }: any) {
     </ScreenLayout>
   );
 }
+
+// 🎨 SLEEK STYLES (Inspired by Joyride)
+const sleekStyles = StyleSheet.create({
+  headerBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  bannerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  bannerSubtitle: {
+    color: '#94A3B8',
+    fontSize: 13,
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  syncBtn: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary || '#6D28D9',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+  },
+  syncBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  bannerIconCircle: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(167, 139, 250, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 15,
+  },
+  sectionTitle: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    letterSpacing: 1,
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  gridCard: {
+    width: CARD_WIDTH,
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  cardIconBg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(167, 139, 250, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  cardSub: {
+    color: '#64748B',
+    fontSize: 11,
+  },
+  emptyBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginTop: 10,
+    fontSize: 13,
+  },
+
+  // FULL SCREEN MODAL STYLES
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  fullScreenHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 50,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+    backgroundColor: '#0F172A',
+  },
+  backBtn: {
+    padding: 10,
+  },
+  fullScreenTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+    marginRight: 40,
+    textAlign: 'center',
+  },
+
+  // TEXT FORMATTER STYLES
+  stepTitle: {
+    color: COLORS.primaryLight,
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    paddingRight: 10,
+  },
+  bulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#94A3B8',
+    marginTop: 7,
+    marginRight: 8,
+  },
+  bulletText: {
+    color: '#CBD5E1',
+    fontSize: 14,
+    lineHeight: 20,
+    flex: 1,
+  },
+  normalText: {
+    color: '#E2E8F0',
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 8,
+  }
+});

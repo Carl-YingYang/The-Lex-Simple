@@ -2,9 +2,13 @@ import chromadb
 import uuid
 from rag.embedder import get_embedding
 
+# 🆕 IMPORT NG CENTRALIZED CONFIG
+from core.config import settings
+
 # Gumagamit tayo ng PersistentClient para kahit mamatay ang server, 
 # nandiyan pa rin ang mga na-save nating batas at contracts.
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+# 🆕 GUMAMIT NG SETTINGS PATH
+chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PATH)
 
 # Ito yung parang "folder" sa loob ng database natin
 collection = chroma_client.get_or_create_collection(name="lex_collection")
