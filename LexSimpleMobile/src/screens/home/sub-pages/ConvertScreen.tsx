@@ -1,21 +1,25 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Text, ActivityIndicator, StatusBar } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 import { postFileEndpoint } from '../../../services/AiEngine';
+import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
+import { useFocusEffect } from '@react-navigation/native';
 
-// 🛠️ IMPORTS
-import { globalStyles, COLORS } from '../../../theme/globalStyles';
+import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import ProcessingLoader from '../../../components/ProcessingLoader';
 import { AlertType, useCustomAlert } from '../../../components/CustomAlert';
+import { useTheme } from '../../../theme/ThemeContext';
 
 export default function ConvertScreen({ navigation }: any) {
   const [isProcessing, setIsProcessing] = useState(false);
   const hasInitialized = useRef(false);
 
+  const { isProcessing: isGlobalProcessing, processRoute, startProcess } = useBackgroundProcess();
   const { showAlert, AlertRender } = useCustomAlert();
+  const { isDarkMode, colors: T } = useTheme();
 
   const LOADING_MESSAGES = [
     "Reading document file...",
@@ -26,11 +30,35 @@ export default function ConvertScreen({ navigation }: any) {
     "Finalizing report..."
   ];
 
+  // KUNG MAY ONGOING PROCESS, IPAKITA ANG LOADER
+  useEffect(() => {
+    if (processRoute === 'ConvertScreen' && isGlobalProcessing) {
+      setIsProcessing(true);
+    } else if (!isGlobalProcessing) {
+      setIsProcessing(false);
+    }
+  }, [isGlobalProcessing, processRoute]);
+
+  // KUNG TUMAPILIK ANG USER DITO AT TAPUS NA ANG PROCESS, BALIK AGAD SA HOME
+  useFocusEffect(
+    useCallback(() => {
+      if (hasInitialized.current && !isGlobalProcessing) {
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('Main', { screen: 'Scan' });
+      }
+    }, [isGlobalProcessing])
+  );
+
   useEffect(() => {
     if (hasInitialized.current) return;
     hasInitialized.current = true;
     handleSelectDocument();
   }, []);
+
+  const safeGoBack = () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Main', { screen: 'Scan' });
+  };
 
   const saveToOfflineHistory = async (fileUri: string, fileName: string) => {
     const newId = Date.now().toString();
@@ -95,7 +123,7 @@ export default function ConvertScreen({ navigation }: any) {
       });
 
       if (result.canceled) {
-        navigation.goBack();
+        safeGoBack();
         return;
       }
 
@@ -106,7 +134,7 @@ export default function ConvertScreen({ navigation }: any) {
           "File Too Large",
           "Masyadong malaki ang file. Limitahan ang document sa 5MB pataas.",
           "warning",
-          [{ text: "OK", style: "cancel", onPress: () => navigation.goBack() }]
+          [{ text: "OK", style: "cancel", onPress: safeGoBack }]
         );
         return;
       }
@@ -123,7 +151,7 @@ export default function ConvertScreen({ navigation }: any) {
           "Offline Mode",
           "Walang internet connection. Na-save ang dokumento sa Recent Files. I-analyze ito kapag may internet na.",
           "info",
-          [{ text: "OK", onPress: () => navigation.goBack() }]
+          [{ text: "OK", onPress: safeGoBack }]
         );
       }
     } catch (error) {
@@ -131,88 +159,65 @@ export default function ConvertScreen({ navigation }: any) {
         "Access Error",
         "Hindi mabuksan ang file manager. Subukan ulit.",
         "error",
-        [{ text: "OK", style: "destructive", onPress: () => navigation.goBack() }]
+        [{ text: "OK", style: "destructive", onPress: safeGoBack }]
       );
     }
   };
 
-  const processDocument = async (file: DocumentPicker.DocumentPickerAsset, dbId: string) => {
+  const processDocument = (file: any, dbId: string) => {
     setIsProcessing(true);
 
-    try {
+    // 🚀 LINIS NA CODE: WALANG TS ERRORS DITO
+    startProcess(async () => {
       const formData = new FormData();
       formData.append('file', {
         uri: file.uri,
         name: file.name,
         type: file.mimeType || 'application/octet-stream',
-      } as any);
+      });
 
-      // 🆕 GUMAMIT NG CENTRALIZED FILE API ENGINE
       const data = await postFileEndpoint('/simplify_file', formData);
 
-      if (data.status === 'success') {
-        setIsProcessing(false);
-
+      if (data && data.status === 'success') {
         const combinedAnalysisResult = {
           ...data.data,
           rag_context_used: data.rag_context_used,
           sanitizedText: data.sanitizedText
         };
-
         const textToSave = data.extractedText || `File Content from: ${file.name}`;
-        const updatedHistoryItem = await updateHistoryToScanned(dbId, combinedAnalysisResult, textToSave);
-
-        navigation.replace('ResultScreen', {
-          analysisResult: combinedAnalysisResult,
-          historyItem: updatedHistoryItem
-        });
+        await updateHistoryToScanned(dbId, combinedAnalysisResult, textToSave);
+        return combinedAnalysisResult;
       } else {
-        throw new Error(data.message || "Server processing failed.");
+        throw new Error(data?.message || "Server processing failed.");
       }
-    } catch (error: any) {
-      setIsProcessing(false);
-      const errorMsg = error.message || "Please check your connection or file format.";
-
-      let alertTitle = "System Error";
-      let alertType: AlertType = "error";
-
-      const lowerMsg = errorMsg.toLowerCase();
-      if (lowerMsg.includes('unreadable') || lowerMsg.includes('empty')) {
-        alertTitle = "Unreadable Document";
-        alertType = "warning";
-      } else if (lowerMsg.includes('network') || lowerMsg.includes('fetch')) {
-        alertTitle = "Connection Error";
-        alertType = "error";
-      }
-
-      showAlert(
-        alertTitle,
-        errorMsg,
-        alertType,
-        [{ text: "OK", style: "destructive", onPress: () => navigation.goBack() }]
-      );
-    }
+    }, 'ConvertScreen');
   };
 
   if (isProcessing) {
     return (
       <ScreenLayout title="Processing Document" showBackButton={false}>
-        <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center' }}>
-          <ProcessingLoader title="Analyzing Document" messages={LOADING_MESSAGES} />
+        <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center' }}>
+          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+          <ProcessingLoader
+            title="Analyzing Document"
+            messages={LOADING_MESSAGES}
+            onMinimize={() => navigation.navigate('Main', { screen: 'Scan' })}
+          />
         </View>
       </ScreenLayout>
     );
   }
 
   return (
-    <>
-      <ScreenLayout title="Document Converter">
-        <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={COLORS.primaryLight} />
-          <Text style={globalStyles.loadingSubText}>Opening File Manager...</Text>
-        </View>
-      </ScreenLayout>
+    <ScreenLayout title="Opening File Manager">
+      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <ActivityIndicator size="large" color={COLORS.primaryLight} />
+        <Text style={{ color: T.subText, marginTop: 15, fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 }}>
+          Loading Library...
+        </Text>
+      </View>
       <AlertRender />
-    </>
+    </ScreenLayout>
   );
 }

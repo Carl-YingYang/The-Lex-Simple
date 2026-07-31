@@ -1,55 +1,57 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Clipboard, LogBox } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Clipboard, LogBox, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
+import { useTheme } from '../../../theme/ThemeContext';
 
-// 💡 THE FIX: Papatayin nito ang yellow warning na "Clipboard has been extracted..." sa screen mo!
 LogBox.ignoreLogs(['Clipboard has been extracted from react-native core']);
 
 export default function SanitizedOcrScreen({ route }: any) {
     const { sanitizedText, isOfflinePreview } = route.params || {};
     const [copied, setCopied] = useState(false);
 
+    const { isDarkMode, colors: T } = useTheme();
+
     const handleCopyText = () => {
         try {
             Clipboard.setString(sanitizedText || "");
             setCopied(true);
-            Alert.alert('Success', 'Text copied to clipboard', [{ text: 'OK' }]);
+            Alert.alert('Success', 'Nakopya na ang text!', [{ text: 'OK' }]);
             setTimeout(() => setCopied(false), 2000);
         } catch (error) {
-            Alert.alert('Error', 'Failed to copy text');
+            Alert.alert('Error', 'Hindi makopya ang text.');
         }
     };
 
-    const textContent = sanitizedText || "Sanitized text is not available for this record.";
+    const textContent = sanitizedText || "Walang available na text para sa record na ito.";
     const charCount = textContent.length;
     const wordCount = textContent.trim().split(/\s+/).length;
 
     return (
-        <ScreenLayout title={isOfflinePreview ? "Local Sanitization Preview" : "Sanitized OCR Data"} noPadding={true}>
+        <ScreenLayout title={isOfflinePreview ? "Preview ng Linis na Text" : "Linis na OCR Data"} noPadding={true}>
+            <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
             <ScrollView
-                style={styles.container}
-                contentContainerStyle={styles.scrollContent}
+                style={{ flex: 1, backgroundColor: T.bg }}
+                contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
                 showsVerticalScrollIndicator={false}
-                scrollEventThrottle={16}
             >
                 {/* HEADER CARD WITH COPY BUTTON */}
-                <View style={styles.headerCard}>
-                    <View style={styles.headerContent}>
-                        <View style={styles.headerTextBox}>
-                            <View style={styles.titleRow}>
-                                <Ionicons name="shield-half" size={24} color={COLORS.success} />
-                                <Text style={styles.headerTitle}>Data Privacy Compliant</Text>
+                <View style={[uiStyles.headerCard, { backgroundColor: T.card, borderColor: T.border }]}>
+                    <View style={uiStyles.headerContent}>
+                        <View style={uiStyles.headerTextBox}>
+                            <View style={uiStyles.titleRow}>
+                                <Ionicons name="shield-checkmark" size={22} color={COLORS.success} />
+                                <Text style={[uiStyles.headerTitle, { color: COLORS.success }]}>Ligtas ang Data Mo</Text>
                             </View>
-                            <Text style={styles.headerSubtitle}>
+                            <Text style={[uiStyles.headerSubtitle, { color: T.subText }]}>
                                 {isOfflinePreview
-                                    ? "Local device sanitization preview"
-                                    : "Exact text processed by AI"}
+                                    ? "Ito ang preview ng linis na text sa phone mo."
+                                    : "Ito yung eksaktong text na na-process ng AI."}
                             </Text>
                         </View>
                         <TouchableOpacity
-                            style={[styles.copyBtn, copied && styles.copyBtnActive]}
+                            style={[uiStyles.copyBtn, { backgroundColor: T.bg, borderColor: T.border }, copied && { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: COLORS.success }]}
                             onPress={handleCopyText}
                             activeOpacity={0.7}
                         >
@@ -62,79 +64,61 @@ export default function SanitizedOcrScreen({ route }: any) {
                     </View>
 
                     {/* INFO STATS */}
-                    <View style={styles.statsRow}>
-                        <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Characters</Text>
-                            <Text style={styles.statValue}>{charCount.toLocaleString()}</Text>
+                    <View style={[uiStyles.statsRow, { backgroundColor: T.bg }]}>
+                        <View style={uiStyles.statBox}>
+                            <Text style={[uiStyles.statLabel, { color: T.subText }]}>Characters</Text>
+                            <Text style={[uiStyles.statValue, { color: COLORS.primaryLight }]}>{charCount.toLocaleString()}</Text>
                         </View>
-                        <View style={styles.statDivider} />
-                        <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Words</Text>
-                            <Text style={styles.statValue}>{wordCount.toLocaleString()}</Text>
+                        <View style={[uiStyles.statDivider, { backgroundColor: T.border }]} />
+                        <View style={uiStyles.statBox}>
+                            <Text style={[uiStyles.statLabel, { color: T.subText }]}>Words</Text>
+                            <Text style={[uiStyles.statValue, { color: COLORS.primaryLight }]}>{wordCount.toLocaleString()}</Text>
                         </View>
                     </View>
                 </View>
 
                 {/* REDACTION WARNING */}
-                <View style={styles.warningBox}>
-                    <View style={styles.warningIcon}>
-                        <Ionicons name="information-circle" size={20} color={COLORS.warning} />
+                <View style={[uiStyles.warningBox, { backgroundColor: isDarkMode ? 'rgba(245, 158, 11, 0.1)' : 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
+                    <View style={uiStyles.warningIcon}>
+                        <Ionicons name="lock-closed" size={20} color={COLORS.warning} />
                     </View>
-                    <View style={styles.warningContent}>
-                        <Text style={styles.warningTitle}>Sensitive Data Redacted</Text>
-                        <Text style={styles.warningText}>
-                            {isOfflinePreview
-                                ? "Naka-[REDACTED] na ang mga sensitibong impormasyon bago ipadala sa internet."
-                                : "Names, dates, amounts, and contact info replaced with [REDACTED] tags."}
+                    <View style={uiStyles.warningContent}>
+                        <Text style={[uiStyles.warningTitle, { color: COLORS.warning }]}>Text na ginamit ng AI</Text>
+                        <Text style={[uiStyles.warningText, { color: T.text }]}>
+                            Pinalitan ng <Text style={{ fontWeight: 'bold' }}>[REDACTED]</Text> ang mga pangalan, numero, at address para protektado ka bago ipadala sa internet.
                         </Text>
                     </View>
                 </View>
 
                 {/* DOCUMENT CONTENT */}
-                <View style={styles.documentContainer}>
-                    <View style={styles.documentHeader}>
-                        <Ionicons name="document-text" size={18} color={COLORS.primaryLight} />
-                        <Text style={styles.documentTitle}>Processed Text</Text>
+                <View style={uiStyles.documentContainer}>
+                    <View style={uiStyles.documentHeader}>
+                        <Ionicons name="document-text" size={16} color={COLORS.primaryLight} />
+                        <Text style={[uiStyles.documentTitle, { color: T.subText }]}>Linis na Dokumento</Text>
                     </View>
-                    <View style={styles.documentPaper}>
-                        <Text style={styles.justifiedText}>
+                    <View style={[uiStyles.documentPaper, { backgroundColor: T.bg, borderColor: T.border }]}>
+                        <Text style={[uiStyles.justifiedText, { color: T.text }]}>
                             {textContent}
                         </Text>
                     </View>
                 </View>
-
-                {/* BOTTOM SPACING */}
-                <View style={{ height: 30 }} />
             </ScrollView>
         </ScreenLayout>
     );
 }
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.background,
-    },
-    scrollContent: {
-        padding: 16,
-        paddingBottom: 20,
-    },
-
-    // HEADER CARD
+const uiStyles = StyleSheet.create({
     headerCard: {
-        backgroundColor: '#0f172a',
-        borderRadius: 16,
-        padding: 18,
-        marginBottom: 20,
+        borderRadius: 10, // Sharp corner
+        padding: 16,
+        marginBottom: 16,
         borderWidth: 1,
-        borderColor: 'rgba(129, 140, 248, 0.2)',
-        elevation: 2,
     },
     headerContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 16,
+        marginBottom: 14,
     },
     headerTextBox: {
         flex: 1,
@@ -146,38 +130,29 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     headerTitle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '900',
-        color: COLORS.success,
-        marginLeft: 10,
-        letterSpacing: 0.5,
+        marginLeft: 8,
+        letterSpacing: 0.3,
     },
     headerSubtitle: {
         fontSize: 12,
-        color: COLORS.textMuted,
         lineHeight: 18,
     },
     copyBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        backgroundColor: 'rgba(129, 140, 248, 0.1)',
+        width: 40,
+        height: 40,
+        borderRadius: 8, // Sharp corner
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: 'rgba(129, 140, 248, 0.3)',
-    },
-    copyBtnActive: {
-        backgroundColor: 'rgba(16, 185, 129, 0.15)',
-        borderColor: 'rgba(16, 185, 129, 0.3)',
     },
 
     // STATS
     statsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(129, 140, 248, 0.05)',
-        borderRadius: 12,
+        borderRadius: 8, // Sharp corner
         paddingVertical: 12,
         paddingHorizontal: 12,
     },
@@ -186,8 +161,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     statLabel: {
-        fontSize: 11,
-        color: COLORS.textMuted,
+        fontSize: 10,
         fontWeight: 'bold',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
@@ -196,24 +170,20 @@ const styles = StyleSheet.create({
     statValue: {
         fontSize: 16,
         fontWeight: '900',
-        color: COLORS.primaryLight,
     },
     statDivider: {
         width: 1,
         height: 24,
-        backgroundColor: 'rgba(129, 140, 248, 0.2)',
         marginHorizontal: 8,
     },
 
     // WARNING BOX
     warningBox: {
         flexDirection: 'row',
-        backgroundColor: 'rgba(245, 158, 11, 0.08)',
-        borderRadius: 12,
+        borderRadius: 10, // Sharp corner
         padding: 14,
-        marginBottom: 22,
+        marginBottom: 20,
         borderWidth: 1,
-        borderColor: 'rgba(245, 158, 11, 0.25)',
     },
     warningIcon: {
         marginRight: 12,
@@ -225,15 +195,13 @@ const styles = StyleSheet.create({
     warningTitle: {
         fontSize: 12,
         fontWeight: '900',
-        color: COLORS.warning,
         marginBottom: 4,
         textTransform: 'uppercase',
         letterSpacing: 0.3,
     },
     warningText: {
-        fontSize: 12,
-        color: '#e2e8f0',
-        lineHeight: 18,
+        fontSize: 13,
+        lineHeight: 19,
     },
 
     // DOCUMENT
@@ -243,29 +211,25 @@ const styles = StyleSheet.create({
     documentHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 10,
     },
     documentTitle: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '900',
-        color: COLORS.textMuted,
         marginLeft: 8,
         textTransform: 'uppercase',
         letterSpacing: 0.8,
     },
     documentPaper: {
-        backgroundColor: '#1E1E2E',
-        padding: 18,
-        borderRadius: 8,
+        padding: 16,
+        borderRadius: 10, // Sharp corner
         borderWidth: 1,
-        borderColor: '#334155',
         minHeight: 200,
     },
     justifiedText: {
-        color: '#E2E8F0',
-        fontSize: 15,
-        lineHeight: 26,
+        fontSize: 14,
+        lineHeight: 24,
         textAlign: 'left',
-        letterSpacing: 0.3,
+        letterSpacing: 0.2,
     }
 });

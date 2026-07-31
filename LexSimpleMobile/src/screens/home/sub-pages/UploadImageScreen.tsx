@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, StatusBar } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -7,11 +7,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 
 // 🛠️ IMPORTS
-import { globalStyles, COLORS } from '../../../theme/globalStyles';
+import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import ProcessingLoader from '../../../components/ProcessingLoader';
 import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
 import { postEndpoint } from '../../../services/AiEngine';
+// 🚀 IMPORT GLOBAL THEME
+import { useTheme } from '../../../theme/ThemeContext';
 
 // 💡 IMPORT ANG ATING LOCAL PII SCRUBBER
 import { sanitizeLocalText } from '../../../utils/sanitizer';
@@ -21,6 +23,8 @@ export default function UploadImageScreen({ navigation }: any) {
   const hasInitialized = useRef(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
+  // 🎨 KUNIN ANG THEME COLORS
+  const { isDarkMode, colors: T } = useTheme();
 
   const LOADING_MESSAGES = [
     "Reading document file...",
@@ -197,28 +201,30 @@ export default function UploadImageScreen({ navigation }: any) {
     );
   };
 
+  // 🟢 ANALYZING UI
   if (isAnalyzing) {
     return (
-      <>
-        <ScreenLayout title="Processing Image" showBackButton={false}>
+      <ScreenLayout title="Processing Image" showBackButton={false}>
+        <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
           <ProcessingLoader title="Analyzing Image" messages={LOADING_MESSAGES} />
-        </ScreenLayout>
+        </View>
         <AlertRender />
-      </>
+      </ScreenLayout>
     );
   }
 
+  // ⏳ DEFAULT LOADING STATE
   return (
-    <>
-      <ScreenLayout title="Opening Gallery">
-        <View style={globalStyles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.primaryLight} />
-          <Text style={globalStyles.loadingSubText}>
-            Loading Library...
-          </Text>
-        </View>
-      </ScreenLayout>
+    <ScreenLayout title="Opening Gallery">
+      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <ActivityIndicator size="large" color={COLORS.primaryLight} />
+        <Text style={{ color: T.subText, marginTop: 15, fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 }}>
+          Loading Library...
+        </Text>
+      </View>
       <AlertRender />
-    </>
+    </ScreenLayout>
   );
 }

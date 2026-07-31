@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { COLORS, globalStyles } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import ClauseCard from '../../../components/ClauseCard';
+import { useTheme } from '../../../theme/ThemeContext';
 
 interface AnalysisResult {
   score: number;
@@ -20,6 +21,37 @@ interface AnalysisResult {
   sanitizedText?: string;
 }
 
+// 🚀 NEW COMPONENT: Expandable Finding Item
+const ExpandableFinding = ({ f, index, itemDeduction, T }: any) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  // Check kung malamang sobra sa 3 lines ang text (approx 80 chars)
+  const isLongText = f.description.length > 80;
+
+  return (
+    <View style={{ marginBottom: 18 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Text style={[localStyles.findingTitle, { color: T.text }]}>{f.title}</Text>
+        <Text style={localStyles.findingDeduction}>-{itemDeduction}</Text>
+      </View>
+
+      <Text
+        style={[localStyles.findingDesc, { color: T.subText }]}
+        numberOfLines={isExpanded ? undefined : 3}
+      >
+        Bakit: {f.description}
+      </Text>
+
+      {isLongText && (
+        <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 4, alignSelf: 'flex-start' }}>
+          <Text style={{ color: COLORS.primaryLight, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase' }}>
+            {isExpanded ? 'See Less' : 'See More'}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
 export default function ResultScreen({ route, navigation }: any) {
   const { analysisResult } = route.params || {};
 
@@ -29,6 +61,9 @@ export default function ResultScreen({ route, navigation }: any) {
   const [scoreInfoModalVisible, setScoreInfoModalVisible] = useState(false);
 
   const result: AnalysisResult = analysisResult || { score: 100, riskLevel: 'Very Safe', findings: [] };
+
+  // 🎨 KUNIN ANG THEME COLORS
+  const { isDarkMode, colors: T } = useTheme();
 
   const memoizedSanitizedText = useMemo(() => {
     if (!result.sanitizedText) return "Sanitized text is not available for this record.";
@@ -124,29 +159,31 @@ export default function ResultScreen({ route, navigation }: any) {
 
   return (
     <ScreenLayout title="Scan Results" noPadding={true}>
-
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+      <View style={{ flex: 1, backgroundColor: T.bg }}>
         <ScrollView
           contentContainerStyle={[globalStyles.result_scrollContent, { paddingBottom: 100 }]}
           showsVerticalScrollIndicator={false}
         >
-          <View style={globalStyles.result_noticeBox}>
+          {/* UPL NOTICE */}
+          <View style={[globalStyles.result_noticeBox, { backgroundColor: T.card, borderColor: T.border }]}>
             <Ionicons name="information-circle" size={20} color={COLORS.primaryLight} style={{ marginRight: 10 }} />
-            <Text style={globalStyles.result_noticeText}>
-              <Text style={{ fontWeight: 'bold', color: 'white' }}>UPL Notice: </Text> Ang Lex-Simple ay isang AI Legal Literacy Tool at hindi pamalit sa pormal na payo ng isang abogado.
+            <Text style={[globalStyles.result_noticeText, { color: T.subText }]}>
+              <Text style={{ fontWeight: 'bold', color: T.text }}>UPL Notice: </Text> Ang Lex-Simple ay isang AI Legal Literacy Tool at hindi pamalit sa pormal na payo ng isang abogado.
             </Text>
           </View>
 
+          {/* SCORE CARD */}
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={() => setScoreInfoModalVisible(true)}
-            style={[globalStyles.result_scoreCard, { borderColor: themeConfig.mainColor }]}
+            style={[globalStyles.result_scoreCard, { backgroundColor: T.card, borderColor: themeConfig.mainColor }]}
           >
             <View style={globalStyles.result_scoreHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={globalStyles.result_scoreLabel}>COMPLEXITY SCORE</Text>
+                <Text style={[globalStyles.result_scoreLabel, { color: T.subText }]}>COMPLEXITY SCORE</Text>
                 <View style={{ paddingLeft: 6, paddingRight: 8 }}>
-                  <Ionicons name="information-circle-outline" size={16} color={COLORS.textMuted} />
+                  <Ionicons name="information-circle-outline" size={16} color={T.subText} />
                 </View>
               </View>
               <View style={[globalStyles.result_riskBadge, { backgroundColor: themeConfig.mainColor }]}>
@@ -157,10 +194,10 @@ export default function ResultScreen({ route, navigation }: any) {
 
             <View style={globalStyles.result_scoreCircleWrapper}>
               <Text style={[globalStyles.result_scoreNumber, { color: themeConfig.mainColor }]}>{result.score}</Text>
-              <Text style={globalStyles.result_scoreMax}>/100</Text>
+              <Text style={[globalStyles.result_scoreMax, { color: T.subText }]}>/100</Text>
             </View>
 
-            <Text style={globalStyles.result_scoreDesc}>
+            <Text style={[globalStyles.result_scoreDesc, { color: T.subText }]}>
               Mayroong <Text style={{ fontWeight: 'bold', color: themeConfig.mainColor }}>{result.findings.length} clause(s)</Text> na nagpababa sa iyong complexity score.
             </Text>
 
@@ -169,25 +206,25 @@ export default function ResultScreen({ route, navigation }: any) {
             </View>
           </TouchableOpacity>
 
-          {/* 💡 THE FIX: Navigate na siya sa bagong screen instead of modal! */}
+          {/* DPA PIPELINE BOX */}
           <TouchableOpacity
-            style={[globalStyles.result_noticeBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', marginTop: 5, paddingVertical: 18 }]}
+            style={[globalStyles.result_noticeBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', marginTop: 5, paddingVertical: 14 }]}
             onPress={() => navigation.navigate('SanitizedOcrScreen', { sanitizedText: memoizedSanitizedText })}
           >
-            <Ionicons name="shield-checkmark" size={28} color={COLORS.success} style={{ marginRight: 15 }} />
+            <Ionicons name="shield-checkmark" size={24} color={COLORS.success} style={{ marginRight: 12 }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 14, marginBottom: 2 }}>DPA Compliant Pipeline</Text>
-              <Text style={{ color: COLORS.textMuted, fontSize: 11, lineHeight: 16 }}>Tap to view the sanitized OCR data sent to the AI.</Text>
+              <Text style={{ color: T.text, fontWeight: 'bold', fontSize: 14, marginBottom: 2 }}>DPA Compliant Pipeline</Text>
+              <Text style={{ color: T.subText, fontSize: 11, lineHeight: 16 }}>Tap to view the sanitized OCR data sent to the AI.</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.success} />
           </TouchableOpacity>
 
-          <Text style={globalStyles.result_sectionTitle}>CLAUSE ANALYSIS</Text>
+          <Text style={[globalStyles.result_sectionTitle, { color: T.text }]}>CLAUSE ANALYSIS</Text>
 
           {result.findings.length === 0 ? (
-            <View style={globalStyles.result_emptyStateBox}>
-              <Ionicons name="shield-checkmark" size={64} color={COLORS.success} />
-              <Text style={globalStyles.result_emptyStateText}>Napakaganda ng kontrata! Walang nakitang high-risk clauses ang system.</Text>
+            <View style={[globalStyles.result_emptyStateBox, { backgroundColor: T.card, borderColor: T.border }]}>
+              <Ionicons name="shield-checkmark" size={48} color={COLORS.success} />
+              <Text style={[globalStyles.result_emptyStateText, { color: T.subText }]}>Napakaganda ng kontrata! Walang nakitang high-risk clauses ang system.</Text>
             </View>
           ) : (
             result.findings.map((item, index) => (
@@ -204,29 +241,30 @@ export default function ResultScreen({ route, navigation }: any) {
         </ScrollView>
       </View>
 
+      {/* FLOATING ASK AI BUTTON */}
       <TouchableOpacity style={localStyles.fabButton} onPress={handleFullDocDeepDive}>
-        <Ionicons name="sparkles" size={26} color="white" />
+        <Ionicons name="sparkles" size={24} color="white" />
       </TouchableOpacity>
 
       {/* SCORE BREAKDOWN MODAL */}
       <Modal animationType="fade" transparent={true} visible={scoreInfoModalVisible} onRequestClose={() => setScoreInfoModalVisible(false)} statusBarTranslucent>
         <View style={globalStyles.result_modalBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setScoreInfoModalVisible(false)} />
-          <View style={[globalStyles.result_modalCenterBox, { maxHeight: '85%' }]}>
-            <View style={globalStyles.result_modalHeaderArea}>
+          <View style={[globalStyles.result_modalCenterBox, { backgroundColor: T.card, borderColor: T.border, borderRadius: 12 }]}>
+            <View style={[globalStyles.result_modalHeaderArea, { backgroundColor: T.bg, borderBottomColor: T.border }]}>
               <View style={globalStyles.result_modalHeaderTitleArea}>
                 <Ionicons name="receipt" size={20} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-                <Text style={globalStyles.result_modalTitleText} numberOfLines={1}>Score Breakdown</Text>
+                <Text style={[globalStyles.result_modalTitleText, { color: T.text }]} numberOfLines={1}>Score Breakdown</Text>
               </View>
               <TouchableOpacity onPress={() => setScoreInfoModalVisible(false)} style={globalStyles.detailModal_closeBtn}>
-                <Ionicons name="close" size={18} color="white" />
+                <Ionicons name="close" size={18} color={T.text} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={globalStyles.result_modalBodyArea} showsVerticalScrollIndicator={true}>
-              <View style={localStyles.scoreBreakdownBox}>
-                <View style={localStyles.scoreStartingRow}>
-                  <Text style={localStyles.scoreLabelText}>Starting Score</Text>
+              <View style={[localStyles.scoreBreakdownBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+                <View style={[localStyles.scoreStartingRow, { borderBottomColor: T.border }]}>
+                  <Text style={[localStyles.scoreLabelText, { color: T.text }]}>Starting Score</Text>
                   <Text style={localStyles.scoreValueSuccess}>100</Text>
                 </View>
 
@@ -234,31 +272,30 @@ export default function ResultScreen({ route, navigation }: any) {
                   result.findings.map((f, i) => {
                     const itemDeduction = baseDeduction + (i === 0 ? remainderDeduction : 0);
                     return (
-                      <View key={i} style={{ marginBottom: 18 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <Text style={localStyles.findingTitle}>{f.title}</Text>
-                          <Text style={localStyles.findingDeduction}>-{itemDeduction}</Text>
-                        </View>
-                        <Text style={localStyles.findingDesc} numberOfLines={3}>
-                          Bakit: {f.description}
-                        </Text>
-                      </View>
+                      // 🚀 GUMAMIT NG EXPANDABLE COMPONENT DITO
+                      <ExpandableFinding
+                        key={i}
+                        f={f}
+                        index={i}
+                        itemDeduction={itemDeduction}
+                        T={T}
+                      />
                     )
                   })
                 ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                     <Ionicons name="checkmark-circle" size={16} color={COLORS.success} style={{ marginRight: 6 }} />
                     <Text style={{ color: COLORS.success, fontSize: 13, fontWeight: 'bold' }}>Walang nakitang penalty points.</Text>
                   </View>
                 )}
 
-                <View style={localStyles.scoreFinalRow}>
-                  <Text style={localStyles.scoreFinalLabel}>Final Score</Text>
+                <View style={[localStyles.scoreFinalRow, { borderTopColor: T.border }]}>
+                  <Text style={[localStyles.scoreFinalLabel, { color: T.text }]}>Final Score</Text>
                   <Text style={[localStyles.scoreFinalValue, { color: themeConfig.mainColor }]}>{result.score}</Text>
                 </View>
               </View>
 
-              <Text style={localStyles.disclaimerText}>
+              <Text style={[localStyles.disclaimerText, { color: T.subText }]}>
                 Ang computation na ito ay base sa AI analysis kung saan hinahati ang ibinawas na points sa mga risky clauses na natagpuan.
               </Text>
               <View style={{ height: 20 }} />
@@ -271,19 +308,19 @@ export default function ResultScreen({ route, navigation }: any) {
       <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)} statusBarTranslucent>
         <View style={globalStyles.result_modalBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalVisible(false)} />
-          <View style={[globalStyles.result_modalCenterBox, { maxHeight: '85%' }]}>
-            <View style={globalStyles.result_modalHeaderArea}>
+          <View style={[globalStyles.result_modalCenterBox, { backgroundColor: T.card, borderColor: T.border, borderRadius: 12 }]}>
+            <View style={[globalStyles.result_modalHeaderArea, { backgroundColor: T.bg, borderBottomColor: T.border }]}>
               <View style={globalStyles.result_modalHeaderTitleArea}>
                 <Ionicons name="document-text" size={20} color={themeConfig.mainColor} style={{ marginRight: 8 }} />
-                <Text style={globalStyles.result_modalTitleText} numberOfLines={1}>{activeTitle}</Text>
+                <Text style={[globalStyles.result_modalTitleText, { color: T.text }]} numberOfLines={1}>{activeTitle}</Text>
               </View>
               <TouchableOpacity onPress={() => setModalVisible(false)} style={globalStyles.detailModal_closeBtn}>
-                <Ionicons name="close" size={18} color="white" />
+                <Ionicons name="close" size={18} color={T.text} />
               </TouchableOpacity>
             </View>
             <ScrollView style={globalStyles.result_modalBodyArea} showsVerticalScrollIndicator={true}>
-              <View style={localStyles.documentPaper}>
-                <Text style={[localStyles.justifiedText, selectedDbInfo?.includes("No matching") ? globalStyles.result_errorItalicText : undefined]}>
+              <View style={[localStyles.documentPaper, { backgroundColor: T.bg, borderColor: T.border }]}>
+                <Text style={[localStyles.justifiedText, { color: T.text }, selectedDbInfo?.includes("No matching") && { fontStyle: 'italic', color: COLORS.warning }]}>
                   {selectedDbInfo}
                 </Text>
               </View>
@@ -300,12 +337,12 @@ export default function ResultScreen({ route, navigation }: any) {
 const localStyles = StyleSheet.create({
   fabButton: {
     position: 'absolute',
-    bottom: 30,
-    right: 20,
+    bottom: 24,
+    right: 16,
     backgroundColor: COLORS.primaryLight,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 12, // Sharp corner
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
@@ -316,40 +353,35 @@ const localStyles = StyleSheet.create({
     zIndex: 999
   },
   scoreBreakdownBox: {
-    backgroundColor: '#0a0a0a',
-    padding: 18,
-    borderRadius: 16,
+    padding: 16,
+    borderRadius: 8, // Sharp corner
     borderWidth: 1,
-    borderColor: '#1e293b',
-    marginBottom: 25
+    marginBottom: 20
   },
   scoreStartingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    paddingBottom: 15,
-    marginBottom: 15
+    paddingBottom: 12,
+    marginBottom: 12
   },
-  scoreLabelText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  scoreLabelText: { fontWeight: 'bold', fontSize: 14 },
   scoreValueSuccess: { color: COLORS.success, fontWeight: '900', fontSize: 16 },
-  findingTitle: { color: '#cbd5e1', fontSize: 13, fontWeight: 'bold', flex: 1, paddingRight: 10, lineHeight: 20 },
+  findingTitle: { fontSize: 13, fontWeight: 'bold', flex: 1, paddingRight: 10, lineHeight: 20 },
   findingDeduction: { color: COLORS.danger, fontSize: 14, fontWeight: '900' },
-  findingDesc: { color: COLORS.textMuted, fontSize: 11, marginTop: 4, lineHeight: 18 },
+  findingDesc: { fontSize: 11, marginTop: 4, lineHeight: 18 },
   scoreFinalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 15,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    marginTop: 5
+    marginTop: 4
   },
-  scoreFinalLabel: { color: 'white', fontWeight: '900', fontSize: 16 },
+  scoreFinalLabel: { fontWeight: '900', fontSize: 16 },
   scoreFinalValue: { fontWeight: '900', fontSize: 22 },
   disclaimerText: {
-    color: COLORS.textMuted,
     fontSize: 11,
     textAlign: 'center',
     fontStyle: 'italic',
@@ -358,15 +390,12 @@ const localStyles = StyleSheet.create({
     lineHeight: 16
   },
   documentPaper: {
-    backgroundColor: '#1E1E2E',
-    padding: 20,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 8, // Sharp corner
     borderWidth: 1,
-    borderColor: '#334155',
-    marginVertical: 15
+    marginVertical: 10
   },
   justifiedText: {
-    color: '#E2E8F0',
     fontSize: 14,
     lineHeight: 22,
     textAlign: 'left',

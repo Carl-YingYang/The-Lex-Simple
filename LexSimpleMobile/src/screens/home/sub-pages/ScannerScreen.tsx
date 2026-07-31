@@ -1,18 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Network from 'expo-network';
 import { postEndpoint } from '../../../services/AiEngine';
 
-import { globalStyles, COLORS, SCAN_FRAME_HEIGHT } from '../../../theme/globalStyles';
+import { COLORS, SCAN_FRAME_HEIGHT } from '../../../theme/globalStyles';
 import ProcessingLoader from '../../../components/ProcessingLoader';
-
-// 💡 IMPORT ANG CUSTOM ALERT HOOK AT LOCAL SANITIZER NATIN
 import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
 import { sanitizeLocalText } from '../../../utils/sanitizer';
+// 🚀 IMPORT GLOBAL THEME
+import { useTheme } from '../../../theme/ThemeContext';
 
 export default function ScannerScreen({ navigation }: any) {
   const [permission, requestPermission] = useCameraPermissions();
@@ -29,8 +29,9 @@ export default function ScannerScreen({ navigation }: any) {
   const [isFlashOn, setIsFlashOn] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
+  // 🎨 KUNIN ANG THEME COLORS
+  const { isDarkMode, colors: T } = useTheme();
 
-  // 💡 IDINAGDAG ANG LOADING MESSAGES PARA MAKITA ANG "SANITIZING LOCALLY"
   const LOADING_MESSAGES = [
     "Extracting text offline...",
     "Sanitizing sensitive data locally...",
@@ -43,10 +44,7 @@ export default function ScannerScreen({ navigation }: any) {
     if (!permission || hasInitialized.current) return;
     hasInitialized.current = true;
     handleOpenCamera();
-
-    return () => {
-      scanLineAnim.stopAnimation();
-    };
+    return () => { scanLineAnim.stopAnimation(); };
   }, [permission]);
 
   useEffect(() => {
@@ -69,12 +67,7 @@ export default function ScannerScreen({ navigation }: any) {
       const result = await requestPermission();
       if (result.granted) setIsCameraOpen(true);
       else {
-        showAlert(
-          "Permission Required",
-          "Kailangan ng camera access para makapag-scan.",
-          "warning",
-          [{ text: "OK", style: "cancel", onPress: () => navigation.goBack() }]
-        );
+        showAlert("Permission Required", "Kailangan ng camera access para makapag-scan.", "warning", [{ text: "OK", style: "cancel", onPress: () => navigation.goBack() }]);
       }
     }
   };
@@ -88,27 +81,17 @@ export default function ScannerScreen({ navigation }: any) {
     setIsFlashOn(false);
   };
 
-  // 💡 IN-UPDATE PARA TANGGAPIN ANG `extractedText`
   const saveToOfflineHistory = async (imageUri: string, type: 'camera' | 'gallery', extractedText: string): Promise<string> => {
     const newId = Date.now().toString();
     try {
       const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
       const historyArray = existingHistory ? JSON.parse(existingHistory) : [];
-
       const newItem = {
-        id: newId,
-        uri: imageUri,
-        title: type === 'camera' ? 'Camera Scan' : 'Gallery Upload',
-        date: new Date().toLocaleString(),
-        type: type,
-        status: 'unscanned',
-        ocrText: extractedText // 💡 SINESAVE NA NATIN AGAD ANG TEXT KAHIT OFFLINE
+        id: newId, uri: imageUri, title: type === 'camera' ? 'Camera Scan' : 'Gallery Upload',
+        date: new Date().toLocaleString(), type: type, status: 'unscanned', ocrText: extractedText
       };
-
       await AsyncStorage.setItem('@lex_scan_history', JSON.stringify([newItem, ...historyArray]));
-    } catch (error) {
-      console.error("Error saving offline", error);
-    }
+    } catch (error) { console.error("Error saving offline", error); }
     return newId;
   };
 
@@ -117,50 +100,23 @@ export default function ScannerScreen({ navigation }: any) {
       const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
       if (!existingHistory) return;
       let historyArray = JSON.parse(existingHistory);
-
       historyArray = historyArray.map((item: any) => {
-        if (item.id === id) {
-          return {
-            ...item,
-            status: 'scanned',
-            analysisResult: {
-              ...analysisData,
-              sanitizedText: sanitizedText
-            },
-            ocrText: ocrText
-          };
-        }
+        if (item.id === id) return { ...item, status: 'scanned', analysisResult: { ...analysisData, sanitizedText: sanitizedText }, ocrText: ocrText };
         return item;
       });
-
       await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(historyArray));
-    } catch (error) {
-      console.error("Error updating history", error);
-    }
+    } catch (error) { console.error("Error updating history", error); }
   };
 
   const triggerErrorAlert = (msg: string) => {
     setIsAnalyzing(false);
     setIsProcessing(false);
-
     let alertTitle = "System Error";
     let alertType: AlertType = "error";
-
     const lowerMsg = msg.toLowerCase();
-    if (lowerMsg.includes('unreadable') || lowerMsg.includes('blurry') || lowerMsg.includes('empty')) {
-      alertTitle = "Unreadable Image";
-      alertType = "warning";
-    } else if (lowerMsg.includes('connection') || lowerMsg.includes('network') || lowerMsg.includes('server')) {
-      alertTitle = "Connection Error";
-      alertType = "error";
-    }
-
-    showAlert(
-      alertTitle,
-      msg,
-      alertType,
-      [{ text: "Try Again", style: "destructive", onPress: resetScanner }]
-    );
+    if (lowerMsg.includes('unreadable') || lowerMsg.includes('blurry') || lowerMsg.includes('empty')) { alertTitle = "Unreadable Image"; alertType = "warning"; }
+    else if (lowerMsg.includes('connection') || lowerMsg.includes('network') || lowerMsg.includes('server')) { alertTitle = "Connection Error"; alertType = "error"; }
+    showAlert(alertTitle, msg, alertType, [{ text: "Try Again", style: "destructive", onPress: resetScanner }]);
   };
 
   const manualTakePicture = async () => {
@@ -173,106 +129,65 @@ export default function ScannerScreen({ navigation }: any) {
           setCapturedImage(photo.uri);
           setIsCameraOpen(false);
           setIsFlashOn(false);
+          setIsAnalyzing(true);
 
-          setIsAnalyzing(true); // 💡 BUHAYIN AGAD ANG LOADER PARA SA OFFLINE OCR
-
-          // 💡 STEP A: LOCAL OCR EXTRACTION MUNA BAGO LAHAT!
           const formattedUri = photo.uri.startsWith('file://') ? photo.uri : `file://${photo.uri}`;
           let extractedText = "";
           try {
             const ocrResult = await TextRecognition.recognize(formattedUri);
             extractedText = ocrResult.text;
-          } catch (ocrError) {
-            triggerErrorAlert("Hindi ma-process ng system ang larawan.");
-            return;
-          }
+          } catch (ocrError) { triggerErrorAlert("Hindi ma-process ng system ang larawan."); return; }
 
-          if (!extractedText || extractedText.trim().length < 20) {
-            triggerErrorAlert("Masyadong malabo o walang laman ang imahe. Hindi mabasa ang text.");
-            return;
-          }
+          if (!extractedText || extractedText.trim().length < 20) { triggerErrorAlert("Masyadong malabo o walang laman ang imahe. Hindi mabasa ang text."); return; }
 
-          // 💡 STEP B: I-SAVE SA DATABASE KASAMA YUNG TEXT (Kahit offline)
           const savedId = await saveToOfflineHistory(photo.uri, 'camera', extractedText);
-
-          // 💡 STEP C: CHECK NETWORK
           const networkState = await Network.getNetworkStateAsync();
 
           if (networkState.isConnected) {
-            // 🟢 ONLINE: I-diretso sa AI gamit yung nakuha nating text (Mas mabilis!)
             startAnalysisWithImageOnly(extractedText, savedId);
           } else {
-            // 🔴 OFFLINE: I-alert ang user at ibalik sa Home Screen
             setIsAnalyzing(false);
-            showAlert(
-              "Offline Mode",
-              "Walang internet connection. Na-extract na ang text at naka-save sa Recent Files. Pwede mo i-review ang text at i-analyze mamaya.",
-              "info",
-              [{ text: "OK", onPress: () => navigation.goBack() }]
-            );
+            showAlert("Offline Mode", "Walang internet connection. Na-extract na ang text at naka-save sa Recent Files. Pwede mo i-review ang text at i-analyze mamaya.", "info", [{ text: "OK", onPress: () => navigation.goBack() }]);
           }
         }
-      } catch (error) {
-        triggerErrorAlert("Hindi makuha ang picture. Subukan ulit.");
-      }
+      } catch (error) { triggerErrorAlert("Hindi makuha ang picture. Subukan ulit."); }
     }
   };
 
-  // 💡 BINAGO: Tatanggapin na niya yung extracted text imbes na siya ang mag-OCR
   const startAnalysisWithImageOnly = async (extractedText: string, dbId: string) => {
     try {
-      // 🛡️ THE MAGIC: DPA COMPLIANCE 🛡️
-      // Nililinis natin ang text DITO sa phone bago mag-fetch sa internet!
       const locallySanitizedText = sanitizeLocalText(extractedText);
+      const data = await postEndpoint('/simplify', { text: locallySanitizedText });
 
-      // 🆕 GUMAMIT NG CENTRALIZED API ENGINE (Walang hardcoded URL!)
-      const data = await postEndpoint('/simplify', {
-        text: locallySanitizedText
-      });
-
-      // Kung ang backend ay nag-return ng error (hal. LLM error sa Groq)
-      if (data.status === 'error') {
-        triggerErrorAlert("AI Error: " + (data.message || "Server processing failed."));
-        return;
-      }
-
-      // Kung success ang analysis
+      if (data.status === 'error') { triggerErrorAlert("AI Error: " + (data.message || "Server processing failed.")); return; }
       if (data.status === 'success') {
         setIsAnalyzing(false);
-        const combinedAnalysisResult = {
-          ...data.data,
-          rag_context_used: data.rag_context_used,
-          sanitizedText: locallySanitizedText // 💡 GINAMIT YUNG LOCAL SANITIZED TEXT
-        };
-
+        const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, sanitizedText: locallySanitizedText };
         await updateHistoryToScanned(dbId, combinedAnalysisResult, extractedText, locallySanitizedText);
         navigation.replace('ResultScreen', { analysisResult: combinedAnalysisResult });
-      } else {
-        triggerErrorAlert("AI Error: " + (data.message || "Server processing failed."));
-      }
+      } else { triggerErrorAlert("AI Error: " + (data.message || "Server processing failed.")); }
     } catch (error) {
       console.error("🔥 ERROR:", error);
       triggerErrorAlert("System Error. Please check your internet connection.");
     }
   };
 
-  // ====================================================
-  // 🟢 SCREEN RENDERERS
-  // ====================================================
-
+  // 🟢 ANALYZING UI
   if (isAnalyzing) {
     return (
-      <View style={globalStyles.centerContainer}>
-        {/* 💡 IDINAGDAG YUNG LOADING_MESSAGES PROP PARA MATCH SA UPLOAD SCREEN */}
+      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <ProcessingLoader title="Analyzing Contract" messages={LOADING_MESSAGES} />
         <AlertRender />
       </View>
     );
   }
 
+  // 🟢 CAMERA UI
   if (isCameraOpen && permission?.granted && !capturedImage) {
     return (
-      <View style={globalStyles.scannerContainer}>
+      <View style={uiStyles.cameraContainer}>
+        <StatusBar barStyle="light-content" />
         <CameraView
           style={{ flex: 1, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
           facing="back"
@@ -280,50 +195,36 @@ export default function ScannerScreen({ navigation }: any) {
           enableTorch={isFlashOn}
         />
 
-        <View style={globalStyles.scanOverlayBlock} />
-
-        <View style={globalStyles.scanMiddleRow}>
-          <View style={globalStyles.scanOverlayBlock} />
-
-          <View style={globalStyles.scanFrame}>
-            <View style={[globalStyles.scanCorner, globalStyles.scanTopLeft]} />
-            <View style={[globalStyles.scanCorner, globalStyles.scanTopRight]} />
-            <View style={[globalStyles.scanCorner, globalStyles.scanBottomLeft]} />
-            <View style={[globalStyles.scanCorner, globalStyles.scanBottomRight]} />
-
-            <Animated.View style={[globalStyles.scanLaser, { transform: [{ translateY: scanLineAnim }] }]} />
+        <View style={uiStyles.scanOverlayBlock} />
+        <View style={uiStyles.scanMiddleRow}>
+          <View style={uiStyles.scanOverlayBlock} />
+          <View style={uiStyles.scanFrame}>
+            <View style={[uiStyles.scanCorner, uiStyles.scanTopLeft]} />
+            <View style={[uiStyles.scanCorner, uiStyles.scanTopRight]} />
+            <View style={[uiStyles.scanCorner, uiStyles.scanBottomLeft]} />
+            <View style={[uiStyles.scanCorner, uiStyles.scanBottomRight]} />
+            <Animated.View style={[uiStyles.scanLaser, { transform: [{ translateY: scanLineAnim }] }]} />
           </View>
-
-          <View style={globalStyles.scanOverlayBlock} />
+          <View style={uiStyles.scanOverlayBlock} />
         </View>
+        <View style={[uiStyles.scanOverlayBlock, uiStyles.scanBottomOverlayContainer]} />
 
-        <View style={[globalStyles.scanOverlayBlock, globalStyles.scanBottomOverlayContainer]} />
-
-        <View style={globalStyles.scanTopControls}>
-          <TouchableOpacity style={globalStyles.scanIconBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="close" size={26} color="white" />
+        <View style={uiStyles.scanTopControls}>
+          <TouchableOpacity style={uiStyles.scanIconBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={globalStyles.scanIconBtn}
-            onPress={() => setIsFlashOn(!isFlashOn)}
-          >
-            <Ionicons
-              name={isFlashOn ? "flash" : "flash-off"}
-              size={24}
-              color={isFlashOn ? "#fcd34d" : "white"}
-            />
+          <TouchableOpacity style={uiStyles.scanIconBtn} onPress={() => setIsFlashOn(!isFlashOn)}>
+            <Ionicons name={isFlashOn ? "flash" : "flash-off"} size={22} color={isFlashOn ? "#fcd34d" : "white"} />
           </TouchableOpacity>
         </View>
 
-        <View style={globalStyles.scanBottomSafeZone}>
-          <View style={globalStyles.scanFeedbackPill}>
-            <Ionicons name="scan-outline" size={16} color="white" style={{ marginRight: 6 }} />
-            <Text style={globalStyles.scanFeedbackText}>{scanFeedback}</Text>
+        <View style={uiStyles.scanBottomSafeZone}>
+          <View style={uiStyles.scanFeedbackPill}>
+            <Ionicons name="scan-outline" size={14} color="white" style={{ marginRight: 6 }} />
+            <Text style={uiStyles.scanFeedbackText}>{scanFeedback}</Text>
           </View>
-
-          <TouchableOpacity style={globalStyles.shutterOuter} onPress={manualTakePicture} disabled={isProcessing}>
-            <View style={globalStyles.shutterInner} />
+          <TouchableOpacity style={uiStyles.shutterOuter} onPress={manualTakePicture} disabled={isProcessing}>
+            <View style={uiStyles.shutterInner} />
           </TouchableOpacity>
         </View>
 
@@ -334,11 +235,33 @@ export default function ScannerScreen({ navigation }: any) {
 
   // ⏳ DEFAULT LOADING CAMERA STATE
   return (
-    <View style={globalStyles.centerContainer}>
+    <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <ActivityIndicator size="large" color={COLORS.primaryLight} />
-      <Text style={globalStyles.loadingSubText}>Loading Camera...</Text>
-
+      <Text style={{ color: T.subText, marginTop: 15, fontSize: 14, fontWeight: 'bold' }}>Loading Camera...</Text>
       <AlertRender />
     </View>
   );
 }
+
+// 🎨 SLEEK & SHARP UI STYLES FOR SCANNER
+const uiStyles = StyleSheet.create({
+  cameraContainer: { flex: 1, backgroundColor: '#000' },
+  scanOverlayBlock: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.70)' },
+  scanMiddleRow: { flexDirection: 'row', height: SCAN_FRAME_HEIGHT },
+  scanBottomOverlayContainer: { flex: 1.5 },
+  scanBottomSafeZone: { position: 'absolute', bottom: 40, left: 0, right: 0, alignItems: 'center', zIndex: 20 },
+  scanFrame: { width: '85%', height: SCAN_FRAME_HEIGHT, backgroundColor: 'transparent', overflow: 'hidden' },
+  scanCorner: { position: 'absolute', width: 36, height: 36, borderColor: 'white' },
+  scanTopLeft: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 4 },
+  scanTopRight: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 4 },
+  scanBottomLeft: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 4 },
+  scanBottomRight: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 4 },
+  scanLaser: { position: 'absolute', width: '100%', height: 3, backgroundColor: COLORS.primaryLight, shadowColor: COLORS.primaryLight, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 10, elevation: 8 },
+  scanFeedbackPill: { flexDirection: 'row', backgroundColor: 'rgba(20, 20, 20, 0.8)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', marginBottom: 24 },
+  scanFeedbackText: { color: 'white', fontSize: 13, fontWeight: '600' },
+  scanTopControls: { position: 'absolute', top: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 20 : 50, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', zIndex: 20 },
+  scanIconBtn: { width: 40, height: 40, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  shutterOuter: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)' },
+  shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'white' }
+});

@@ -1,11 +1,9 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-// 🛠️ Import ang global styles at COLORS natin
-import { globalStyles, COLORS } from '../theme/globalStyles';
-
-const { width } = Dimensions.get('window');
+import { COLORS } from '../theme/globalStyles';
+import { useTheme } from '../theme/ThemeContext';
 
 interface ScreenLayoutProps {
   title: string;
@@ -25,139 +23,85 @@ export default function ScreenLayout({
   noPadding = false,
 }: ScreenLayoutProps) {
   const navigation = useNavigation();
+  const { colors } = useTheme();
 
   return (
-    <View style={globalStyles.safeArea}>
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44 }}>
 
       {/* ─── APP BAR ─── */}
-      <View style={styles.appBar}>
+      <View style={[styles.appBar, { backgroundColor: colors.bg, borderBottomColor: colors.border }]}>
 
-        {/* Soft indigo wash layered on top of the base bg */}
-        <View style={styles.indigoOverlay} pointerEvents="none" />
+        {/* LEFT — Back button (Pinned Left) */}
+        <View style={[styles.sideSlot, { alignItems: 'flex-start' }]}>
+          {showBackButton ? (
+            <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+              <View style={[styles.iconRing, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="chevron-back" size={22} color={colors.text} />
+              </View>
+            </TouchableOpacity>
+          ) : <View style={styles.spacer} />}
+        </View>
 
-        <View style={styles.barRow}>
+        {/* CENTER — Title */}
+        <View style={styles.centerSlot}>
+          <Text style={[styles.appBarTitle, { color: colors.text }]} numberOfLines={1}>
+            {title}
+          </Text>
+        </View>
 
-          {/* LEFT — Back button */}
-          <View style={styles.sideSlot}>
-            {showBackButton ? (
-              <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
-                <View style={styles.iconRing}>
-                  <Ionicons name="chevron-back" size={22} color="#a5b4fc" />
-                </View>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.spacer} />
-            )}
-          </View>
-
-          {/* CENTER — Title */}
-          <View style={styles.centerSlot}>
-            <Text style={styles.appBarTitle} numberOfLines={1}>
-              {title}
-            </Text>
-          </View>
-
-          {/* RIGHT — Optional action icon */}
-          <View style={styles.sideSlot}>
-            {rightIcon ? (
-              <TouchableOpacity style={styles.iconButton} onPress={onRightPress} activeOpacity={0.7}>
-                <View style={styles.iconRing}>
-                  <Ionicons name={rightIcon} size={20} color="#a5b4fc" />
-                </View>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.spacer} />
-            )}
-          </View>
-
+        {/* RIGHT — Trash Icon (Pinned Far Right Edge) */}
+        <View style={[styles.sideSlot, { alignItems: 'flex-end' }]}>
+          {rightIcon ? (
+            <TouchableOpacity style={styles.iconButton} onPress={onRightPress} activeOpacity={0.7}>
+              <View style={[styles.iconRing, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name={rightIcon} size={20} color={COLORS.danger} />
+              </View>
+            </TouchableOpacity>
+          ) : <View style={styles.spacer} />}
         </View>
       </View>
 
       {/* ─── CONTENT ─── */}
-      <View style={[styles.content, !noPadding && { paddingHorizontal: 20 }]}>
+      <View style={[styles.content, !noPadding && { paddingHorizontal: 16 }]}>
         {children}
       </View>
-
     </View>
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
 const SIDE_SLOT_WIDTH = 50;
-
 const styles = StyleSheet.create({
-
   appBar: {
-    position: 'relative',
-    overflow: 'hidden',
-    backgroundColor: COLORS.background,  // Ginaya na sa true black ng buong app para seamless
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 8,
+    paddingTop: 10,
     paddingBottom: 15,
-    paddingHorizontal: 15,
+    paddingHorizontal: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(99, 102, 241, 0.1)', // Very subtle indigo line
-  },
-
-  // Soft indigo wash — adds a premium glow without changing the solid color completely
-  indigoOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(79, 70, 229, 0.05)',  // Super faint indigo tint
-  },
-
-  barRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: Platform.OS === 'android' ? 5 : 10,
   },
-
-  // Fixed-width side slots keep the title perfectly centred
   sideSlot: {
     width: SIDE_SLOT_WIDTH,
-    alignItems: 'flex-start', // Para pumantay sa edges
-    justifyContent: 'center',
+    justifyContent: 'center'
   },
-
   centerSlot: {
     position: 'absolute',
-    left: 0,
-    right: 0,
+    left: SIDE_SLOT_WIDTH,
+    right: SIDE_SLOT_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: -1, // Para hindi maharang yung touch events ng buttons
+    zIndex: -1
   },
-
-  // Premium Circular Ring para sa buttons (Tugma sa Chat at Scan Screen)
   iconRing: {
     width: 38,
     height: 38,
-    borderRadius: 19, // Circular pill
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',  // Light indigo background
-    borderWidth: 1,
-    borderColor: 'rgba(129, 140, 248, 0.15)', // Subtle border
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
   },
-
-  iconButton: {
-    padding: 0,
-  },
-
-  // Clean Typography
-  appBarTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: 'white',
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-
-  spacer: {
-    width: SIDE_SLOT_WIDTH,
-    height: 38,
-  },
-
-  content: {
-    flex: 1,
-  },
+  iconButton: { padding: 0 },
+  appBarTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', letterSpacing: 0.5 },
+  spacer: { width: SIDE_SLOT_WIDTH, height: 38 },
+  content: { flex: 1 },
 });

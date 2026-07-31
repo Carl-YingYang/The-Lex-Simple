@@ -5,7 +5,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
-// Papatayin nito ang nakakabwisit na Yellow Box warnings sa screen ng phone mo
+// 🚀 IMPORTS
+import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
+import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
+import { ThemeProvider, useTheme } from '../theme/ThemeContext';
+// 🚀 IMPORT ANG NAVIGATION REF
+import { navigationRef } from './RootNavigation';
+
 LogBox.ignoreLogs(['The app is running using the Legacy Architecture']);
 
 // Import Tabs
@@ -30,26 +36,15 @@ import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// 💡 CUSTOM ANIMATED TAB BUTTON
 const TabBarButton = ({ children, onPress, accessibilityState }: any) => {
   const focused = accessibilityState?.selected;
   const translateY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (focused) {
-      Animated.spring(translateY, {
-        toValue: -6, // Aangat pataas kapag active (Icon + Text sabay aangat)
-        useNativeDriver: true,
-        friction: 5,
-        tension: 40,
-      }).start();
+      Animated.spring(translateY, { toValue: -6, useNativeDriver: true, friction: 5, tension: 40 }).start();
     } else {
-      Animated.spring(translateY, {
-        toValue: 0, // Babalik sa baba kapag inactive
-        useNativeDriver: true,
-        friction: 5,
-        tension: 40,
-      }).start();
+      Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 5, tension: 40 }).start();
     }
   }, [focused]);
 
@@ -62,43 +57,34 @@ const TabBarButton = ({ children, onPress, accessibilityState }: any) => {
   );
 };
 
-// 1. Bottom Tabs (Sticky, Taller, with Titles)
 function MainTabs() {
+  const { colors, isDarkMode } = useTheme();
+
   return (
     <Tab.Navigator
       initialRouteName="Scan"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#000000',
+          backgroundColor: colors.bg,
           borderTopWidth: 1,
-          borderTopColor: '#1e293b',
-          height: 70, // 💡 TINAASAN ANG HEIGHT (from 60 to 70) para magkasya ang text
-          paddingBottom: 8, // Dinagdagan ng space sa ilalim
-          paddingTop: 8, // Dinagdagan ng space sa itaas
+          borderTopColor: colors.border,
+          height: 70,
+          paddingBottom: 8,
+          paddingTop: 8,
           elevation: 0,
           shadowOpacity: 0,
         },
-        tabBarShowLabel: true, // 💡 IBINALIK ANG TITLE LABELS
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-          marginTop: 2,
-        },
-        tabBarActiveTintColor: '#A78BFA', // Kulay purple kapag active (pasok sa theme mo)
-        tabBarInactiveTintColor: '#64748b',
+        tabBarShowLabel: true,
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+        tabBarActiveTintColor: '#A78BFA',
+        tabBarInactiveTintColor: isDarkMode ? '#64748b' : '#8E8E93',
 
         tabBarIcon: ({ focused, color }) => {
           let iconName: any;
-          if (route.name === 'Library') {
-            iconName = focused ? 'book' : 'book-outline';
-          } else if (route.name === 'Scan') {
-            iconName = focused ? 'scan' : 'scan-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
-          }
-
-          // 💡 LINALAKIHAN ANG ICON SIZE (from 26 to 28)
+          if (route.name === 'Library') iconName = focused ? 'book' : 'book-outline';
+          else if (route.name === 'Scan') iconName = focused ? 'scan' : 'scan-outline';
+          else if (route.name === 'Profile') iconName = focused ? 'person' : 'person-outline';
           return <Ionicons name={iconName} size={28} color={color} />;
         },
         tabBarButton: (props) => <TabBarButton {...props} />,
@@ -111,31 +97,35 @@ function MainTabs() {
   );
 }
 
-// 2. Stack Navigator
 export default function AppNavigator() {
   return (
-    <NavigationContainer theme={DarkTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Main" component={MainTabs} />
-        <Stack.Screen name="ScannerScreen" component={ScannerScreen} />
-        <Stack.Screen name="ResultScreen" component={ResultScreen} />
-        <Stack.Screen name="DictionaryDetailScreen" component={DictionaryDetailScreen} />
-        <Stack.Screen name="ConvertScreen" component={ConvertScreen} />
-        <Stack.Screen name="AskAiScreen" component={AskAiScreen} />
-        <Stack.Screen name="UploadImageScreen" component={UploadImageScreen} />
-        <Stack.Screen name="OfflineDetailScreen" component={OfflineDetailScreen} />
-        <Stack.Screen name="AboutScreen" component={AboutScreen} />
-        <Stack.Screen name="LegalAidScreen" component={LegalAidScreen} />
-        <Stack.Screen name="SanitizedOcrScreen" component={SanitizedOcrScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ThemeProvider>
+      {/* 🚀 WRAP APP WITH BACKGROUND PROVIDER */}
+      <BackgroundProcessProvider>
+        {/* 🚀 ILAGAY ANG navigationRef DITO */}
+        <NavigationContainer ref={navigationRef} theme={DarkTheme}>
+          {/* 🚀 FLOATING INDICATOR PARA LITAW SA KAHIT ANONG SCREEN */}
+          <FloatingProcessIndicator />
+
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="ScannerScreen" component={ScannerScreen} />
+            <Stack.Screen name="ResultScreen" component={ResultScreen} />
+            <Stack.Screen name="DictionaryDetailScreen" component={DictionaryDetailScreen} />
+            <Stack.Screen name="ConvertScreen" component={ConvertScreen} />
+            <Stack.Screen name="AskAiScreen" component={AskAiScreen} />
+            <Stack.Screen name="UploadImageScreen" component={UploadImageScreen} />
+            <Stack.Screen name="OfflineDetailScreen" component={OfflineDetailScreen} />
+            <Stack.Screen name="AboutScreen" component={AboutScreen} />
+            <Stack.Screen name="LegalAidScreen" component={LegalAidScreen} />
+            <Stack.Screen name="SanitizedOcrScreen" component={SanitizedOcrScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </BackgroundProcessProvider>
+    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  tabButton: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  }
+  tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' }
 });
