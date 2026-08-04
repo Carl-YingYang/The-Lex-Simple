@@ -5,21 +5,17 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
-// 🚀 IMPORTS
 import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
-// 🚀 IMPORT ANG NAVIGATION REF
+// 🚀 IMPORT ROOT NAVIGATION
 import { navigationRef } from './RootNavigation';
 
 LogBox.ignoreLogs(['The app is running using the Legacy Architecture']);
 
-// Import Tabs
 import ScanScreen from '../screens/home/tab-pages/ScanScreen';
 import LibraryScreen from '../screens/dictionary/tab-pages/LibraryScreen';
 import ProfileScreen from '../screens/profile/tab-pages/ProfileScreen';
-
-// Import Sub-screens
 import ScannerScreen from '../screens/home/sub-pages/ScannerScreen';
 import ResultScreen from '../screens/home/sub-pages/ResultScreen';
 import DictionaryDetailScreen from '../screens/dictionary/sub-pages/DictionaryDetailScreen';
@@ -28,8 +24,6 @@ import ConvertScreen from '../screens/home/sub-pages/ConvertScreen';
 import AskAiScreen from '../screens/home/sub-pages/AskAiScreen';
 import OfflineDetailScreen from '../screens/home/sub-pages/OfflineDetailScreen';
 import SanitizedOcrScreen from '../screens/home/sub-pages/SanitizedOcrScreen';
-
-// Import About Screens
 import AboutScreen from '../screens/profile/sub-pages/AboutScreen';
 import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
 
@@ -39,57 +33,36 @@ const Stack = createNativeStackNavigator();
 const TabBarButton = ({ children, onPress, accessibilityState }: any) => {
   const focused = accessibilityState?.selected;
   const translateY = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
-    if (focused) {
-      Animated.spring(translateY, { toValue: -6, useNativeDriver: true, friction: 5, tension: 40 }).start();
-    } else {
-      Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 5, tension: 40 }).start();
-    }
+    if (focused) Animated.spring(translateY, { toValue: -6, useNativeDriver: true, friction: 5, tension: 40 }).start();
+    else Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 5, tension: 40 }).start();
   }, [focused]);
-
   return (
     <TouchableWithoutFeedback onPress={onPress}>
-      <Animated.View style={[styles.tabButton, { transform: [{ translateY }] }]}>
-        {children}
-      </Animated.View>
+      <Animated.View style={[styles.tabButton, { transform: [{ translateY }] }]}>{children}</Animated.View>
     </TouchableWithoutFeedback>
   );
 };
 
 function MainTabs() {
   const { colors, isDarkMode } = useTheme();
-
   return (
-    <Tab.Navigator
-      initialRouteName="Scan"
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: colors.bg,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
-          height: 70,
-          paddingBottom: 8,
-          paddingTop: 8,
-          elevation: 0,
-          shadowOpacity: 0,
-        },
-        tabBarShowLabel: true,
-        tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginTop: 2 },
-        tabBarActiveTintColor: '#A78BFA',
-        tabBarInactiveTintColor: isDarkMode ? '#64748b' : '#8E8E93',
-
-        tabBarIcon: ({ focused, color }) => {
-          let iconName: any;
-          if (route.name === 'Library') iconName = focused ? 'book' : 'book-outline';
-          else if (route.name === 'Scan') iconName = focused ? 'scan' : 'scan-outline';
-          else if (route.name === 'Profile') iconName = focused ? 'person' : 'person-outline';
-          return <Ionicons name={iconName} size={28} color={color} />;
-        },
-        tabBarButton: (props) => <TabBarButton {...props} />,
-      })}
-    >
+    <Tab.Navigator initialRouteName="Scan" screenOptions={({ route }) => ({
+      headerShown: false,
+      tabBarStyle: { backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, height: 70, paddingBottom: 8, paddingTop: 8, elevation: 0, shadowOpacity: 0 },
+      tabBarShowLabel: true,
+      tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+      tabBarActiveTintColor: '#A78BFA',
+      tabBarInactiveTintColor: isDarkMode ? '#64748b' : '#8E8E93',
+      tabBarIcon: ({ focused, color }) => {
+        let iconName: any;
+        if (route.name === 'Library') iconName = focused ? 'book' : 'book-outline';
+        else if (route.name === 'Scan') iconName = focused ? 'scan' : 'scan-outline';
+        else if (route.name === 'Profile') iconName = focused ? 'person' : 'person-outline';
+        return <Ionicons name={iconName} size={28} color={color} />;
+      },
+      tabBarButton: (props) => <TabBarButton {...props} />,
+    })}>
       <Tab.Screen name="Library" component={LibraryScreen} options={{ tabBarLabel: 'Library' }} />
       <Tab.Screen name="Scan" component={ScanScreen} options={{ tabBarLabel: 'Scanner' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
@@ -100,13 +73,10 @@ function MainTabs() {
 export default function AppNavigator() {
   return (
     <ThemeProvider>
-      {/* 🚀 WRAP APP WITH BACKGROUND PROVIDER */}
       <BackgroundProcessProvider>
         {/* 🚀 ILAGAY ANG navigationRef DITO */}
         <NavigationContainer ref={navigationRef} theme={DarkTheme}>
-          {/* 🚀 FLOATING INDICATOR PARA LITAW SA KAHIT ANONG SCREEN */}
           <FloatingProcessIndicator />
-
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="ScannerScreen" component={ScannerScreen} />
@@ -126,6 +96,4 @@ export default function AppNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
-  tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' }
-});
+const styles = StyleSheet.create({ tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' } });
