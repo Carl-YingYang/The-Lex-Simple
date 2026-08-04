@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState } from 'react';
 
 const BackgroundProcessContext = createContext({
     isProcessing: false,
-    startProcess: () => { },
+    startProcess: (p0: () => Promise<any>, p1: string) => { },
     endProcess: () => { }
 });
 
