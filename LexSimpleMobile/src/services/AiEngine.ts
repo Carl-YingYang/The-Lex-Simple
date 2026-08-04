@@ -1,8 +1,5 @@
-// src/services/AiEngine.ts
-import Constants from 'expo-constants';
-
-// 🚨 TEMPORARY FIX: I-hardcode muna natin ang Ngrok URL para sigurado.
-const BASE_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev';
+// 🚀 BASAHIN ANG URL MULA SA .env FILE
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 console.log(`[AI Engine] Using Base URL: ${BASE_URL}`);
 
@@ -16,6 +13,13 @@ export async function postEndpoint(endpoint: string, body: any) {
             },
             body: JSON.stringify(body)
         });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Server Response Error:", errorText);
+            throw new Error(`Server Error: ${response.status}`);
+        }
+
         const data = await response.json();
         return data;
     } catch (error) {
@@ -32,6 +36,13 @@ export async function getEndpoint(endpoint: string) {
                 'ngrok-skip-browser-warning': 'true'
             }
         });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Server Response Error:", errorText);
+            throw new Error(`Server Error: ${response.status}`);
+        }
+
         const data = await response.json();
         return data;
     } catch (error) {
@@ -47,11 +58,19 @@ export async function postFileEndpoint(endpoint: string, formData: FormData) {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
-                'Content-Type': 'multipart/form-data',
                 'ngrok-skip-browser-warning': 'true'
+                // Wag lagyan ng Content-Type, RN handles it
             },
             body: formData
         });
+
+        // 🚀 KUNG MAY ERROR ANG SERVER (HAL. 500 INTERNAL SERVER ERROR)
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Server Response Error:", errorText);
+            throw new Error(`Server Error: ${response.status} - ${errorText.substring(0, 100)}`);
+        }
+
         const data = await response.json();
         return data;
     } catch (error) {

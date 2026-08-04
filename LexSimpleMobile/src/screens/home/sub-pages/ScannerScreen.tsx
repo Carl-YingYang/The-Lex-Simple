@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Network from 'expo-network';
 import { postEndpoint } from '../../../services/AiEngine';
+import { Linking } from 'react-native';
 
 import { COLORS, SCAN_FRAME_HEIGHT } from '../../../theme/globalStyles';
 import ProcessingLoader from '../../../components/ProcessingLoader';
@@ -62,13 +63,25 @@ export default function ScannerScreen({ navigation }: any) {
   }, [isCameraOpen, capturedImage]);
 
   const handleOpenCamera = async () => {
-    if (permission?.granted) setIsCameraOpen(true);
-    else {
-      const result = await requestPermission();
-      if (result.granted) setIsCameraOpen(true);
-      else {
-        showAlert("Permission Required", "Kailangan ng camera access para makapag-scan.", "warning", [{ text: "OK", style: "cancel", onPress: () => navigation.goBack() }]);
-      }
+    if (permission?.granted) {
+      setIsCameraOpen(true);
+      return;
+    }
+
+    const result = await requestPermission();
+    if (result.granted) {
+      setIsCameraOpen(true);
+    } else {
+      // 🚀 KUNG DENIED, IPAKITA ANG OPTION NA PUMUNTA SA SETTINGS
+      showAlert(
+        "Kailangan ng Camera Access",
+        "Para makapag-scan ng dokumento, kailangan namin ng pahintulot na gamitin ang camera mo. Pinindot mo yata ang 'Deny' kanina.",
+        "warning",
+        [
+          { text: "Bumalik", style: "cancel", onPress: () => navigation.goBack() },
+          { text: "Pumunta sa Settings", onPress: () => Linking.openSettings() }
+        ]
+      );
     }
   };
 

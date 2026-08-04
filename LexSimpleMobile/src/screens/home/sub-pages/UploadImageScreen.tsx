@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, ActivityIndicator, StatusBar } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,7 +13,6 @@ import ScreenLayout from '../../../components/ScreenLayout';
 import ProcessingLoader from '../../../components/ProcessingLoader';
 import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
 import { postEndpoint } from '../../../services/AiEngine';
-// 🚀 IMPORT GLOBAL THEME
 import { useTheme } from '../../../theme/ThemeContext';
 
 // 💡 IMPORT ANG ATING LOCAL PII SCRUBBER
@@ -23,7 +23,6 @@ export default function UploadImageScreen({ navigation }: any) {
   const hasInitialized = useRef(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  // 🎨 KUNIN ANG THEME COLORS
   const { isDarkMode, colors: T } = useTheme();
 
   const LOADING_MESSAGES = [
@@ -94,9 +93,28 @@ export default function UploadImageScreen({ navigation }: any) {
   };
 
   const pickImage = async () => {
+    // 🚀 MAG-CHECK MUNA NG PERMISSION BAGO MAG-OPEN NG GALLERY
+    const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+    if (status !== 'granted') {
+      const { status: newStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (newStatus !== 'granted') {
+        showAlert(
+          "Kailangan ng Gallery Access",
+          "Para makapag-upload ng litrato, kailangan namin ng pahintulot na ma-access ang gallery mo. Pinindot mo yata ang 'Deny' kanina.",
+          "warning",
+          [
+            { text: "Bumalik", style: "cancel", onPress: () => navigation.goBack() },
+            { text: "Pumunta sa Settings", onPress: () => Linking.openSettings() }
+          ]
+        );
+        return; // Itigil ang function kung walang permission
+      }
+    }
+
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 1
       });
@@ -149,7 +167,6 @@ export default function UploadImageScreen({ navigation }: any) {
     try {
       const locallySanitizedText = sanitizeLocalText(extractedText);
 
-      // 🆕 GUMAMIT NG CENTRALIZED API ENGINE
       const data = await postEndpoint('/simplify', {
         text: locallySanitizedText
       });
@@ -201,30 +218,32 @@ export default function UploadImageScreen({ navigation }: any) {
     );
   };
 
-  // 🟢 ANALYZING UI
   if (isAnalyzing) {
     return (
-      <ScreenLayout title="Processing Image" showBackButton={false}>
-        <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
-          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-          <ProcessingLoader title="Analyzing Image" messages={LOADING_MESSAGES} />
-        </View>
+      <>
+        <ScreenLayout title="Processing Image" showBackButton={false}>
+          <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center' }}>
+            <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+            <ProcessingLoader title="Analyzing Image" messages={LOADING_MESSAGES} />
+          </View>
+        </ScreenLayout>
         <AlertRender />
-      </ScreenLayout>
+      </>
     );
   }
 
-  // ⏳ DEFAULT LOADING STATE
   return (
-    <ScreenLayout title="Opening Gallery">
-      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <ActivityIndicator size="large" color={COLORS.primaryLight} />
-        <Text style={{ color: T.subText, marginTop: 15, fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 }}>
-          Loading Library...
-        </Text>
-      </View>
-      <AlertRender />
-    </ScreenLayout>
+    <>
+      <ScreenLayout title="Opening Gallery">
+        <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
+          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+          <ActivityIndicator size="large" color={COLORS.primaryLight} />
+          <Text style={{ color: T.subText, marginTop: 15, fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 }}>
+            Loading Library...
+          </Text>
+        </View>
+        <AlertRender />
+      </ScreenLayout>
+    </>
   );
 }
