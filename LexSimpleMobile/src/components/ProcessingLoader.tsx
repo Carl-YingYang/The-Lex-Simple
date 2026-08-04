@@ -21,7 +21,7 @@ export default function ProcessingLoader({
   ],
   onMinimize
 }: ProcessingLoaderProps) {
-  const { isDarkMode, colors: T } = useTheme();
+  const { colors: T } = useTheme();
   const [progress, setProgress] = useState(0);
   const [step, setStep] = useState(0);
   const pulseAnim = useRef(new Animated.Value(1)).current;

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, globalStyles } from '../theme/globalStyles';
+import { useTheme } from '../theme/ThemeContext';
 
 interface ClauseCardProps {
   item: {
@@ -12,14 +13,14 @@ interface ClauseCardProps {
     confidence?: string;
   };
   themeConfig: { mainColor: string; icon: string; label: string };
-  ragContext?: string; // 💡 NEW: Tinatanggap na niya ang buong database extract!
+  ragContext?: string;
   onShowLegalBasis: (item: any) => void;
-  // 💡 NEW: Nagpasa na tayo ng 4th parameter para sa nakuhang Legal Basis
   onAskAiDeepDive: (item: any, initialPrompt?: string, suggestedPrompts?: string[], legalBasis?: string) => void;
 }
 
 export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalBasis, onAskAiDeepDive }: ClauseCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { colors: T } = useTheme();
 
   const shouldTruncate = item.foundText.length > 120;
   const displaySnippet = (!isExpanded && shouldTruncate)
@@ -46,7 +47,6 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
     return [`Bakit risky ang ${item.title}?`, "Pwede ko ba itong ipatanggal?", "Paki-explain nang mas simple."];
   }, [item.title]);
 
-  // 💡 THE MAGIC: Si Clause Card na mismo ang hahanap ng Article sa Database!
   const extractLegalBasis = () => {
     if (!ragContext || ragContext.trim() === "") return null;
     const chunks = ragContext.split('\n---\n').map(c => c.trim()).filter(c => c.length > 0);
@@ -63,72 +63,69 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
   };
 
   return (
-    <View style={globalStyles.result_findingCard}>
+    <View style={[globalStyles.result_findingCard, { backgroundColor: T.card, borderColor: T.border, borderRadius: 12 }]}>
       {/* ── HEADER ── */}
-      <View style={globalStyles.result_findingHeader}>
-        <Ionicons name="alert-circle" size={22} color={themeConfig.mainColor} />
-        <Text style={globalStyles.result_findingTitle}>{item.title}</Text>
+      <View style={[globalStyles.result_findingHeader, { marginBottom: 8 }]}>
+        <Ionicons name="alert-circle" size={20} color={themeConfig.mainColor} />
+        <Text style={[globalStyles.result_findingTitle, { color: T.text, fontSize: 16 }]}>{item.title}</Text>
       </View>
 
-      <View style={globalStyles.result_aiTagBox}>
+      <View style={[globalStyles.result_aiTagBox, { backgroundColor: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.2)', borderRadius: 6, marginBottom: 12 }]}>
         <Ionicons name="analytics" size={12} color={COLORS.primaryLight} />
-        <Text style={globalStyles.result_aiTagText}>AI Confidence: {item.confidence || '90%'}</Text>
+        <Text style={[globalStyles.result_aiTagText, { color: COLORS.primaryLight }]}>AI Confidence: {item.confidence || '90%'}</Text>
       </View>
 
-      <Text style={globalStyles.result_label}>Explanation:</Text>
-      <Text style={globalStyles.result_descText}>{item.description}</Text>
+      <Text style={[globalStyles.result_label, { color: T.subText, marginBottom: 4 }]}>Explanation:</Text>
+      <Text style={[globalStyles.result_descText, { color: T.text, marginBottom: 12 }]}>{item.description}</Text>
 
-      <View style={[globalStyles.result_adviceBox, { borderLeftColor: themeConfig.mainColor }]}>
-        <Text style={[globalStyles.result_adviceTitle, { color: themeConfig.mainColor }]}>💡 Practical Advice:</Text>
-        <Text style={globalStyles.result_adviceText}>{item.advice}</Text>
+      <View style={[globalStyles.result_adviceBox, { borderLeftColor: themeConfig.mainColor, backgroundColor: T.bg, borderRadius: 8, marginBottom: 16 }]}>
+        <Text style={[globalStyles.result_adviceTitle, { color: themeConfig.mainColor, marginBottom: 4 }]}>💡 Practical Advice:</Text>
+        <Text style={[globalStyles.result_adviceText, { color: T.text }]}>{item.advice}</Text>
       </View>
 
-      <Text style={globalStyles.result_label}>Original Clause (OCR):</Text>
-      <View style={globalStyles.result_snippetBox}>
-        <Text style={globalStyles.result_snippetText}>"{displaySnippet}"</Text>
+      <Text style={[globalStyles.result_label, { color: T.subText, marginBottom: 4 }]}>Original Clause (OCR):</Text>
+      <View style={[globalStyles.result_snippetBox, { backgroundColor: T.bg, borderColor: T.border, borderRadius: 8, marginBottom: 16 }]}>
+        <Text style={[globalStyles.result_snippetText, { color: T.subText }]}>"{displaySnippet}"</Text>
         {shouldTruncate && (
           <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={globalStyles.result_expandBtn}>
-            <Text style={globalStyles.result_expandBtnText}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
+            <Text style={[globalStyles.result_expandBtnText, { color: COLORS.primaryLight }]}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      <TouchableOpacity style={globalStyles.result_dbButton} onPress={() => onShowLegalBasis(item)}>
+      <TouchableOpacity style={[globalStyles.result_dbButton, { backgroundColor: T.bg, borderColor: T.border, borderRadius: 8 }]} onPress={() => onShowLegalBasis(item)}>
         <Ionicons name="library" size={16} color={COLORS.primaryLight} />
-        <Text style={globalStyles.result_dbButtonText}>View Legal Basis</Text>
+        <Text style={[globalStyles.result_dbButtonText, { color: COLORS.primaryLight }]}>View Legal Basis</Text>
         <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} />
       </TouchableOpacity>
 
       {/* ── PREMIUM REDIRECT UI ── */}
-      <View style={{ marginTop: 25, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
-        <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+      <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: T.border }}>
+        <Text style={{ color: T.subText, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
           Ask AI About This Clause
         </Text>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
           {dynamicPrompts.map((prompt, i) => (
             <TouchableOpacity
               key={i}
-              // 💡 IPINAPASA NA NATIN ANG LEGAL BASIS (ARTICLE) SA ON-CLICK!
               onPress={() => onAskAiDeepDive(item, prompt, dynamicPrompts, extractLegalBasis() || undefined)}
-              style={{ backgroundColor: '#1e293b', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#334155' }}
+              style={{ backgroundColor: T.bg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: T.border }}
             >
-              <Text style={{ color: '#cbd5e1', fontSize: 12, fontWeight: 'bold' }}>{prompt}</Text>
+              <Text style={{ color: T.text, fontSize: 12, fontWeight: 'bold' }}>{prompt}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
 
         <TouchableOpacity
-          style={{ flexDirection: 'row', backgroundColor: 'rgba(129, 140, 248, 0.1)', paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(129, 140, 248, 0.3)' }}
-          // 💡 IPINAPASA NA NATIN ANG LEGAL BASIS (ARTICLE) SA ON-CLICK!
+          style={{ flexDirection: 'row', backgroundColor: 'rgba(167, 139, 250, 0.1)', paddingVertical: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.3)' }}
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts, extractLegalBasis() || undefined)}
         >
-          <Ionicons name="chatbubbles" size={18} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-          <Text style={{ color: COLORS.primaryLight, fontSize: 14, fontWeight: 'bold' }}>Discuss in Ask AI</Text>
-          <Ionicons name="arrow-forward" size={16} color={COLORS.primaryLight} style={{ position: 'absolute', right: 15 }} />
+          <Ionicons name="chatbubbles" size={16} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
+          <Text style={{ color: COLORS.primaryLight, fontSize: 13, fontWeight: 'bold' }}>Discuss in Ask AI</Text>
+          <Ionicons name="arrow-forward" size={14} color={COLORS.primaryLight} style={{ position: 'absolute', right: 12 }} />
         </TouchableOpacity>
       </View>
-
     </View>
   );
 }

@@ -81,13 +81,22 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
 
   const showFullInfo = (item: any) => {
     setActiveTitle(item.title);
-    if (!result.rag_context_used || result.rag_context_used.trim() === "") { setSelectedDbInfo("No matching statutory provision found in the local database."); setModalVisible(true); return; }
+    if (!result.rag_context_used || result.rag_context_used.trim() === "") {
+      setSelectedDbInfo("No matching statutory provision found in the local database.");
+      setModalVisible(true);
+      return;
+    }
     const chunks = result.rag_context_used.split('\n---\n').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
     const extractKeywords = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
     const findingKeywords = extractKeywords(`${item.title} ${item.description} ${item.foundText}`);
     let bestChunk = null; let highestScore = 0;
-    chunks.forEach((chunk: string) => { const chunkLower = chunk.toLowerCase(); let score = 0; findingKeywords.forEach(word => { if (chunkLower.includes(word)) score++; }); if (score > highestScore) { highestScore = score; bestChunk = chunk; } });
-    if (bestChunk && highestScore > 0) setSelectedDbInfo(`⚖️ Statutory Provision:\n\n${bestChunk}`);
+    chunks.forEach((chunk: string) => {
+      const chunkLower = chunk.toLowerCase(); let score = 0;
+      findingKeywords.forEach(word => { if (chunkLower.includes(word)) score++; });
+      if (score > highestScore) { highestScore = score; bestChunk = chunk; }
+    });
+    // 🚀 TINANGGAL ANG EMOJI PARA MAS PROFESSIONAL
+    if (bestChunk && highestScore > 0) setSelectedDbInfo(`Statutory Provision:\n\n${bestChunk}`);
     else setSelectedDbInfo("No matching statutory provision found in the local database.");
     setModalVisible(true);
   };
