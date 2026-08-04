@@ -1,7 +1,6 @@
 import React from 'react';
-import { View, ScrollView, TouchableOpacity, Pressable, StyleSheet, Text, StatusBar } from 'react-native';
+import { View, ScrollView, TouchableOpacity, Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, globalStyles } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
 
 interface ModalSheetProps {
@@ -23,38 +22,41 @@ export default function ModalSheet({
     maxHeightPercent = '86%',
     showsVerticalScrollIndicator = true,
 }: ModalSheetProps) {
-    const { isDarkMode, colors: T } = useTheme();
+    const { colors: T } = useTheme();
 
     return (
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)' }}>
+        <View style={styles.overlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
             <View
                 style={[
-                    globalStyles.result_modalCenterBox,
+                    styles.sheetContainer,
                     {
                         maxHeight: maxHeightPercent,
                         backgroundColor: T.card,
-                        borderColor: T.border,
-                        borderRadius: 12 // Sharp corner
-                    },
+                        borderColor: T.border
+                    }
                 ]}
             >
                 {/* HEADER */}
-                <View style={[globalStyles.result_modalHeaderArea, { backgroundColor: T.bg, borderBottomColor: T.border }]}>
-                    <View style={globalStyles.result_modalHeaderTitleArea}>
-                        <Ionicons name={iconName as any} size={20} color={iconColor} style={{ marginRight: 8 }} />
-                        <Text style={[globalStyles.result_modalTitleText, { color: T.text }]} numberOfLines={1}>
+                <View style={[styles.header, { borderBottomColor: T.border, backgroundColor: T.bg }]}>
+                    <View style={styles.headerTitleArea}>
+                        <Ionicons name={iconName as any} size={20} color={iconColor} style={{ marginRight: 10 }} />
+                        <Text style={[styles.title, { color: T.text }]} numberOfLines={1}>
                             {title}
                         </Text>
                     </View>
-                    <TouchableOpacity onPress={onClose} style={globalStyles.detailModal_closeBtn}>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={[styles.closeBtn, { backgroundColor: T.card, borderColor: T.border }]}
+                    >
                         <Ionicons name="close" size={18} color={T.text} />
                     </TouchableOpacity>
                 </View>
 
                 {/* BODY */}
                 <ScrollView
-                    style={globalStyles.result_modalBodyArea}
+                    style={styles.body}
+                    contentContainerStyle={{ padding: 20 }}
                     showsVerticalScrollIndicator={showsVerticalScrollIndicator}
                 >
                     {children}
@@ -63,3 +65,55 @@ export default function ModalSheet({
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.85)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+    },
+    sheetContainer: {
+        width: '100%',
+        maxWidth: 500,
+        borderRadius: 12,
+        borderWidth: 1,
+        overflow: 'hidden',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+        shadowOffset: { width: 0, height: 10 },
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+    },
+    headerTitleArea: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 10,
+    },
+    title: {
+        fontSize: 16,
+        fontWeight: '700',
+        letterSpacing: 0.3,
+    },
+    closeBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+    },
+    body: {
+        flex: 1,
+    }
+});

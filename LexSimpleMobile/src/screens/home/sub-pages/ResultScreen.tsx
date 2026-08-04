@@ -21,28 +21,22 @@ interface AnalysisResult {
   sanitizedText?: string;
 }
 
-// 🚀 NEW COMPONENT: Expandable Finding Item
-const ExpandableFinding = ({ f, index, itemDeduction, T }: any) => {
+// 🚀 EXPANDABLE FINDING COMPONENT
+const ExpandableFinding = ({ f, itemDeduction, T }: any) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  // Check kung malamang sobra sa 3 lines ang text (approx 80 chars)
   const isLongText = f.description.length > 80;
 
   return (
-    <View style={{ marginBottom: 18 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Text style={[localStyles.findingTitle, { color: T.text }]}>{f.title}</Text>
-        <Text style={localStyles.findingDeduction}>-{itemDeduction}</Text>
+    <View style={{ marginBottom: 16 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+        <Text style={{ color: T.text, fontSize: 13, fontWeight: 'bold', flex: 1, paddingRight: 10, lineHeight: 18 }}>{f.title}</Text>
+        <Text style={{ color: COLORS.danger, fontSize: 14, fontWeight: '900' }}>-{itemDeduction}</Text>
       </View>
-
-      <Text
-        style={[localStyles.findingDesc, { color: T.subText }]}
-        numberOfLines={isExpanded ? undefined : 3}
-      >
-        Bakit: {f.description}
+      <Text style={{ color: T.subText, fontSize: 12, lineHeight: 18 }} numberOfLines={isExpanded ? undefined : 3}>
+        {f.description}
       </Text>
-
       {isLongText && (
-        <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 4, alignSelf: 'flex-start' }}>
+        <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 6, alignSelf: 'flex-start' }}>
           <Text style={{ color: COLORS.primaryLight, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase' }}>
             {isExpanded ? 'See Less' : 'See More'}
           </Text>
@@ -62,7 +56,6 @@ export default function ResultScreen({ route, navigation }: any) {
 
   const result: AnalysisResult = analysisResult || { score: 100, riskLevel: 'Very Safe', findings: [] };
 
-  // 🎨 KUNIN ANG THEME COLORS
   const { isDarkMode, colors: T } = useTheme();
 
   const memoizedSanitizedText = useMemo(() => {
@@ -108,8 +101,9 @@ export default function ResultScreen({ route, navigation }: any) {
       if (score > highestScore) { highestScore = score; bestChunk = chunk; }
     });
 
+    // 🚀 TINANGGAL ANG EMOJI PARA MAS PROFESSIONAL
     if (bestChunk && highestScore > 0) {
-      setSelectedDbInfo(`⚖️ Statutory Provision:\n\n${bestChunk}`);
+      setSelectedDbInfo(`Statutory Provision:\n\n${bestChunk}`);
     } else {
       setSelectedDbInfo("No matching statutory provision found in the local database.");
     }
@@ -272,7 +266,6 @@ export default function ResultScreen({ route, navigation }: any) {
                   result.findings.map((f, i) => {
                     const itemDeduction = baseDeduction + (i === 0 ? remainderDeduction : 0);
                     return (
-                      // 🚀 GUMAMIT NG EXPANDABLE COMPONENT DITO
                       <ExpandableFinding
                         key={i}
                         f={f}
@@ -354,7 +347,7 @@ const localStyles = StyleSheet.create({
   },
   scoreBreakdownBox: {
     padding: 16,
-    borderRadius: 8, // Sharp corner
+    borderRadius: 10, // Sharp corner
     borderWidth: 1,
     marginBottom: 20
   },
@@ -368,9 +361,6 @@ const localStyles = StyleSheet.create({
   },
   scoreLabelText: { fontWeight: 'bold', fontSize: 14 },
   scoreValueSuccess: { color: COLORS.success, fontWeight: '900', fontSize: 16 },
-  findingTitle: { fontSize: 13, fontWeight: 'bold', flex: 1, paddingRight: 10, lineHeight: 20 },
-  findingDeduction: { color: COLORS.danger, fontSize: 14, fontWeight: '900' },
-  findingDesc: { fontSize: 11, marginTop: 4, lineHeight: 18 },
   scoreFinalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -391,7 +381,7 @@ const localStyles = StyleSheet.create({
   },
   documentPaper: {
     padding: 16,
-    borderRadius: 8, // Sharp corner
+    borderRadius: 10, // Sharp corner
     borderWidth: 1,
     marginVertical: 10
   },

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, globalStyles } from '../theme/globalStyles';
+import { COLORS } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
 
 interface ClauseCardProps {
@@ -29,21 +29,11 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
   const dynamicPrompts = useMemo(() => {
     const t = item.title.toLowerCase();
-    if (t.match(/payment|fee|interest|rent|bayad|price|cost|penalty/)) {
-      return ["May hidden charges ba rito?", "Ano mangyayari kung ma-late ako ng bayad?", "Pwede ba itong i-negotiate?"];
-    }
-    if (t.match(/terminate|cancel|end|alis|evict|rescind/)) {
-      return ["May penalty ba kung i-cancel ko ito?", "Ilang days ang kailangang notice?", "Paano ko ito tatapusin nang legal?"];
-    }
-    if (t.match(/liability|damage|risk|sira|indemnify|responsibility/)) {
-      return ["Sino ang magbabayad kapag may nasira?", "Ano ang worst-case scenario rito?", "Paano ko lilimitahan ang risk ko?"];
-    }
-    if (t.match(/confidential|data|privacy|secret/)) {
-      return ["Ligtas ba ang personal info ko rito?", "Kanino nila pwedeng i-share ang data ko?", "Pwede ko ba itong ipabura?"];
-    }
-    if (t.match(/default|breach|violation|labag|entry|access/)) {
-      return ["Ano ang mangyayari kung lumabag ako rito?", "Legal ba ang ginagawa nilang ito?", "Paano ko ito maiiwasan?"];
-    }
+    if (t.match(/payment|fee|interest|rent|bayad|price|cost|penalty/)) return ["May hidden charges ba rito?", "Ano mangyayari kung ma-late ako ng bayad?", "Pwede ba itong i-negotiate?"];
+    if (t.match(/terminate|cancel|end|alis|evict|rescind/)) return ["May penalty ba kung i-cancel ko ito?", "Ilang days ang kailangang notice?", "Paano ko ito tatapusin nang legal?"];
+    if (t.match(/liability|damage|risk|sira|indemnify|responsibility/)) return ["Sino ang magbabayad kapag may nasira?", "Ano ang worst-case scenario rito?", "Paano ko lilimitahan ang risk ko?"];
+    if (t.match(/confidential|data|privacy|secret/)) return ["Ligtas ba ang personal info ko rito?", "Kanino nila pwedeng i-share ang data ko?", "Pwede ko ba itong ipabura?"];
+    if (t.match(/default|breach|violation|labag|entry|access/)) return ["Ano ang mangyayari kung lumabag ako rito?", "Legal ba ang ginagawa nilang ito?", "Paano ko ito maiiwasan?"];
     return [`Bakit risky ang ${item.title}?`, "Pwede ko ba itong ipatanggal?", "Paki-explain nang mas simple."];
   }, [item.title]);
 
@@ -63,69 +53,205 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
   };
 
   return (
-    <View style={[globalStyles.result_findingCard, { backgroundColor: T.card, borderColor: T.border, borderRadius: 12 }]}>
-      {/* ── HEADER ── */}
-      <View style={[globalStyles.result_findingHeader, { marginBottom: 8 }]}>
+    <View style={[styles.card, { backgroundColor: T.card, borderColor: T.border }]}>
+      {/* HEADER */}
+      <View style={styles.header}>
         <Ionicons name="alert-circle" size={20} color={themeConfig.mainColor} />
-        <Text style={[globalStyles.result_findingTitle, { color: T.text, fontSize: 16 }]}>{item.title}</Text>
+        <Text style={[styles.title, { color: T.text }]}>{item.title}</Text>
       </View>
 
-      <View style={[globalStyles.result_aiTagBox, { backgroundColor: 'rgba(167, 139, 250, 0.1)', borderColor: 'rgba(167, 139, 250, 0.2)', borderRadius: 6, marginBottom: 12 }]}>
+      <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.border }]}>
         <Ionicons name="analytics" size={12} color={COLORS.primaryLight} />
-        <Text style={[globalStyles.result_aiTagText, { color: COLORS.primaryLight }]}>AI Confidence: {item.confidence || '90%'}</Text>
+        <Text style={[styles.tagText, { color: COLORS.primaryLight }]}>AI Confidence: {item.confidence || '90%'}</Text>
       </View>
 
-      <Text style={[globalStyles.result_label, { color: T.subText, marginBottom: 4 }]}>Explanation:</Text>
-      <Text style={[globalStyles.result_descText, { color: T.text, marginBottom: 12 }]}>{item.description}</Text>
+      <Text style={[styles.label, { color: T.subText }]}>Explanation</Text>
+      <Text style={[styles.description, { color: T.text }]}>{item.description}</Text>
 
-      <View style={[globalStyles.result_adviceBox, { borderLeftColor: themeConfig.mainColor, backgroundColor: T.bg, borderRadius: 8, marginBottom: 16 }]}>
-        <Text style={[globalStyles.result_adviceTitle, { color: themeConfig.mainColor, marginBottom: 4 }]}>💡 Practical Advice:</Text>
-        <Text style={[globalStyles.result_adviceText, { color: T.text }]}>{item.advice}</Text>
+      {/* 🚀 EVEN BORDER AROUND ALL SIDES WITH THEME COLOR */}
+      <View style={[styles.adviceBox, { backgroundColor: T.bg, borderColor: themeConfig.mainColor }]}>
+        <Text style={[styles.adviceLabel, { color: themeConfig.mainColor }]}>Practical Advice</Text>
+        <Text style={[styles.adviceText, { color: T.text }]}>{item.advice}</Text>
       </View>
 
-      <Text style={[globalStyles.result_label, { color: T.subText, marginBottom: 4 }]}>Original Clause (OCR):</Text>
-      <View style={[globalStyles.result_snippetBox, { backgroundColor: T.bg, borderColor: T.border, borderRadius: 8, marginBottom: 16 }]}>
-        <Text style={[globalStyles.result_snippetText, { color: T.subText }]}>"{displaySnippet}"</Text>
+      <Text style={[styles.label, { color: T.subText }]}>Original Clause (OCR)</Text>
+      <View style={[styles.snippetBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+        <Text style={[styles.snippetText, { color: T.subText }]}>"{displaySnippet}"</Text>
         {shouldTruncate && (
-          <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={globalStyles.result_expandBtn}>
-            <Text style={[globalStyles.result_expandBtnText, { color: COLORS.primaryLight }]}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
+          <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={styles.expandBtn}>
+            <Text style={[styles.expandBtnText, { color: COLORS.primaryLight }]}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      <TouchableOpacity style={[globalStyles.result_dbButton, { backgroundColor: T.bg, borderColor: T.border, borderRadius: 8 }]} onPress={() => onShowLegalBasis(item)}>
+      <TouchableOpacity
+        style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.border }]}
+        onPress={() => onShowLegalBasis(item)}
+      >
         <Ionicons name="library" size={16} color={COLORS.primaryLight} />
-        <Text style={[globalStyles.result_dbButtonText, { color: COLORS.primaryLight }]}>View Legal Basis</Text>
-        <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} />
+        <Text style={[styles.basisBtnText, { color: COLORS.primaryLight }]}>View Legal Basis</Text>
+        <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
 
-      {/* ── PREMIUM REDIRECT UI ── */}
-      <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: T.border }}>
-        <Text style={{ color: T.subText, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
-          Ask AI About This Clause
-        </Text>
+      {/* ASK AI SECTION */}
+      <View style={[styles.askAiSection, { borderTopColor: T.border }]}>
+        <Text style={[styles.askAiLabel, { color: T.subText }]}>Ask AI About This Clause</Text>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsScroll}>
           {dynamicPrompts.map((prompt, i) => (
             <TouchableOpacity
               key={i}
               onPress={() => onAskAiDeepDive(item, prompt, dynamicPrompts, extractLegalBasis() || undefined)}
-              style={{ backgroundColor: T.bg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: T.border }}
+              style={[styles.promptChip, { backgroundColor: T.bg, borderColor: T.border }]}
             >
-              <Text style={{ color: T.text, fontSize: 12, fontWeight: 'bold' }}>{prompt}</Text>
+              <Text style={[styles.promptText, { color: T.text }]}>{prompt}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
 
         <TouchableOpacity
-          style={{ flexDirection: 'row', backgroundColor: 'rgba(167, 139, 250, 0.1)', paddingVertical: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.3)' }}
+          style={[styles.discussBtn, { borderColor: COLORS.primaryLight }]}
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts, extractLegalBasis() || undefined)}
         >
           <Ionicons name="chatbubbles" size={16} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-          <Text style={{ color: COLORS.primaryLight, fontSize: 13, fontWeight: 'bold' }}>Discuss in Ask AI</Text>
-          <Ionicons name="arrow-forward" size={14} color={COLORS.primaryLight} style={{ position: 'absolute', right: 12 }} />
+          <Text style={[styles.discussBtnText, { color: COLORS.primaryLight }]}>Discuss in Ask AI</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  card: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 8,
+    flex: 1,
+  },
+  tagContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  tagText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 4,
+    textTransform: 'uppercase',
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  description: {
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  adviceBox: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1.5, // 🚀 Clean uniform border
+    marginBottom: 16,
+  },
+  adviceLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  adviceText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  snippetBox: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  snippetText: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 20,
+  },
+  expandBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  expandBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  basisBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 20,
+  },
+  basisBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  askAiSection: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+  },
+  askAiLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+  },
+  promptsScroll: {
+    marginBottom: 12,
+  },
+  promptChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  promptText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  discussBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: 'rgba(167, 139, 250, 0.05)'
+  },
+  discussBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  }
+});

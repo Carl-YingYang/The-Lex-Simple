@@ -207,7 +207,14 @@ export default function ScanScreen({ navigation }: any) {
 
                 {/* TAPPABLE THUMBNAIL */}
                 <TouchableOpacity
-                  style={[localStyles.thumbnailWrapper, { backgroundColor: T.bg, borderLeftWidth: 4, borderLeftColor: item.status === 'scanned' ? '#6D28D9' : T.border }]}
+                  style={[
+                    localStyles.thumbnailWrapper,
+                    {
+                      backgroundColor: item.type === 'document' ? T.bg : T.border,
+                      borderWidth: 1,
+                      borderColor: T.border
+                    }
+                  ]}
                   activeOpacity={0.8}
                   onPress={() => {
                     if (item.type === 'document') {
@@ -220,7 +227,11 @@ export default function ScanScreen({ navigation }: any) {
                   {item.type === 'document' ? (
                     <Ionicons name="document-text" size={28} color={COLORS.primaryLight} />
                   ) : (
-                    <Image source={{ uri: item.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="cover"
+                    />
                   )}
                 </TouchableOpacity>
 
@@ -346,13 +357,13 @@ const localStyles = StyleSheet.create({
     alignItems: 'center'
   },
   thumbnailWrapper: {
-    width: 56, // Compact
+    width: 56,
     height: 56,
     borderRadius: 10,
     marginRight: 14,
     overflow: 'hidden',
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   historyContent: {
     flex: 1,

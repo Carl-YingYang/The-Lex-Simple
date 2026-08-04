@@ -1,19 +1,37 @@
 import React, { createContext, useContext, useState } from 'react';
+import { Alert } from 'react-native';
+import { navigate } from '../navigation/RootNavigation';
 
 const BackgroundProcessContext = createContext({
     isProcessing: false,
-    startProcess: (p0: () => Promise<any>, p1: string) => { },
-    endProcess: () => { }
+    processRoute: '',
+    startProcess: async (task: () => Promise<any>, routeName: string) => { },
 });
 
 export const BackgroundProcessProvider = ({ children }: any) => {
     const [isProcessing, setIsProcessing] = useState(false);
+    const [processRoute, setProcessRoute] = useState('');
 
-    const startProcess = () => setIsProcessing(true);
-    const endProcess = () => setIsProcessing(false);
+    const startProcess = async (task: () => Promise<any>, routeName: string) => {
+        setIsProcessing(true);
+        setProcessRoute(routeName);
+
+        try {
+            const result = await task();
+            if (result) {
+                // 🚀 GUMAMIT NA TAYO NG GLOBAL NAVIGATE, HINDI NA MAGCCRASH ITO
+                navigate('ResultScreen', { analysisResult: result });
+            }
+        } catch (error: any) {
+            Alert.alert("Error", error.message || "Nagkaproblema sa background process.");
+        } finally {
+            setIsProcessing(false);
+            setProcessRoute('');
+        }
+    };
 
     return (
-        <BackgroundProcessContext.Provider value={{ isProcessing, startProcess, endProcess }}>
+        <BackgroundProcessContext.Provider value={{ isProcessing, processRoute, startProcess }}>
             {children}
         </BackgroundProcessContext.Provider>
     );
