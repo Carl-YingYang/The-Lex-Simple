@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet, StatusBar } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet, StatusBar, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { COLORS, globalStyles } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import ClauseCard from '../../../components/ClauseCard';
 import { useTheme } from '../../../theme/ThemeContext';
+
+// 🚀 IMPORT ANG CUSTOM ICON PARA SA FLOATING BUTTON
+const MessageAiIcon = require('../../../../assets/icons/message_ai.png');
 
 interface AnalysisResult {
   score: number;
@@ -22,7 +25,7 @@ interface AnalysisResult {
 }
 
 // 🚀 EXPANDABLE FINDING COMPONENT
-const ExpandableFinding = ({ f, itemDeduction, T }: any) => {
+const ExpandableFinding = ({ f, index, itemDeduction, T }: any) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const isLongText = f.description.length > 80;
 
@@ -101,7 +104,6 @@ export default function ResultScreen({ route, navigation }: any) {
       if (score > highestScore) { highestScore = score; bestChunk = chunk; }
     });
 
-    // 🚀 TINANGGAL ANG EMOJI PARA MAS PROFESSIONAL
     if (bestChunk && highestScore > 0) {
       setSelectedDbInfo(`Statutory Provision:\n\n${bestChunk}`);
     } else {
@@ -202,7 +204,7 @@ export default function ResultScreen({ route, navigation }: any) {
 
           {/* DPA PIPELINE BOX */}
           <TouchableOpacity
-            style={[globalStyles.result_noticeBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)', marginTop: 5, paddingVertical: 14 }]}
+            style={[globalStyles.result_noticeBox, { backgroundColor: T.card, borderColor: T.border, marginTop: 5, paddingVertical: 14 }]}
             onPress={() => navigation.navigate('SanitizedOcrScreen', { sanitizedText: memoizedSanitizedText })}
           >
             <Ionicons name="shield-checkmark" size={24} color={COLORS.success} style={{ marginRight: 12 }} />
@@ -235,9 +237,11 @@ export default function ResultScreen({ route, navigation }: any) {
         </ScrollView>
       </View>
 
-      {/* FLOATING ASK AI BUTTON */}
+      {/* 🚀 FLOATING ASK AI BUTTON (Meta AI Style Pill) */}
       <TouchableOpacity style={localStyles.fabButton} onPress={handleFullDocDeepDive}>
-        <Ionicons name="sparkles" size={24} color="white" />
+        {/* 🚀 FULLY WHITE ICON */}
+        <Image source={MessageAiIcon} style={[localStyles.fabIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
+        <Text style={localStyles.fabText}>Ask AI</Text>
       </TouchableOpacity>
 
       {/* SCORE BREAKDOWN MODAL */}
@@ -330,14 +334,16 @@ export default function ResultScreen({ route, navigation }: any) {
 const localStyles = StyleSheet.create({
   fabButton: {
     position: 'absolute',
-    bottom: 24,
-    right: 16,
-    backgroundColor: COLORS.primaryLight,
-    width: 56,
-    height: 56,
-    borderRadius: 12, // Sharp corner
-    justifyContent: 'center',
+    bottom: 30,
+    right: 20,
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#4910bc', // Solid Purple
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 30, // Pill shape
+    borderWidth: 2, // 🚀 Solid Border
+    borderColor: '#FFFFFF', // 🚀 Solid White Border
     elevation: 8,
     shadowColor: '#000',
     shadowOpacity: 0.3,
@@ -345,9 +351,19 @@ const localStyles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     zIndex: 999
   },
+  fabIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 10,
+  },
+  fabText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
   scoreBreakdownBox: {
     padding: 16,
-    borderRadius: 10, // Sharp corner
+    borderRadius: 8,
     borderWidth: 1,
     marginBottom: 20
   },
@@ -381,7 +397,7 @@ const localStyles = StyleSheet.create({
   },
   documentPaper: {
     padding: 16,
-    borderRadius: 10, // Sharp corner
+    borderRadius: 8,
     borderWidth: 1,
     marginVertical: 10
   },

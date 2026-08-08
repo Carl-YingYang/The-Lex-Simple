@@ -1,8 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
+
+// 🚀 IMPORT ANG MGA CUSTOM ICONS
+const ConfidenceIcon = require('../../assets/icons/confidence_chart.png');
+const LibraryIcon = require('../../assets/icons/library.png');
+const MessageAiIcon = require('../../assets/icons/message_ai.png');
 
 interface ClauseCardProps {
   item: {
@@ -60,15 +65,16 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         <Text style={[styles.title, { color: T.text }]}>{item.title}</Text>
       </View>
 
+      {/* 🚀 CUSTOM ICON: AI CONFIDENCE (Orig Icon Color, Solid Theme Text Color) */}
       <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.border }]}>
-        <Ionicons name="analytics" size={12} color={COLORS.primaryLight} />
-        <Text style={[styles.tagText, { color: COLORS.primaryLight }]}>AI Confidence: {item.confidence || '90%'}</Text>
+        <Image source={ConfidenceIcon} style={styles.tagIcon} resizeMode="contain" />
+        <Text style={[styles.tagText, { color: T.text }]}>AI Confidence: {item.confidence || '90%'}</Text>
       </View>
 
       <Text style={[styles.label, { color: T.subText }]}>Explanation</Text>
       <Text style={[styles.description, { color: T.text }]}>{item.description}</Text>
 
-      {/* 🚀 EVEN BORDER AROUND ALL SIDES WITH THEME COLOR */}
+      {/* ADVICE BOX */}
       <View style={[styles.adviceBox, { backgroundColor: T.bg, borderColor: themeConfig.mainColor }]}>
         <Text style={[styles.adviceLabel, { color: themeConfig.mainColor }]}>Practical Advice</Text>
         <Text style={[styles.adviceText, { color: T.text }]}>{item.advice}</Text>
@@ -84,13 +90,14 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         )}
       </View>
 
+      {/* 🚀 CUSTOM ICON: VIEW LEGAL BASIS (Orig Icon Color, Solid Theme Text Color) */}
       <TouchableOpacity
         style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.border }]}
         onPress={() => onShowLegalBasis(item)}
       >
-        <Ionicons name="library" size={16} color={COLORS.primaryLight} />
-        <Text style={[styles.basisBtnText, { color: COLORS.primaryLight }]}>View Legal Basis</Text>
-        <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} style={{ marginLeft: 'auto' }} />
+        <Image source={LibraryIcon} style={styles.btnIcon} resizeMode="contain" />
+        <Text style={[styles.basisBtnText, { color: T.text }]}>View Legal Basis</Text>
+        <Ionicons name="chevron-forward" size={16} color={T.text} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
 
       {/* ASK AI SECTION */}
@@ -109,12 +116,13 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
           ))}
         </ScrollView>
 
+        {/* 🚀 CUSTOM ICON: DISCUSS IN ASK AI (TINT COLOR WHITE) */}
         <TouchableOpacity
           style={[styles.discussBtn, { borderColor: COLORS.primaryLight }]}
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts, extractLegalBasis() || undefined)}
         >
-          <Ionicons name="chatbubbles" size={16} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-          <Text style={[styles.discussBtnText, { color: COLORS.primaryLight }]}>Discuss in Ask AI</Text>
+          <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
+          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Discuss in Ask AI</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -123,7 +131,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
@@ -149,10 +157,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 16,
   },
+  tagIcon: {
+    width: 12,
+    height: 12,
+    marginRight: 4,
+  },
   tagText: {
     fontSize: 10,
     fontWeight: '600',
-    marginLeft: 4,
     textTransform: 'uppercase',
   },
   label: {
@@ -170,7 +182,7 @@ const styles = StyleSheet.create({
   adviceBox: {
     padding: 12,
     borderRadius: 8,
-    borderWidth: 1.5, // 🚀 Clean uniform border
+    borderWidth: 1,
     marginBottom: 16,
   },
   adviceLabel: {
@@ -211,10 +223,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 20,
   },
+  btnIcon: {
+    width: 16,
+    height: 16,
+    marginRight: 8,
+  },
   basisBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 8,
   },
   askAiSection: {
     paddingTop: 16,
@@ -248,7 +264,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
-    backgroundColor: 'rgba(167, 139, 250, 0.05)'
+    backgroundColor: COLORS.primary
   },
   discussBtnText: {
     fontSize: 14,
