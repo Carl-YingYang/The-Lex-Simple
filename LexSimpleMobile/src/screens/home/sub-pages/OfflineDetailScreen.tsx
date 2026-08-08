@@ -52,10 +52,26 @@ const ExpandableFinding = ({ f, itemDeduction, T }: any) => {
 };
 
 export default function OfflineDetailScreen({ route, navigation }: any) {
-  const { scanItem } = route.params;
+  // 🚀 SAFE CHECK: KUNG WALANG scanItem, IBALIK AGAD SA HOME PARA HINDI MAG-CRASH
+  const scanItem = route?.params?.scanItem;
+
+  if (!scanItem) {
+    return (
+      <ScreenLayout title="Error">
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+          <Text style={{ color: '#fff', marginBottom: 20 }}>Hindi mahanap ang file.</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'Scan' })} style={{ backgroundColor: COLORS.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Bumalik sa Home</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenLayout>
+    );
+  }
+
   const isScanned = scanItem.status === 'scanned';
   const result: AnalysisResult = scanItem.analysisResult || { score: 100, riskLevel: 'Very Safe', findings: [] };
 
+  // 🚀 LOCAL STATE NA LANG PARA HINDI MAG-FREEZE
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedDbInfo, setSelectedDbInfo] = useState<string | null>(null);
@@ -95,7 +111,6 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
       findingKeywords.forEach(word => { if (chunkLower.includes(word)) score++; });
       if (score > highestScore) { highestScore = score; bestChunk = chunk; }
     });
-    // 🚀 TINANGGAL ANG EMOJI PARA MAS PROFESSIONAL
     if (bestChunk && highestScore > 0) setSelectedDbInfo(`Statutory Provision:\n\n${bestChunk}`);
     else setSelectedDbInfo("No matching statutory provision found in the local database.");
     setModalVisible(true);
@@ -139,42 +154,66 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
   const handleAnalyzeOfflineFile = async () => {
     const networkState = await Network.getNetworkStateAsync();
     if (!networkState.isConnected) { showAlert("Offline Pa Rin", "Wala pa ring internet connection. Subukan ulit mamaya.", "warning"); return; }
-    setIsAnalyzing(true);
+
+    setIsAnalyzing(true); // 🚀 LOCAL LOADING STATE LANG
     try {
+      let combinedAnalysisResult: any = null;
+
       if (scanItem.type === 'document') {
         const formData = new FormData();
         formData.append('file', { uri: scanItem.uri, name: scanItem.title || 'document.txt', type: 'application/octet-stream' } as any);
         const data = await postFileEndpoint('/simplify_file', formData);
-        if (data.status === 'success') {
-          setIsAnalyzing(false);
-          const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, ocrText: data.extractedText || scanItem.title, sanitizedText: data.sanitizedText };
-          const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
-          if (existingHistory) { const historyArray = JSON.parse(existingHistory).map((item: any) => { if (item.id === scanItem.id) return { ...item, status: 'scanned', analysisResult: combinedAnalysisResult, ocrText: data.extractedText || scanItem.title }; return item; }); await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(historyArray)); }
-          navigation.replace('OfflineDetailScreen', { scanItem: { ...scanItem, status: 'scanned', analysisResult: combinedAnalysisResult, ocrText: data.extractedText || scanItem.title } });
-        } else { throw new Error(data.message || "Failed to connect to AI."); }
+
+        if (data && data.status === 'success') {
+          combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, ocrText: data.extractedText || scanItem.title, sanitizedText: data.sanitizedText };
+        } else {
+          throw new Error(data?.message || "Failed to connect to AI.");
+        }
       } else {
         const formattedUri = scanItem.uri.startsWith('file://') ? scanItem.uri : `file://${scanItem.uri}`;
         const ocrResult = await TextRecognition.recognize(formattedUri);
         if (!ocrResult.text || ocrResult.text.trim().length < 20) throw new Error("Masyadong malabo ang image para basahin ng AI.");
+
         const locallySanitizedText = sanitizeLocalText(ocrResult.text);
         const data = await postEndpoint('/simplify', { text: locallySanitizedText });
-        if (data.status === 'success') {
-          setIsAnalyzing(false);
-          const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, ocrText: ocrResult.text, sanitizedText: locallySanitizedText };
-          const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
-          if (existingHistory) { const historyArray = JSON.parse(existingHistory).map((item: any) => { if (item.id === scanItem.id) return { ...item, status: 'scanned', analysisResult: combinedAnalysisResult, ocrText: ocrResult.text }; return item; }); await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(historyArray)); }
-          navigation.replace('OfflineDetailScreen', { scanItem: { ...scanItem, status: 'scanned', analysisResult: combinedAnalysisResult, ocrText: ocrResult.text } });
-        } else { throw new Error(data.message || "Failed to connect to AI."); }
+
+        if (data && data.status === 'success') {
+          combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, ocrText: ocrResult.text, sanitizedText: locallySanitizedText };
+        } else {
+          throw new Error(data?.message || "Failed to connect to AI.");
+        }
       }
-    } catch (error: any) { setIsAnalyzing(false); showAlert("Error", error.message || "Hindi ma-process ang file.", "error"); }
+
+      // SAVE TO HISTORY
+      const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
+      if (existingHistory) {
+        const historyArray = JSON.parse(existingHistory).map((item: any) => {
+          if (item.id === scanItem.id) return { ...item, status: 'scanned', analysisResult: combinedAnalysisResult, ocrText: combinedAnalysisResult.ocrText };
+          return item;
+        });
+        await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(historyArray));
+      }
+
+      setIsAnalyzing(false);
+      // 🚀 DIRECT REPLACE PARA HINDI NA BALIK SA OFFLINE SCREEN
+      navigation.replace('ResultScreen', { analysisResult: combinedAnalysisResult });
+
+    } catch (error: any) {
+      setIsAnalyzing(false);
+      showAlert("Error", error.message || "Hindi ma-process ang file.", "error");
+    }
   };
 
+  // 🟢 ANALYZING UI (LOCAL)
   if (isAnalyzing) {
     return (
       <ScreenLayout title="Processing..." showBackButton={false}>
         <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
           <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-          <ProcessingLoader title="Analyzing Document" messages={LOADING_MESSAGES} />
+          <ProcessingLoader
+            title="Analyzing Document"
+            messages={LOADING_MESSAGES}
+          />
         </View>
       </ScreenLayout>
     );
@@ -346,7 +385,10 @@ export default function OfflineDetailScreen({ route, navigation }: any) {
         </View>
 
         <View style={{ flexDirection: 'row', width: '100%', justifyContent: 'space-between' }}>
-          <TouchableOpacity style={{ flex: 1, flexDirection: 'row', backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 }} onPress={handleAnalyzeOfflineFile}>
+          <TouchableOpacity
+            style={{ flex: 1, flexDirection: 'row', backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}
+            onPress={handleAnalyzeOfflineFile}
+          >
             <Ionicons name="sparkles" size={18} color="white" style={{ marginRight: 8 }} /><Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>Analyze Now</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ width: 48, height: 48, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' }} onPress={handleDelete}>

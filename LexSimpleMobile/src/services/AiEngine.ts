@@ -2,25 +2,16 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 console.log(`[AI Engine] Using Base URL: ${BASE_URL}`);
 
-// Helper function para may timeout ang fetch (Para hindi mag-hang ang Android)
-const fetchWithTimeout = (url: any, options: any, timeout = 60000) => {
-    return Promise.race([
-        fetch(url, options),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Nag-timeout ang server. Masyadong malaki o mabagal ang file.')), timeout)
-        )
-    ]);
-};
-
-export async function postFileEndpoint(endpoint: string, formData: FormData) {
+export async function postFileEndpoint(endpoint: string, formData: FormData, signal?: AbortSignal) {
     try {
-        const response: any = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
                 'ngrok-skip-browser-warning': 'true'
             },
-            body: formData
+            body: formData,
+            signal
         });
 
         if (!response.ok) {
@@ -31,22 +22,24 @@ export async function postFileEndpoint(endpoint: string, formData: FormData) {
 
         const data = await response.json();
         return data;
-    } catch (error) {
+    } catch (error: any) {
+        if (error.name === 'AbortError') throw error; // Re-throw abort errors
         console.error(`[AI Engine] Error fetching ${endpoint}:`, error);
         throw error;
     }
 }
 
-export async function postEndpoint(endpoint: string, body: any) {
+export async function postEndpoint(endpoint: string, body: any, signal?: AbortSignal) {
     try {
-        const response: any = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'ngrok-skip-browser-warning': 'true'
             },
-            body: JSON.stringify(body)
-        }, 30000); // 30s timeout for normal text
+            body: JSON.stringify(body),
+            signal
+        });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -56,20 +49,20 @@ export async function postEndpoint(endpoint: string, body: any) {
 
         const data = await response.json();
         return data;
-    } catch (error) {
+    } catch (error: any) {
+        if (error.name === 'AbortError') throw error;
         console.error(`[AI Engine] Error fetching ${endpoint}:`, error);
         throw error;
     }
 }
 
-export async function getEndpoint(endpoint: string) {
+export async function getEndpoint(endpoint: string, signal?: AbortSignal) {
     try {
-        const response: any = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'GET',
-            headers: {
-                'ngrok-skip-browser-warning': 'true'
-            }
-        }, 30000);
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+            signal
+        });
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -79,7 +72,8 @@ export async function getEndpoint(endpoint: string) {
 
         const data = await response.json();
         return data;
-    } catch (error) {
+    } catch (error: any) {
+        if (error.name === 'AbortError') throw error;
         console.error(`[AI Engine] Error fetching ${endpoint}:`, error);
         throw error;
     }

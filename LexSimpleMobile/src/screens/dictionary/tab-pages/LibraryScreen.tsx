@@ -1,29 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Platform,
-  StatusBar,
-  ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Platform, StatusBar, ActivityIndicator, StyleSheet
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Fuse from 'fuse.js';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import defaultDictionary from '../../../data/legal_dictionary.json';
-import { COLORS, globalStyles } from '../../../theme/globalStyles';
+import { COLORS } from '../../../theme/globalStyles';
 import LoadingSpinner from '../../../components/LoadingSpinner';
-
-// 💡 IMPORT ANG CUSTOM ALERT HOOK NATIN
 import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
+import { useTheme } from '../../../theme/ThemeContext';
 
-// =====================================================================
-// 💡 REUSABLE RESULT CARD (Flat UI, Walang Dropdown, May Tabs at Read More)
-// =====================================================================
-const ResultCard = ({ item, isOfflineMode, getRawText }: { item: any, isOfflineMode: boolean, getRawText: (item: any) => string }) => {
+// 🚀 REUSABLE RESULT CARD (Sleek UI)
+const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
   const [activeTab, setActiveTab] = useState<'ai' | 'basis' | 'example'>(isOfflineMode ? 'basis' : 'ai');
   const [isTextExpanded, setIsTextExpanded] = useState(false);
 
@@ -33,12 +23,12 @@ const ResultCard = ({ item, isOfflineMode, getRawText }: { item: any, isOfflineM
 
     return (
       <View>
-        <Text style={[globalStyles.lib_chunkText, { fontStyle: isItalic ? 'italic' : 'normal', fontSize: 14, color: '#e2e8f0', lineHeight: 24 }]}>
+        <Text style={[uiStyles.chunkText, { fontStyle: isItalic ? 'italic' : 'normal', color: T.text }]}>
           {isItalic ? `"${displayText}"` : displayText}
         </Text>
         {shouldTruncate && (
           <TouchableOpacity onPress={() => setIsTextExpanded(!isTextExpanded)} style={{ marginTop: 12 }}>
-            <Text style={{ color: COLORS.primaryLight, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            <Text style={uiStyles.readMoreBtn}>
               {isTextExpanded ? 'Show Less' : 'Read Full Text'}
             </Text>
           </TouchableOpacity>
@@ -48,56 +38,55 @@ const ResultCard = ({ item, isOfflineMode, getRawText }: { item: any, isOfflineM
   };
 
   return (
-    <View style={[globalStyles.lib_contentBox, { marginBottom: 20, padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b' }]}>
-      
-      {/* 🔹 MALAKING TITLE AT LEGAL BASIS */}
+    <View style={[uiStyles.contentBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+
+      {/* TITLE AT LEGAL BASIS */}
       <View style={{ marginBottom: 15 }}>
-        <Text style={[globalStyles.lib_termTitle, { fontSize: 24, marginBottom: 4, lineHeight: 30 }]}>{item.term}</Text>
-        <Text style={[globalStyles.lib_basisText, { fontSize: 13, color: COLORS.primaryLight, fontWeight: 'bold' }]} numberOfLines={2}>
+        <Text style={[uiStyles.termTitle, { color: T.text }]}>{item.term}</Text>
+        <Text style={[uiStyles.basisText, { color: COLORS.primaryLight }]} numberOfLines={2}>
           {item.legal_basis || 'Philippine Law Database'}
         </Text>
       </View>
 
-      {/* 💡 DIVIDER LINE PARA MAS MALINIS ANG GROUPING */}
-      <View style={{ height: 1, backgroundColor: '#1e293b', marginBottom: 15 }} />
+      <View style={[uiStyles.divider, { backgroundColor: T.border }]} />
 
-      {/* 🔹 TABS (Itatago kapag offline) */}
+      {/* TABS (Itatago kapag offline) */}
       {!isOfflineMode && (
-        <View style={[globalStyles.lib_tabsWrapper, { marginBottom: 15, borderRadius: 8 }]}>
-          <TouchableOpacity style={[globalStyles.lib_tabBtn, { borderRadius: 6 }, activeTab === 'basis' && globalStyles.lib_tabBtnActive]} onPress={() => { setActiveTab('basis'); setIsTextExpanded(false); }}>
-            <Text style={[globalStyles.lib_tabBtnText, activeTab === 'basis' && globalStyles.lib_tabBtnTextActive]}>Legal Basis</Text>
+        <View style={[uiStyles.tabsWrapper, { backgroundColor: T.card, borderColor: T.border }]}>
+          <TouchableOpacity style={[uiStyles.tabBtn, activeTab === 'basis' && { backgroundColor: COLORS.primary }]} onPress={() => { setActiveTab('basis'); setIsTextExpanded(false); }}>
+            <Text style={[uiStyles.tabText, { color: activeTab === 'basis' ? '#fff' : T.subText }]}>Legal Basis</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[globalStyles.lib_tabBtn, { borderRadius: 6 }, activeTab === 'ai' && globalStyles.lib_tabBtnActive]} onPress={() => { setActiveTab('ai'); setIsTextExpanded(false); }}>
-            <Text style={[globalStyles.lib_tabBtnText, activeTab === 'ai' && globalStyles.lib_tabBtnTextActive]}>AI Summary</Text>
+          <TouchableOpacity style={[uiStyles.tabBtn, activeTab === 'ai' && { backgroundColor: COLORS.primary }]} onPress={() => { setActiveTab('ai'); setIsTextExpanded(false); }}>
+            <Text style={[uiStyles.tabText, { color: activeTab === 'ai' ? '#fff' : T.subText }]}>AI Summary</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[globalStyles.lib_tabBtn, { borderRadius: 6 }, activeTab === 'example' && globalStyles.lib_tabBtnActive]} onPress={() => { setActiveTab('example'); setIsTextExpanded(false); }}>
-            <Text style={[globalStyles.lib_tabBtnText, activeTab === 'example' && globalStyles.lib_tabBtnTextActive]}>Example</Text>
+          <TouchableOpacity style={[uiStyles.tabBtn, activeTab === 'example' && { backgroundColor: COLORS.primary }]} onPress={() => { setActiveTab('example'); setIsTextExpanded(false); }}>
+            <Text style={[uiStyles.tabText, { color: activeTab === 'example' ? '#fff' : T.subText }]}>Example</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* 🔹 CONSISTENT DYNAMIC CONTENT UI (Nasa loob ng Box pare-pareho) */}
+      {/* DYNAMIC CONTENT */}
       {isOfflineMode || activeTab === 'basis' ? (
-        <View>
-          <Text style={globalStyles.lib_contentTitle}>RAW LEGAL PROVISION</Text>
-          <View style={[globalStyles.lib_exampleBox, { padding: 16, marginTop: 8, borderRadius: 8 }]}>
+        <View style={{ marginTop: 12 }}>
+          <Text style={[uiStyles.contentTitle, { color: T.subText }]}>RAW LEGAL PROVISION</Text>
+          <View style={[uiStyles.innerBox, { backgroundColor: T.card, borderColor: T.border }]}>
             {renderExpandableText(isOfflineMode ? item.definition : getRawText(item), true)}
           </View>
         </View>
       ) : activeTab === 'ai' ? (
-        <View>
-          <View style={[globalStyles.lib_aiHeaderRow, { marginBottom: 8 }]}>
+        <View style={{ marginTop: 12 }}>
+          <View style={uiStyles.aiHeaderRow}>
             <Ionicons name="sparkles" size={14} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
-            <Text style={globalStyles.lib_contentTitle}>AI SIMPLIFIED EXPLANATION</Text>
+            <Text style={[uiStyles.contentTitle, { color: T.subText }]}>AI SIMPLIFIED EXPLANATION</Text>
           </View>
-          <View style={[globalStyles.lib_exampleBox, { padding: 16, marginTop: 8, borderRadius: 8 }]}>
+          <View style={[uiStyles.innerBox, { backgroundColor: T.card, borderColor: T.border }]}>
             {renderExpandableText(item.definition, false)}
           </View>
         </View>
       ) : (
-        <View>
-          <Text style={globalStyles.lib_contentTitle}>REAL-WORLD APPLICATION</Text>
-          <View style={[globalStyles.lib_exampleBox, { padding: 16, marginTop: 8, borderRadius: 8 }]}>
+        <View style={{ marginTop: 12 }}>
+          <Text style={[uiStyles.contentTitle, { color: T.subText }]}>REAL-WORLD APPLICATION</Text>
+          <View style={[uiStyles.innerBox, { backgroundColor: T.card, borderColor: T.border }]}>
             {renderExpandableText(item.example || 'Walang halimbawa na naibigay.', false)}
           </View>
         </View>
@@ -105,7 +94,6 @@ const ResultCard = ({ item, isOfflineMode, getRawText }: { item: any, isOfflineM
     </View>
   );
 };
-
 
 export default function LibraryScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,10 +105,10 @@ export default function LibraryScreen({ navigation }: any) {
   const [dictionaryData, setDictionaryData] = useState<any[]>(defaultDictionary);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // 💡 THE MAGIC HOOK: Eto na lang ang kailangan imbes na mahabang state!
   const { showAlert, AlertRender } = useCustomAlert();
+  const { colors: T, isDarkMode } = useTheme(); // 🚀 GLOBAL THEME
 
-  const API_BASE_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
   const localFileUri = FileSystem.documentDirectory + 'lex_offline_db.json';
 
   useEffect(() => {
@@ -144,31 +132,22 @@ export default function LibraryScreen({ navigation }: any) {
     try {
       const response = await fetch(`${API_BASE_URL}/dictionary/sync`, {
         method: 'GET',
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-          Accept: 'application/json',
-        },
+        headers: { 'ngrok-skip-browser-warning': 'true', Accept: 'application/json' },
       });
       const json = await response.json();
       if (json.status === 'success') {
         await FileSystem.writeAsStringAsync(localFileUri, JSON.stringify(json.data));
         setDictionaryData(json.data);
-        
-        // 💡 GINAMIT ANG HOOK PARA SA SUCCESS
         showAlert("Update Complete", "The offline dictionary has been successfully synced.", "success");
       }
     } catch {
-      // 💡 GINAMIT ANG HOOK PARA SA ERROR
       showAlert("Network Error", "An internet connection is required to update the database.", "error");
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const fuse = new Fuse(dictionaryData, {
-    keys: ['definition', 'term'],
-    threshold: 0.3,
-  });
+  const fuse = new Fuse(dictionaryData, { keys: ['definition', 'term'], threshold: 0.3 });
 
   const normalizeQuery = (q: string) => {
     let str = q.toLowerCase().trim();
@@ -177,23 +156,19 @@ export default function LibraryScreen({ navigation }: any) {
     return str;
   };
 
-  // 💡 FIX: INAYOS ANG LOGIC PARA MAHANAP YUNG RAW TEXT KAHIT BINA-GO NG AI YUNG TITLE
   const fetchRawTextFromLocal = (item: any): string => {
     const termSearch = normalizeQuery(item.term || '');
     const basisSearch = normalizeQuery(item.legal_basis || '');
 
-    // 1. Hanapin gamit ang exact term
     let exactMatch = dictionaryData.find((d: any) => d.term && d.term.toLowerCase().trim() === termSearch);
     if (exactMatch) return exactMatch.definition ?? '';
 
-    // 2. Hanapin gamit ang Legal Basis (Dahil madalas ito yung "Article 3")
     exactMatch = dictionaryData.find((d: any) => d.term && d.term.toLowerCase().trim() === basisSearch);
     if (exactMatch) return exactMatch.definition ?? '';
 
-    // 3. Fallback sa Fuzzy Search
     let fuzzyResults = fuse.search(termSearch);
     if (fuzzyResults.length > 0) return fuzzyResults[0].item.definition ?? '';
-    
+
     fuzzyResults = fuse.search(basisSearch);
     if (fuzzyResults.length > 0) return fuzzyResults[0].item.definition ?? '';
 
@@ -211,16 +186,10 @@ export default function LibraryScreen({ navigation }: any) {
     setResults([]);
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/dictionary/search?query=${encodeURIComponent(queryStr)}`,
-        {
-          method: 'GET',
-          headers: {
-            'ngrok-skip-browser-warning': 'true',
-            Accept: 'application/json',
-          },
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/dictionary/search?query=${encodeURIComponent(queryStr)}`, {
+        method: 'GET',
+        headers: { 'ngrok-skip-browser-warning': 'true', Accept: 'application/json' },
+      });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => null);
@@ -258,12 +227,10 @@ export default function LibraryScreen({ navigation }: any) {
     } catch (networkError) {
       console.log('Network Error: Falling back to Offline Mode.');
 
-      const exactMatches = dictionaryData.filter(
-        (item: any) => item.term && item.term.toLowerCase().trim().includes(normalizedQ)
-      );
+      const exactMatches = dictionaryData.filter((item: any) => item.term && item.term.toLowerCase().trim().includes(normalizedQ));
 
       if (exactMatches.length > 0) {
-        setResults(exactMatches.slice(0, 10)); 
+        setResults(exactMatches.slice(0, 10));
         setIsOfflineMode(true);
       } else {
         const fuzzyResults = fuse.search(normalizedQ);
@@ -286,51 +253,41 @@ export default function LibraryScreen({ navigation }: any) {
   };
 
   return (
-    <View style={globalStyles.lib_container}>
+    <View style={{ flex: 1, backgroundColor: T.bg }}>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
-      <View style={globalStyles.lib_header}>
+      {/* HEADER */}
+      <View style={uiStyles.header}>
         <View>
-          <Text style={globalStyles.lib_headerTitle}>Lex-Library</Text>
-          <Text style={[globalStyles.lib_headerSubtitle, { letterSpacing: 1.5, fontSize: 11, color: '#64748b', fontWeight: '800' }]}>
+          <Text style={[uiStyles.headerTitle, { color: T.text }]}>Lex-Library</Text>
+          <Text style={[uiStyles.headerSubtitle, { color: T.subText }]}>
             {dictionaryData.length} INDEXED LAWS
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#1e293b',
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: '#334155'
-          }}
-          onPress={syncDatabase}
-          disabled={isSyncing}
-        >
+        <TouchableOpacity style={[uiStyles.syncBtn, { backgroundColor: T.card, borderColor: T.border }]} onPress={syncDatabase} disabled={isSyncing}>
           {isSyncing ? (
             <>
               <ActivityIndicator size="small" color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-              <Text style={{ color: COLORS.textMuted, fontSize: 12, fontWeight: '900', letterSpacing: 0.5 }}>UPDATING</Text>
+              <Text style={[uiStyles.syncBtnText, { color: T.subText }]}>UPDATING</Text>
             </>
           ) : (
             <>
               <Ionicons name="sync" size={14} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
-              <Text style={{ color: 'white', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 }}>UPDATE</Text>
+              <Text style={[uiStyles.syncBtnText, { color: T.text }]}>UPDATE</Text>
             </>
           )}
         </TouchableOpacity>
       </View>
 
-      <View style={globalStyles.lib_searchArea}>
-        <View style={[globalStyles.lib_searchWrapper, { borderRadius: 10 }]}>
-          <Ionicons name="search" size={20} color={COLORS.textMuted} />
+      {/* SEARCH BAR */}
+      <View style={uiStyles.searchArea}>
+        <View style={[uiStyles.searchWrapper, { backgroundColor: T.card, borderColor: T.border }]}>
+          <Ionicons name="search" size={20} color={T.subText} />
           <TextInput
-            style={globalStyles.lib_searchInput}
+            style={[uiStyles.searchInput, { color: T.text }]}
             placeholder="Search legal term or Article..."
-            placeholderTextColor={COLORS.textMuted}
+            placeholderTextColor={T.subText}
             value={searchQuery}
             onChangeText={setSearchQuery}
             onSubmitEditing={handleSearch}
@@ -338,80 +295,134 @@ export default function LibraryScreen({ navigation }: any) {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={clearSearch} style={{ padding: 5 }}>
-              <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+              <Ionicons name="close-circle" size={20} color={T.subText} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
+      {/* CONTENT */}
       {loading && <LoadingSpinner message="Searching Lex-Simple Engine..." />}
 
       {error !== '' && !loading && (
-        <View style={globalStyles.lib_centerMessage}>
+        <View style={uiStyles.centerMessage}>
           <Ionicons name="warning-outline" size={48} color={COLORS.danger} style={{ marginBottom: 15 }} />
-          <Text style={globalStyles.lib_errorText}>{error}</Text>
+          <Text style={[uiStyles.errorText, { color: T.text }]}>{error}</Text>
         </View>
       )}
 
       {results.length === 0 && !loading && error === '' && (
-        <View style={globalStyles.lib_emptyStateContainer}>
-          <View style={globalStyles.lib_emptyStateIconBg}>
+        <View style={uiStyles.emptyStateContainer}>
+          <View style={[uiStyles.emptyStateIconBg, { backgroundColor: T.card, borderColor: T.border }]}>
             <Ionicons name="library" size={48} color={COLORS.primaryLight} />
           </View>
-          <Text style={globalStyles.lib_emptyStateTitle}>Search the Lexicon</Text>
-          <Text style={globalStyles.lib_emptyStateSub}>
+          <Text style={[uiStyles.emptyStateTitle, { color: T.text }]}>Search the Lexicon</Text>
+          <Text style={[uiStyles.emptyStateSub, { color: T.subText }]}>
             Search for general concepts (e.g. "Usury") or specific laws (e.g. "Article 13") to get AI-simplified explanations.
           </Text>
 
-          <TouchableOpacity
-            style={[globalStyles.lib_browseBtn, { borderRadius: 10, marginTop: 10 }]}
-            onPress={() => navigation.navigate('DictionaryDetailScreen', { dictionaryData })}
-          >
+          <TouchableOpacity style={[uiStyles.browseBtn, { borderColor: COLORS.primaryLight }]} onPress={() => navigation.navigate('DictionaryDetailScreen', { dictionaryData })}>
             <Ionicons name="list" size={18} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
-            <Text style={globalStyles.lib_browseBtnText}>Browse Offline Dictionary</Text>
+            <Text style={uiStyles.browseBtnText}>Browse Offline Dictionary</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {results.length > 0 && !loading && (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={globalStyles.lib_resultScrollContent}
-        >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15 }}>
-            
-            <Text style={[globalStyles.lib_feedbackText, { marginBottom: 0, paddingHorizontal: 0, flex: 1, paddingRight: 10 }]}>
-              Showing results for <Text style={globalStyles.lib_highlightText}>"{searchQuery}"</Text>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+            <Text style={[uiStyles.feedbackText, { color: T.subText }]}>
+              Showing results for <Text style={{ color: T.text, fontWeight: 'bold' }}>"{searchQuery}"</Text>
             </Text>
-            
-            <View style={[globalStyles.lib_statusBadge, { borderRadius: 6, marginBottom: 0, backgroundColor: isOfflineMode ? '#1e293b' : 'rgba(16, 185, 129, 0.15)', borderColor: isOfflineMode ? '#334155' : COLORS.success }]}>
-              <Ionicons name={isOfflineMode ? 'cloud-offline' : 'checkmark-circle'} size={12} color={isOfflineMode ? '#cbd5e1' : COLORS.success} style={{ marginRight: 6 }} />
-              <Text style={[globalStyles.lib_statusBadgeText, { color: isOfflineMode ? '#cbd5e1' : COLORS.success }]}>
+
+            <View style={[uiStyles.statusBadge, { backgroundColor: isOfflineMode ? T.card : 'rgba(16, 185, 129, 0.15)', borderColor: isOfflineMode ? T.border : COLORS.success }]}>
+              <Ionicons name={isOfflineMode ? 'cloud-offline' : 'checkmark-circle'} size={12} color={isOfflineMode ? T.subText : COLORS.success} style={{ marginRight: 6 }} />
+              <Text style={[uiStyles.statusBadgeText, { color: isOfflineMode ? T.subText : COLORS.success }]}>
                 {isOfflineMode ? 'OFFLINE MATCH' : 'AI VERIFIED'}
               </Text>
             </View>
           </View>
 
           {isOfflineMode && (
-            <View style={[globalStyles.lib_offlineWarningBox, { marginHorizontal: 20, borderRadius: 8 }]}>
-              <Ionicons name="cloud-offline" size={18} color="#fcd34d" style={{ marginRight: 8 }} />
-              <Text style={globalStyles.lib_offlineWarningText}>
+            <View style={[uiStyles.offlineWarningBox, { backgroundColor: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
+              <Ionicons name="cloud-offline" size={18} color={COLORS.warning} style={{ marginRight: 8 }} />
+              <Text style={[uiStyles.offlineWarningText, { color: T.text }]}>
                 Viewing in Offline Mode. Connect to the internet for AI-simplified explanations.
               </Text>
             </View>
           )}
 
-          <View style={{ paddingHorizontal: 20 }}>
+          <View>
             {results.map((item, index) => (
-              <ResultCard key={index} item={item} isOfflineMode={isOfflineMode} getRawText={fetchRawTextFromLocal} />
+              <ResultCard key={index} item={item} isOfflineMode={isOfflineMode} getRawText={fetchRawTextFromLocal} T={T} />
             ))}
             <View style={{ height: 40 }} />
           </View>
         </ScrollView>
       )}
 
-      {/* 💡 ALERT RENDERER PARA SA POP-UPS NG SCREEN NA ITO */}
       <AlertRender />
     </View>
   );
 }
+
+// 🎨 SLEEK & SHARP UI STYLES
+const uiStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16,
+    // 🚀 AYOS: Nagdagdag ng safe area padding para hindi sumanib sa status bar
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 50,
+    paddingBottom: 15,
+  },
+  headerTitle: { fontSize: 28, fontWeight: '900' },
+  headerSubtitle: { letterSpacing: 1.5, fontSize: 11, fontWeight: '800', marginTop: 2 },
+  syncBtn: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 8, borderWidth: 1,
+  },
+  syncBtnText: { fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+
+  searchArea: { paddingHorizontal: 16, marginBottom: 15 },
+  searchWrapper: {
+    flexDirection: 'row', alignItems: 'center', borderRadius: 10, borderWidth: 1, paddingHorizontal: 16, height: 50,
+  },
+  searchInput: { flex: 1, fontSize: 15, marginLeft: 12 },
+
+  centerMessage: { padding: 40, alignItems: 'center', justifyContent: 'center' },
+  errorText: { fontSize: 15, textAlign: 'center', fontWeight: '500' },
+
+  emptyStateContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
+  emptyStateIconBg: { width: 80, height: 80, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 1 },
+  emptyStateTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
+  emptyStateSub: { fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 30 },
+  browseBtn: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20,
+    borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(167, 139, 250, 0.05)'
+  },
+  browseBtnText: { color: COLORS.primaryLight, fontSize: 13, fontWeight: 'bold', letterSpacing: 0.5 },
+
+  feedbackText: { fontSize: 13, flex: 1, paddingRight: 10 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1 },
+  statusBadgeText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+
+  offlineWarningBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 20 },
+  offlineWarningText: { flex: 1, fontSize: 12, lineHeight: 18 },
+
+  // RESULT CARD STYLES
+  contentBox: { borderRadius: 12, padding: 16, marginBottom: 20, borderWidth: 1 },
+  termTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 4, lineHeight: 28 },
+  basisText: { fontSize: 13, fontWeight: 'bold' },
+  divider: { height: 1, marginBottom: 15 },
+
+  tabsWrapper: { flexDirection: 'row', borderRadius: 10, padding: 4, borderWidth: 1 },
+  tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  tabText: { fontSize: 12, fontWeight: 'bold' },
+
+  contentTitle: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2, marginBottom: 6 },
+  innerBox: { padding: 14, borderRadius: 8, borderWidth: 1 },
+  chunkText: { fontSize: 14, lineHeight: 22 },
+  aiHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  readMoreBtn: { color: COLORS.primaryLight, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }
+});

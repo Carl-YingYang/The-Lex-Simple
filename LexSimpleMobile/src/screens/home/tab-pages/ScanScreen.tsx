@@ -11,8 +11,13 @@ import ImageViewer from 'react-native-image-zoom-viewer';
 import { COLORS } from '../../../theme/globalStyles';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
-// 🚀 IMPORT ANG FLOATING INDICATOR
 import FloatingProcessIndicator from '../../../components/FloatingProcessIndicator';
+import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
+
+// 🚀 IMPORT ANG MGA CUSTOM ICONS
+const AskAiGridIcon = require('../../../../assets/icons/chat_ai.png'); // Para sa Grid Button
+const AskAiListIcon = require('../../../../assets/icons/message_ai.png'); // 🟡 Para sa Recent Files List
+const DocFileIcon = require('../../../../assets/icons/files.png'); // Para sa Document Thumbnail
 
 export interface ScanHistoryItem {
   id: string; uri: string; title: string; date: string; type: 'camera' | 'gallery' | 'document'; status: 'unscanned' | 'scanned'; analysisResult?: any; ocrText?: string;
@@ -26,6 +31,7 @@ export default function ScanScreen({ navigation }: any) {
   const [activeFilter, setActiveFilter] = useState<'all' | 'scanned' | 'unscanned'>('all');
 
   const { isDarkMode, toggleTheme, colors: T } = useTheme();
+  const { isProcessing: isGlobalProcessing, activeFileId, processRoute } = useBackgroundProcess();
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
@@ -42,7 +48,11 @@ export default function ScanScreen({ navigation }: any) {
   const loadHistory = async () => {
     try {
       const storedHistory = await AsyncStorage.getItem('@lex_scan_history');
-      if (storedHistory) setHistoryItems(JSON.parse(storedHistory));
+      if (storedHistory) {
+        const historyArray = JSON.parse(storedHistory);
+        historyArray.sort((a, b) => parseInt(b.id) - parseInt(a.id));
+        setHistoryItems(historyArray);
+      }
     } catch (error) { console.error("Failed to load history", error); }
   };
 
@@ -50,9 +60,20 @@ export default function ScanScreen({ navigation }: any) {
     showAlert("Legal Literacy Tool", "Ang Lex-Simple ay isang AI Legal Literacy Tool at hindi pamalit sa pormal na payo ng isang lisensyadong abogado.", "info", [{ text: "Naintindihan ko", style: "default" }]);
   };
 
+  const handleGridPress = (screen: string) => {
+    if (isGlobalProcessing) {
+      showAlert("May Proseso Pa", "May kasalukuyang nag-aanalyze pa. Hintayin matapos o i-cancel muna ito.", "warning");
+      return;
+    }
+    navigation.navigate(screen);
+  };
+
   const handleCardPress = (item: ScanHistoryItem) => {
-    if (item.status === 'scanned' && item.analysisResult) navigation.navigate('ResultScreen', { analysisResult: item.analysisResult, historyItem: item });
-    else navigation.navigate('OfflineDetailScreen', { scanItem: item });
+    if (item.status === 'scanned' && item.analysisResult) {
+      navigation.navigate('ResultScreen', { analysisResult: item.analysisResult, historyItem: item });
+    } else {
+      navigation.navigate('OfflineDetailScreen', { scanItem: item });
+    }
   };
 
   const getDisplayTitle = (item: ScanHistoryItem) => {
@@ -117,8 +138,6 @@ export default function ScanScreen({ navigation }: any) {
   return (
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-
-      {/* 🚀 FLOATING INDICATOR DITO */}
       <FloatingProcessIndicator />
 
       <ScrollView
@@ -127,7 +146,6 @@ export default function ScanScreen({ navigation }: any) {
         onScroll={handleScroll}
         scrollEventThrottle={16}
       >
-        {/* HEADER */}
         <View style={localStyles.header}>
           <View>
             <Text style={[localStyles.greeting, { color: T.subText }]}>Welcome back,</Text>
@@ -143,7 +161,6 @@ export default function ScanScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* DISCLAIMER */}
         <View style={[localStyles.disclaimerBox, { backgroundColor: T.card, borderColor: T.border }]}>
           <Ionicons name="shield-checkmark" size={18} color={COLORS.success} style={{ marginRight: 8 }} />
           <Text style={[localStyles.disclaimerText, { color: T.subText }]}>
@@ -151,34 +168,34 @@ export default function ScanScreen({ navigation }: any) {
           </Text>
         </View>
 
-        {/* GRID ACTIONS */}
         <View style={localStyles.gridContainer}>
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#6D28D9' }]} onPress={() => navigation.navigate('ScannerScreen')}>
-            <Ionicons name="scan" size={26} color="#6D28D9" />
+          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#6D28D9', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('ScannerScreen')} disabled={isGlobalProcessing}>
+            <Ionicons name="scan" size={26} color="#6D28D9" style={{ marginBottom: 10 }} />
             <Text style={[localStyles.cardTitle, { color: T.text }]}>Scan</Text>
             <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Camera & Docs</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#3B82F6' }]} onPress={() => navigation.navigate('UploadImageScreen')}>
-            <Ionicons name="image-outline" size={26} color="#3B82F6" />
+
+          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#3B82F6', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('UploadImageScreen')} disabled={isGlobalProcessing}>
+            <Ionicons name="image-outline" size={26} color="#3B82F6" style={{ marginBottom: 10 }} />
             <Text style={[localStyles.cardTitle, { color: T.text }]}>Upload</Text>
             <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Photos & Gallery</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#10B981' }]} onPress={() => navigation.navigate('ConvertScreen')}>
-            <Ionicons name="document-text-outline" size={26} color="#10B981" />
+
+          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#10B981', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('ConvertScreen')} disabled={isGlobalProcessing}>
+            <Ionicons name="document-text-outline" size={26} color="#10B981" style={{ marginBottom: 10 }} />
             <Text style={[localStyles.cardTitle, { color: T.text }]}>Convert</Text>
             <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>PDF, Word, TXT</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#F59E0B' }]} onPress={() => navigation.navigate('AskAiScreen')}>
-            <Ionicons name="chatbubble-ellipses-outline" size={26} color="#F59E0B" />
+
+          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#F59E0B', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('AskAiScreen')} disabled={isGlobalProcessing}>
+            <Image source={AskAiGridIcon} style={[localStyles.gridIcon, { tintColor: '#F59E0B' }]} />
             <Text style={[localStyles.cardTitle, { color: T.text }]}>Ask AI</Text>
             <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Chat & Analyze</Text>
           </TouchableOpacity>
         </View>
 
-        {/* DIVIDER */}
         <View style={{ height: 1, backgroundColor: T.border, marginVertical: 24 }} />
 
-        {/* RECENT FILES */}
         <View style={localStyles.sectionHeader}>
           <Text style={[localStyles.sectionTitle, { color: T.text }]}>Recent Files</Text>
           <View style={localStyles.filterRow}>
@@ -194,7 +211,6 @@ export default function ScanScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* 🚀 REDESIGNED HISTORY LIST (Concise & Readable) */}
         <View style={localStyles.historyList}>
           {filteredHistory.length === 0 ? (
             <View style={localStyles.emptyState}>
@@ -202,87 +218,81 @@ export default function ScanScreen({ navigation }: any) {
               <Text style={{ color: T.subText, marginTop: 12, fontSize: 16 }}>No recent files found.</Text>
             </View>
           ) : (
-            displayedHistory.map((item) => (
-              <View key={item.id} style={[localStyles.historyCard, { backgroundColor: T.card, borderColor: T.border }]}>
+            displayedHistory.map((item) => {
+              const isCurrentlyAnalyzing = isGlobalProcessing && activeFileId === item.id;
 
-                {/* TAPPABLE THUMBNAIL */}
-                <TouchableOpacity
-                  style={[
-                    localStyles.thumbnailWrapper,
-                    {
-                      backgroundColor: item.type === 'document' ? T.bg : T.border,
-                      borderWidth: 1,
-                      borderColor: T.border
-                    }
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    if (item.type === 'document') {
-                      navigation.navigate('SanitizedOcrScreen', { sanitizedText: item.ocrText || "Walang text content.", customTitle: getDisplayTitle(item), isDocumentView: true });
-                    } else {
-                      setSelectedImage(item.uri);
-                    }
-                  }}
-                >
-                  {item.type === 'document' ? (
-                    <Ionicons name="document-text" size={28} color={COLORS.primaryLight} />
-                  ) : (
-                    <Image
-                      source={{ uri: item.uri }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="cover"
-                    />
-                  )}
-                </TouchableOpacity>
+              return (
+                <View key={item.id} style={[localStyles.historyCard, { backgroundColor: T.card, borderColor: T.border, opacity: isGlobalProcessing && !isCurrentlyAnalyzing ? 0.6 : 1 }]}>
 
-                {/* CONTENT */}
-                <View style={localStyles.historyContent}>
-                  {/* Top Row: Title & Rename */}
-                  <View style={localStyles.historyTopRow}>
-                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleCardPress(item)} activeOpacity={0.7}>
-                      <Text style={[localStyles.historyTitle, { color: T.text }]} numberOfLines={1}>{getDisplayTitle(item)}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => openRenameModal(item)} style={{ padding: 4 }}>
-                      <Ionicons name="pencil" size={14} color={T.subText} />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Meta Row */}
-                  <View style={localStyles.historyMetaRow}>
-                    <Ionicons name={item.type === 'camera' ? 'camera' : item.type === 'gallery' ? 'images' : 'document'} size={12} color={T.subText} />
-                    <Text style={[localStyles.historyMetaText, { color: T.subText }]}> {item.type.toUpperCase()} • {item.date.split(',')[0]}</Text>
-                  </View>
-
-                  {/* Action Row */}
-                  <View style={localStyles.historyActionsRow}>
-                    <TouchableOpacity
-                      style={[
-                        localStyles.actionBtn,
-                        item.status === 'scanned'
-                          ? { backgroundColor: 'rgba(109, 40, 217, 0.1)' }
-                          : { backgroundColor: '#6D28D9' }
-                      ]}
-                      onPress={() => handleCardPress(item)}
-                    >
-                      <Ionicons name={item.status === 'scanned' ? "document-text" : "sparkles"} size={12} color={item.status === 'scanned' ? '#A78BFA' : '#fff'} />
-                      <Text style={[localStyles.actionBtnText, { color: item.status === 'scanned' ? '#A78BFA' : '#fff' }]}>
-                        {item.status === 'scanned' ? 'View Results' : 'Analyze'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {item.status === 'scanned' && (
-                      <TouchableOpacity style={localStyles.iconBtnSmall} onPress={() => handleAskAi(item)}>
-                        <Ionicons name="chatbubble-ellipses" size={14} color="#F59E0B" />
-                      </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[localStyles.thumbnailWrapper, { backgroundColor: T.bg, borderWidth: 1, borderColor: T.border }]}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      if (isCurrentlyAnalyzing) return;
+                      if (item.type === 'document') {
+                        navigation.navigate('SanitizedOcrScreen', { sanitizedText: item.ocrText || "Walang text content.", customTitle: getDisplayTitle(item), isDocumentView: true });
+                      } else {
+                        setSelectedImage(item.uri);
+                      }
+                    }}
+                  >
+                    {item.type === 'document' ? (
+                      <Image source={DocFileIcon} style={{ width: 28, height: 28, resizeMode: 'contain' }} />
+                    ) : (
+                      <Image source={{ uri: item.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                     )}
+                  </TouchableOpacity>
 
-                    <TouchableOpacity style={localStyles.iconBtnSmall} onPress={() => handleDelete(item.id)}>
-                      <Ionicons name="trash" size={14} color="#EF4444" />
-                    </TouchableOpacity>
+                  <View style={localStyles.historyContent}>
+                    <View style={localStyles.historyTopRow}>
+                      <TouchableOpacity style={{ flex: 1 }} onPress={() => handleCardPress(item)} activeOpacity={0.7}>
+                        <Text style={[localStyles.historyTitle, { color: T.text }]} numberOfLines={1}>{getDisplayTitle(item)}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => openRenameModal(item)} disabled={isGlobalProcessing}>
+                        <Ionicons name="pencil" size={14} color={T.subText} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={localStyles.historyMetaRow}>
+                      <Ionicons name={item.type === 'camera' ? 'camera' : item.type === 'gallery' ? 'images' : 'document'} size={12} color={T.subText} />
+                      <Text style={[localStyles.historyMetaText, { color: T.subText }]}> {item.type.toUpperCase()} • {item.date.split(',')[0]}</Text>
+                    </View>
+
+                    <View style={localStyles.historyActionsRow}>
+                      {isCurrentlyAnalyzing ? (
+                        <View style={[localStyles.actionBtn, { backgroundColor: 'rgba(167, 139, 250, 0.1)' }]}>
+                          <ActivityIndicator size="small" color={COLORS.primaryLight} style={{ marginRight: 6 }} />
+                          <Text style={[localStyles.actionBtnText, { color: COLORS.primaryLight }]}>Analyzing...</Text>
+                        </View>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            style={[localStyles.actionBtn, { borderWidth: 1, borderColor: item.status === 'scanned' ? COLORS.primaryLight : 'transparent', backgroundColor: item.status === 'scanned' ? 'transparent' : '#6D28D9' }]}
+                            onPress={() => handleCardPress(item)}
+                          >
+                            <Ionicons name={item.status === 'scanned' ? "document-text" : "sparkles"} size={12} color={item.status === 'scanned' ? '#A78BFA' : '#fff'} />
+                            <Text style={[localStyles.actionBtnText, { color: item.status === 'scanned' ? '#A78BFA' : '#fff' }]}>
+                              {item.status === 'scanned' ? 'View Results' : 'Analyze'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {item.status === 'scanned' && (
+                            <TouchableOpacity style={[localStyles.iconBtnSmall, { borderWidth: 1, borderColor: T.border }]} onPress={() => handleAskAi(item)} disabled={isGlobalProcessing}>
+                              {/* 🚀 CUSTOM PNG ICON (YELLOW TINT) PARA SA ASK AI SA RECENT FILES */}
+                              <Image source={AskAiListIcon} style={{ width: 16, height: 16, tintColor: '#F59E0B' }} resizeMode="contain" />
+                            </TouchableOpacity>
+                          )}
+
+                          <TouchableOpacity style={[localStyles.iconBtnSmall, { borderWidth: 1, borderColor: T.border }]} onPress={() => handleDelete(item.id)} disabled={isGlobalProcessing}>
+                            <Ionicons name="trash" size={14} color="#EF4444" />
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -294,7 +304,6 @@ export default function ScanScreen({ navigation }: any) {
         )}
       </ScrollView>
 
-      {/* IMAGE VIEWER MODAL */}
       <Modal visible={!!selectedImage} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)} statusBarTranslucent>
         <View style={localStyles.viewerContainer}>
           <TouchableOpacity style={localStyles.viewerCloseBtn} onPress={() => setSelectedImage(null)}>
@@ -306,7 +315,6 @@ export default function ScanScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      {/* RENAME MODAL */}
       <Modal visible={renameModalVisible} transparent={true} animationType="slide" onRequestClose={() => setRenameModalVisible(false)} statusBarTranslucent>
         <KeyboardAvoidingView style={localStyles.modalBackground} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <View style={[localStyles.renameBox, { backgroundColor: T.card }]}>
@@ -337,86 +345,30 @@ const localStyles = StyleSheet.create({
   disclaimerBox: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, padding: 14, marginBottom: 20, borderWidth: 1 },
   disclaimerText: { fontSize: 14, lineHeight: 20, flex: 1 },
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  gridCard: { width: CARD_WIDTH, borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, height: 110, justifyContent: 'center' },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 10 },
+  gridCard: { width: CARD_WIDTH, borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, height: 110, justifyContent: 'center', alignItems: 'flex-start' },
+  gridIcon: { width: 28, height: 28, marginBottom: 10, resizeMode: 'contain' },
+  cardTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 0 },
   cardSubtitle: { fontSize: 14, marginTop: 4 },
   sectionHeader: { marginBottom: 16 },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   filterRow: { flexDirection: 'row', gap: 8 },
   filterChip: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, borderWidth: 1 },
   filterText: { fontSize: 14, fontWeight: '600' },
-
-  // 🚀 REDESIGNED HISTORY STYLES
   historyList: {},
-  historyCard: {
-    flexDirection: 'row',
-    borderRadius: 12, // Softer corners
-    padding: 16, // More breathing room
-    marginBottom: 12,
-    borderWidth: 1,
-    alignItems: 'center'
-  },
-  thumbnailWrapper: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
-    marginRight: 14,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  historyContent: {
-    flex: 1,
-    justifyContent: 'center'
-  },
-  historyTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6 // Clear separation
-  },
-  historyTitle: {
-    fontSize: 15, // Optimal size for lists
-    fontWeight: 'bold'
-  },
-  historyMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12 // Space before buttons
-  },
-  historyMetaText: {
-    fontSize: 12
-  },
-  historyActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    gap: 4
-  },
-  actionBtnText: {
-    fontSize: 12,
-    fontWeight: 'bold'
-  },
-  iconBtnSmall: { // Compact icon buttons
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(128,128,128,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
+  historyCard: { flexDirection: 'row', borderRadius: 8, padding: 14, marginBottom: 12, borderWidth: 1, alignItems: 'center' },
+  thumbnailWrapper: { width: 56, height: 56, borderRadius: 8, marginRight: 14, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  historyContent: { flex: 1, justifyContent: 'center' },
+  historyTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  historyTitle: { fontSize: 15, fontWeight: 'bold' },
+  historyMetaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  historyMetaText: { fontSize: 12 },
+  historyActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, gap: 4 },
+  actionBtnText: { fontSize: 12, fontWeight: 'bold' },
+  iconBtnSmall: { width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(128,128,128,0.1)', justifyContent: 'center', alignItems: 'center' },
   emptyState: { alignItems: 'center', padding: 40, opacity: 0.5 },
   loadingMoreBox: { paddingVertical: 20, alignItems: 'center' },
   loadingMoreText: { fontSize: 14, marginTop: 8 },
-
-  // MODAL STYLES
   viewerContainer: { flex: 1, backgroundColor: '#000' },
   viewerCloseBtn: { position: 'absolute', top: 50, right: 20, zIndex: 99, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
   modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },

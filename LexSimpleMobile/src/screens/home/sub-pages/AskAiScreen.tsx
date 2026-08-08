@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from '../../../services/SpeechRecognitionSafe';
 import { COLORS } from '../../../theme/globalStyles';
-import { useTheme } from '../../../theme/ThemeContext';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { postEndpoint } from '../../../services/AiEngine';
 
@@ -83,14 +82,16 @@ const TypingIndicator = () => {
   );
 };
 
-const SwipeableMessage = ({ item, index, isUser, isLastMsg, isLoading, onReply, onOptions, onRegenerate, shouldAnimate, onTypingComplete, colors }: any) => {
+const SwipeableMessage = ({ item, index, isUser, isLastMsg, isLoading, onReply, onOptions, onRegenerate, shouldAnimate, onTypingComplete }: any) => {
   const pan = useRef(new Animated.ValueXY()).current;
   const [isTypingLocal, setIsTypingLocal] = useState(shouldAnimate);
 
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dx > 10 && Math.abs(gestureState.dy) < 10,
-      onPanResponderMove: (_, gestureState) => { if (gestureState.dx > 0 && gestureState.dx <= 60) pan.setValue({ x: gestureState.dx, y: 0 }); },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx > 0 && gestureState.dx <= 60) pan.setValue({ x: gestureState.dx, y: 0 });
+      },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dx > 45) onReply(item);
         Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
@@ -100,6 +101,7 @@ const SwipeableMessage = ({ item, index, isUser, isLastMsg, isLoading, onReply, 
 
   const replyIconOpacity = pan.x.interpolate({ inputRange: [0, 20, 50], outputRange: [0, 0, 1], extrapolate: 'clamp' });
   const replyIconScale = pan.x.interpolate({ inputRange: [0, 20, 50], outputRange: [0.5, 0.8, 1], extrapolate: 'clamp' });
+
   const handleTypingDone = () => { setIsTypingLocal(false); if (onTypingComplete) onTypingComplete(item.id); };
 
   return (
@@ -115,11 +117,7 @@ const SwipeableMessage = ({ item, index, isUser, isLastMsg, isLoading, onReply, 
           </View>
         )}
         <TouchableOpacity activeOpacity={0.9} onLongPress={() => item.id !== '1' ? onOptions(item) : null} delayLongPress={400} style={{ maxWidth: '82%' }}>
-          <View style={[
-            { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },
-            isUser ? { backgroundColor: COLORS.primary, borderTopRightRadius: 4, borderBottomRightRadius: 4 } : { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4, borderBottomLeftRadius: 4 },
-            item.isError && { borderColor: COLORS.danger, backgroundColor: 'rgba(239, 68, 68, 0.1)' }
-          ]}>
+          <View style={[uiStyles.bubble, isUser ? uiStyles.userBubble : uiStyles.aiBubble, item.isError && uiStyles.errorBubble]}>
             {item.attachedFileName && (
               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 6 }}>
                 <Ionicons name="document-text" size={12} color="#fff" style={{ marginRight: 6 }} />
@@ -127,9 +125,9 @@ const SwipeableMessage = ({ item, index, isUser, isLastMsg, isLoading, onReply, 
               </View>
             )}
             {!isUser && shouldAnimate ? (
-              <TypeWriterText text={item.text} style={[{ fontSize: 15, lineHeight: 22, letterSpacing: 0.2 }, { color: colors.text }]} onComplete={handleTypingDone} />
+              <TypeWriterText text={item.text} style={[uiStyles.messageText, uiStyles.aiText]} onComplete={handleTypingDone} />
             ) : (
-              <Text style={[{ fontSize: 15, lineHeight: 22, letterSpacing: 0.2 }, isUser ? { color: '#ffffff' } : { color: colors.text }]}>{item.text}</Text>
+              <Text style={[uiStyles.messageText, isUser ? uiStyles.userText : uiStyles.aiText]}>{item.text}</Text>
             )}
           </View>
         </TouchableOpacity>
@@ -165,8 +163,6 @@ export default function AskAiScreen({ route }: any) {
   const animatedMessageIds = useRef<Set<string>>(new Set(['1']));
   const flatListRef = useRef<FlatList>(null);
   const isMounted = useRef(true);
-
-  const { colors } = useTheme();
 
   const [activePrompts, setActivePrompts] = useState<string[]>(["Paki-summarize ang dokumentong ito.", "Mayroon bang hidden risks dito?", "Ano ang mga karapatan ko rito?", "Ipaliwanag nang simple."]);
   const [messages, setMessages] = useState<Message[]>([DEFAULT_WELCOME_MSG]);
@@ -214,14 +210,14 @@ export default function AskAiScreen({ route }: any) {
       try {
         const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
         if (!permission || !permission.granted) {
-          Alert.alert("Mic Permission", "Kailangan payagan ang microphone access o gumamit ng Development Build para sa voice feature.");
+          Alert.alert("Mic Permission", "Kailangan payagan ang microphone access.");
           setIsMicModalVisible(false);
           return;
         }
         await ExpoSpeechRecognitionModule.start({ lang: 'fil-PH', interimResults: true });
       } catch (e: any) {
         setIsListening(false);
-        Alert.alert("Hardware Limitation", e.message || "Bumagsak ang Speech Module. Pwede mong gamitin ang keyboard na lang.", [{ text: "OK", onPress: () => setIsMicModalVisible(false) }]);
+        Alert.alert("Hardware Limitation", e.message || "Bumagsak ang Speech Module.", [{ text: "OK", onPress: () => setIsMicModalVisible(false) }]);
       }
     }, 400);
   };
@@ -245,6 +241,7 @@ export default function AskAiScreen({ route }: any) {
   };
 
   useEffect(() => { isMounted.current = true; return () => { isMounted.current = false; }; }, []);
+
   useEffect(() => {
     const initChat = async () => {
       try {
@@ -296,6 +293,7 @@ export default function AskAiScreen({ route }: any) {
 
   const handleReplyMessage = (msg: Message) => { if (msg.id === '1') return; setReplyingTo(msg); };
   const openMessageOptions = (msg: Message) => { setSelectedMessage(msg); setOptionsModalVisible(true); };
+
   const confirmUnsend = async () => {
     if (!selectedMessage) return;
     const msgId = selectedMessage.id;
@@ -323,6 +321,7 @@ export default function AskAiScreen({ route }: any) {
     const actualText = typeof overrideText === 'string' ? overrideText : inputText;
     const userText = actualText.trim();
     if (!userText && !attachedFile && !hiddenDataOverride) return;
+
     try { if (isListening) ExpoSpeechRecognitionModule.stop(); } catch (e) { }
 
     const baseHistory = customHistoryArray || messages;
@@ -331,28 +330,43 @@ export default function AskAiScreen({ route }: any) {
       if (m.hiddenData) contentStr = `[PREVIOUSLY ATTACHED DOCUMENT: ${m.attachedFileName}]\n${m.hiddenData}\n\nUSER SAID: ${m.text}`;
       return { role: m.sender, content: contentStr };
     });
+
     const finalFileName = fileNameOverride || (attachedFile ? attachedFile.name : undefined);
     const finalHiddenData = hiddenDataOverride || (attachedFile ? attachedFile.data : undefined);
-    let payloadText = finalHiddenData ? `[ATTACHED DOCUMENT CONTEXT: ${finalFileName}]\n\n${finalHiddenData}\n\nCURRENT USER QUESTION: ${userText || "Pakisuri ito."}` : `CURRENT USER QUESTION: ${userText}`;
+
+    let payloadText = finalHiddenData
+      ? `[ATTACHED DOCUMENT CONTEXT: ${finalFileName}]\n\n${finalHiddenData}\n\nCURRENT USER QUESTION: ${userText || "Pakisuri ito."}`
+      : `CURRENT USER QUESTION: ${userText}`;
+
     if (replyingTo) payloadText = `[USER IS REPLYING TO THIS PAST MESSAGE: "${replyingTo.text}"]\n\n` + payloadText;
+
     const newUserMsg: Message = { id: Date.now().toString(), text: userText || "Nagpadala ng dokumento.", sender: 'user', attachedFileName: finalFileName, hiddenData: finalHiddenData };
+
     let updatedMessages = [...baseHistory];
     if (!overrideText || customHistoryArray) {
       updatedMessages = [...baseHistory, newUserMsg];
       setMessages(updatedMessages);
       await AsyncStorage.setItem('@lex_chat_history', JSON.stringify(updatedMessages));
     }
+
     setInputText(''); setAttachedFile(null); setReplyingTo(null); setIsLoading(true); Keyboard.dismiss();
+
     try {
       const data = await postEndpoint('/chat', { message: payloadText, history: recentHistory });
+
       if (data.status === 'success') {
-        const aiMsg: Message = { id: Date.now().toString(), text: data.reply, sender: 'ai' };
+        // 🚀 FIX: Ensure we get the reply string and trim any extra quotes
+        const replyText = (data.reply || "No reply from AI.").trim();
+        const aiMsg: Message = { id: Date.now().toString(), text: replyText, sender: 'ai' };
+
         const storedHistoryStr = await AsyncStorage.getItem('@lex_chat_history');
         const latestHistory = storedHistoryStr ? JSON.parse(storedHistoryStr) : updatedMessages;
         const finalHistory = [...latestHistory, aiMsg];
         await AsyncStorage.setItem('@lex_chat_history', JSON.stringify(finalHistory));
         if (isMounted.current) setMessages(finalHistory);
-      } else { throw new Error(data.message || 'Failed'); }
+      } else {
+        throw new Error(data.message || 'Failed');
+      }
     } catch (error) {
       const storedHistoryStr = await AsyncStorage.getItem('@lex_chat_history');
       const latestHistory = storedHistoryStr ? JSON.parse(storedHistoryStr) : updatedMessages;
@@ -360,7 +374,9 @@ export default function AskAiScreen({ route }: any) {
       const finalHistory = [...latestHistory, errorMsg];
       await AsyncStorage.setItem('@lex_chat_history', JSON.stringify(finalHistory));
       if (isMounted.current) setMessages(finalHistory);
-    } finally { if (isMounted.current) setIsLoading(false); }
+    } finally {
+      if (isMounted.current) setIsLoading(false);
+    }
   };
 
   const renderMessage = ({ item, index }: { item: Message, index: number }) => {
@@ -374,7 +390,6 @@ export default function AskAiScreen({ route }: any) {
         onRegenerate={handleRegenerate}
         shouldAnimate={!isUser && !animatedMessageIds.current.has(item.id)}
         onTypingComplete={(id: string) => animatedMessageIds.current.add(id)}
-        colors={colors}
       />
     );
   };
@@ -393,22 +408,20 @@ export default function AskAiScreen({ route }: any) {
                 <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(129, 140, 248, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
                   <Ionicons name="sparkles" size={14} color={COLORS.primaryLight} />
                 </View>
-                <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, paddingVertical: 14, paddingHorizontal: 18, borderRadius: 12, borderTopLeftRadius: 4, borderBottomLeftRadius: 4 }}>
-                  <TypingIndicator />
-                </View>
+                <View style={[uiStyles.bubble, uiStyles.aiBubble, { paddingVertical: 14, paddingHorizontal: 18 }]}><TypingIndicator /></View>
               </View>
             </View>
           ) : null
         }
       />
 
-      <View style={{ paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 15, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border }}>
+      <View style={{ paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 25 : 15, backgroundColor: COLORS.background, borderTopWidth: 1, borderTopColor: '#1E293B' }}>
         {messages.length === 1 && !isLoading && (
           <View style={{ marginBottom: 12 }}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
               {activePrompts.map((prompt, idx) => (
-                <TouchableOpacity key={idx} style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }} onPress={() => setInputText(prompt)}>
-                  <Text style={{ color: '#CBD5E1', fontSize: 12 }}>{prompt}</Text>
+                <TouchableOpacity key={idx} style={uiStyles.suggestionChip} onPress={() => setInputText(prompt)}>
+                  <Text style={uiStyles.suggestionText}>{prompt}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -416,7 +429,7 @@ export default function AskAiScreen({ route }: any) {
         )}
 
         {replyingTo && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderLeftWidth: 3, borderLeftColor: COLORS.primaryLight, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.background, borderLeftWidth: 3, borderLeftColor: COLORS.primaryLight, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: COLORS.primaryLight, fontSize: 11, fontWeight: 'bold', marginBottom: 2 }}>Replying to {replyingTo.sender === 'ai' ? 'Lex-Simple' : 'Yourself'}</Text>
               <Text style={{ color: '#94A3B8', fontSize: 12, fontStyle: 'italic' }} numberOfLines={1}>{replyingTo.text}</Text>
@@ -426,25 +439,25 @@ export default function AskAiScreen({ route }: any) {
         )}
 
         {attachedFile && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderWidth: 1, borderColor: COLORS.primaryLight, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', borderWidth: 1, borderColor: COLORS.primaryLight, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 }}>
             <View style={{ backgroundColor: COLORS.primary, padding: 6, borderRadius: 6, marginRight: 8 }}><Ionicons name="document-text" size={14} color="#fff" /></View>
-            <Text style={{ flex: 1, color: colors.text, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>{attachedFile.name}</Text>
+            <Text style={{ flex: 1, color: '#E2E8F0', fontSize: 13, fontWeight: '600' }} numberOfLines={1}>{attachedFile.name}</Text>
             <TouchableOpacity onPress={() => setAttachedFile(null)} style={{ padding: 4, marginLeft: 5 }}><Ionicons name="close-circle" size={20} color="#94A3B8" /></TouchableOpacity>
           </View>
         )}
 
         <View style={{ paddingHorizontal: 16 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48 }}>
+          <View style={uiStyles.inputBox}>
             <TextInput
-              style={{ flex: 1, color: colors.text, fontSize: 15, maxHeight: 120, paddingTop: 0, paddingBottom: 0 }}
+              style={uiStyles.textInput}
               placeholder={attachedFile ? "Magtanong tungkol sa doc..." : "Mag-type..."}
               placeholderTextColor="#64748B"
               value={inputText} onChangeText={setInputText} multiline maxLength={500} onFocus={scrollToBottom}
             />
             <TouchableOpacity style={{ padding: 8, marginRight: 2 }} onPress={openMicModal}>
-              <Ionicons name="mic-outline" size={22} color={colors.subText} />
+              <Ionicons name="mic-outline" size={22} color="#94A3B8" />
             </TouchableOpacity>
-            <TouchableOpacity style={[{ backgroundColor: COLORS.primary, width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginLeft: 8 }, (!inputText.trim() && !attachedFile || isLoading) && { backgroundColor: colors.border }]} onPress={() => sendMessage()} disabled={(!inputText.trim() && !attachedFile) || isLoading}>
+            <TouchableOpacity style={[uiStyles.sendBtn, (!inputText.trim() && !attachedFile || isLoading) && uiStyles.sendBtnDisabled]} onPress={() => sendMessage()} disabled={(!inputText.trim() && !attachedFile) || isLoading}>
               <Ionicons name="send" size={18} color={(inputText.trim() || attachedFile) && !isLoading ? '#fff' : '#64748B'} />
             </TouchableOpacity>
           </View>
@@ -452,38 +465,38 @@ export default function AskAiScreen({ route }: any) {
       </View>
 
       <Modal visible={isMicModalVisible} transparent={true} animationType="fade" onRequestClose={closeMicModal}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: colors.card, borderRadius: 16, width: '85%', padding: 25, alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: COLORS.primaryLight, fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>{isListening ? "Nakikinig..." : "I-tap ang mic para magsalita"}</Text>
-            <Text style={{ color: colors.text, fontSize: 16, textAlign: 'center', marginBottom: 25, minHeight: 60, fontStyle: 'italic' }} numberOfLines={3}>
+        <View style={uiStyles.modalBackdrop}>
+          <View style={uiStyles.micModalContent}>
+            <Text style={uiStyles.micModalTitle}>{isListening ? "Nakikinig..." : "I-tap ang mic para magsalita"}</Text>
+            <Text style={uiStyles.micModalTranscript} numberOfLines={3}>
               {inputText.replace(originalTextRef.current, '').trim() || (isListening ? "..." : "Naka-pause.")}
             </Text>
             <TouchableOpacity onPress={toggleListeningInModal} activeOpacity={0.8}>
               <Animated.View style={{ transform: [{ scale: micScaleAnim }] }}>
-                <View style={[{ width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 25 }, isListening ? { backgroundColor: COLORS.danger } : { backgroundColor: colors.border }]}>
+                <View style={[uiStyles.bigMicIcon, isListening ? uiStyles.micActiveBg : uiStyles.micInactiveBg]}>
                   <Ionicons name={isListening ? "mic" : "mic-off-outline"} size={36} color="#fff" />
                 </View>
               </Animated.View>
             </TouchableOpacity>
-            <View style={{ flexDirection: 'row', gap: 15, width: '100%' }}>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: colors.border, paddingVertical: 14, borderRadius: 10, alignItems: 'center' }} onPress={closeMicModal}><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[{ flex: 1, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 10, alignItems: 'center' }, !inputText.trim() && { opacity: 0.5 }]} onPress={handleSendFromMic} disabled={!inputText.trim()}><Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Send Now</Text></TouchableOpacity>
+            <View style={uiStyles.micModalActions}>
+              <TouchableOpacity style={uiStyles.micModalCancelBtn} onPress={closeMicModal}><Text style={uiStyles.micModalBtnText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[uiStyles.micModalSendBtn, !inputText.trim() && { opacity: 0.5 }]} onPress={handleSendFromMic} disabled={!inputText.trim()}><Text style={uiStyles.micModalBtnText}>Send Now</Text></TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
       <Modal visible={optionsModalVisible} transparent={true} animationType="fade" onRequestClose={() => setOptionsModalVisible(false)}>
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 }} activeOpacity={1} onPress={() => setOptionsModalVisible(false)}>
+        <TouchableOpacity style={uiStyles.modalBackdrop} activeOpacity={1} onPress={() => setOptionsModalVisible(false)}>
           <TouchableWithoutFeedback>
-            <View style={{ backgroundColor: colors.card, borderRadius: 12, width: '100%', padding: 20, borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ color: colors.text, fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>Message Options</Text>
-              <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }} onPress={() => { setOptionsModalVisible(false); handleReplyMessage(selectedMessage!); }}>
-                <Ionicons name="arrow-undo" size={20} color={COLORS.primaryLight} style={{ marginRight: 12 }} /><Text style={{ color: colors.text, fontSize: 14, fontWeight: '500' }}>Reply to Message</Text>
+            <View style={uiStyles.modalContent}>
+              <Text style={uiStyles.modalTitle}>Message Options</Text>
+              <TouchableOpacity style={uiStyles.modalActionBtn} onPress={() => { setOptionsModalVisible(false); handleReplyMessage(selectedMessage!); }}>
+                <Ionicons name="arrow-undo" size={20} color={COLORS.primaryLight} style={{ marginRight: 12 }} /><Text style={uiStyles.modalActionText}>Reply to Message</Text>
               </TouchableOpacity>
               {selectedMessage?.sender === 'user' && (
-                <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border }} onPress={confirmUnsend}>
-                  <Ionicons name="trash" size={20} color={COLORS.danger} style={{ marginRight: 12 }} /><Text style={{ color: COLORS.danger, fontSize: 14, fontWeight: '500' }}>Unsend Message</Text>
+                <TouchableOpacity style={[uiStyles.modalActionBtn, { borderTopWidth: 1, borderTopColor: '#334155' }]} onPress={confirmUnsend}>
+                  <Ionicons name="trash" size={20} color={COLORS.danger} style={{ marginRight: 12 }} /><Text style={[uiStyles.modalActionText, { color: COLORS.danger }]}>Unsend Message</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -492,16 +505,13 @@ export default function AskAiScreen({ route }: any) {
       </Modal>
 
       <Modal visible={clearModalVisible} transparent={true} animationType="fade" onRequestClose={() => setClearModalVisible(false)}>
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 }} activeOpacity={1} onPress={() => setClearModalVisible(false)}>
+        <TouchableOpacity style={uiStyles.modalBackdrop} activeOpacity={1} onPress={() => setClearModalVisible(false)}>
           <TouchableWithoutFeedback>
-            <View style={{ backgroundColor: colors.card, borderRadius: 12, width: '100%', padding: 20, borderWidth: 1, borderColor: colors.border }}>
-              <View style={{ alignItems: 'center', marginBottom: 15 }}>
-                <Ionicons name="trash" size={28} color={COLORS.danger} />
-                <Text style={{ color: colors.text, fontSize: 16, fontWeight: 'bold', marginTop: 8 }}>Clear Conversation</Text>
-              </View>
+            <View style={uiStyles.modalContent}>
+              <View style={{ alignItems: 'center', marginBottom: 15 }}><Ionicons name="trash" size={28} color={COLORS.danger} /><Text style={uiStyles.modalTitle}>Clear Conversation</Text></View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity style={{ flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: colors.border }} onPress={() => setClearModalVisible(false)}><Text style={{ color: '#fff', fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={{ flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: COLORS.danger }} onPress={confirmClearChat}><Text style={{ color: '#fff', fontWeight: '600' }}>Clear Chat</Text></TouchableOpacity>
+                <TouchableOpacity style={[uiStyles.modalBtn, { backgroundColor: '#334155' }]} onPress={() => setClearModalVisible(false)}><Text style={{ color: '#fff', fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[uiStyles.modalBtn, { backgroundColor: COLORS.danger }]} onPress={confirmClearChat}><Text style={{ color: '#fff', fontWeight: '600' }}>Clear Chat</Text></TouchableOpacity>
               </View>
             </View>
           </TouchableWithoutFeedback>
@@ -510,10 +520,43 @@ export default function AskAiScreen({ route }: any) {
     </>
   );
 
-  // 🚀 LALABAS ANG TRASH ICON SA PINAKA-DULONG GILID NG APP BAR (FAR RIGHT)
   return (
     <ScreenLayout title="Ask AI" noPadding={true} rightIcon="trash-outline" onRightPress={() => setClearModalVisible(true)}>
-      {Platform.OS === 'ios' ? <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior="padding" keyboardVerticalOffset={90}>{chatContent}</KeyboardAvoidingView> : <View style={[{ flex: 1, backgroundColor: colors.bg }, { paddingBottom: keyboardOffset }]}>{chatContent}</View>}
+      {Platform.OS === 'ios' ? <KeyboardAvoidingView style={{ flex: 1, backgroundColor: COLORS.background }} behavior="padding" keyboardVerticalOffset={90}>{chatContent}</KeyboardAvoidingView> : <View style={[{ flex: 1, backgroundColor: COLORS.background }, { paddingBottom: keyboardOffset }]}>{chatContent}</View>}
     </ScreenLayout>
   );
 };
+
+const uiStyles = StyleSheet.create({
+  bubble: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },
+  userBubble: { backgroundColor: COLORS.primary, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
+  aiBubble: { backgroundColor: '#1E1E2E', borderWidth: 1, borderColor: '#334155', borderTopLeftRadius: 2, borderBottomLeftRadius: 2 },
+  errorBubble: { borderColor: COLORS.danger, backgroundColor: 'rgba(239, 68, 68, 0.1)' },
+  messageText: { fontSize: 15, lineHeight: 22 },
+  userText: { color: '#ffffff' },
+  aiText: { color: '#E2E8F0' },
+  suggestionChip: { backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+  suggestionText: { color: '#CBD5E1', fontSize: 13 },
+  inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E1E2E', borderWidth: 1, borderColor: '#334155', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48 },
+  textInput: { flex: 1, color: '#fff', fontSize: 15, maxHeight: 120, paddingTop: 0, paddingBottom: 0 },
+  sendBtn: { backgroundColor: COLORS.primary, width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  sendBtnDisabled: { backgroundColor: '#1E293B' },
+
+  micModalContent: { backgroundColor: '#1E293B', borderRadius: 24, width: '85%', padding: 25, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  micModalTitle: { color: COLORS.primaryLight, fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
+  micModalTranscript: { color: '#fff', fontSize: 16, textAlign: 'center', marginBottom: 25, minHeight: 60, fontStyle: 'italic' },
+  bigMicIcon: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 25 },
+  micActiveBg: { backgroundColor: COLORS.danger },
+  micInactiveBg: { backgroundColor: '#334155' },
+  micModalActions: { flexDirection: 'row', gap: 15, width: '100%' },
+  micModalCancelBtn: { flex: 1, backgroundColor: '#334155', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  micModalSendBtn: { flex: 1, backgroundColor: COLORS.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  micModalBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#1E293B', borderRadius: 16, width: '100%', padding: 20, borderWidth: 1, borderColor: '#334155' },
+  modalTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
+  modalActionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15 },
+  modalActionText: { color: '#E2E8F0', fontSize: 15, fontWeight: '500' },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' }
+});

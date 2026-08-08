@@ -1,37 +1,37 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Network from 'expo-network';
 import { postEndpoint } from '../../../services/AiEngine';
-import { Linking } from 'react-native';
 
 import { COLORS, SCAN_FRAME_HEIGHT } from '../../../theme/globalStyles';
 import ProcessingLoader from '../../../components/ProcessingLoader';
 import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
 import { sanitizeLocalText } from '../../../utils/sanitizer';
-// 🚀 IMPORT GLOBAL THEME
 import { useTheme } from '../../../theme/ThemeContext';
+import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
+import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 
 export default function ScannerScreen({ navigation }: any) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
-
   const hasInitialized = useRef(false);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanFeedback, setScanFeedback] = useState("Position document inside the frame");
   const [isFlashOn, setIsFlashOn] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  // 🎨 KUNIN ANG THEME COLORS
   const { isDarkMode, colors: T } = useTheme();
+
+  // 🚀 REUSABLE HOOK
+  const { isProcessing: isAnalyzing, triggerBackgroundProcess, cancelProcess } = useBackgroundProcessScreen('ScannerScreen');
 
   const LOADING_MESSAGES = [
     "Extracting text offline...",
@@ -41,12 +41,16 @@ export default function ScannerScreen({ navigation }: any) {
     "Simplifying for you..."
   ];
 
+  // 🚀 FIX: KAPAG MAY ONGOING PROCESS (isAnalyzing), WAG MAG-OPEN NG CAMERA
   useEffect(() => {
+    if (isAnalyzing) {
+      hasInitialized.current = true; // Mark as initialized so it doesn't run when isAnalyzing becomes false
+      return;
+    }
     if (!permission || hasInitialized.current) return;
     hasInitialized.current = true;
     handleOpenCamera();
-    return () => { scanLineAnim.stopAnimation(); };
-  }, [permission]);
+  }, [permission, isAnalyzing]);
 
   useEffect(() => {
     if (isCameraOpen && !capturedImage) {
@@ -63,32 +67,22 @@ export default function ScannerScreen({ navigation }: any) {
   }, [isCameraOpen, capturedImage]);
 
   const handleOpenCamera = async () => {
-    if (permission?.granted) {
-      setIsCameraOpen(true);
-      return;
-    }
-
-    const result = await requestPermission();
-    if (result.granted) {
-      setIsCameraOpen(true);
-    } else {
-      // 🚀 KUNG DENIED, IPAKITA ANG OPTION NA PUMUNTA SA SETTINGS
-      showAlert(
-        "Kailangan ng Camera Access",
-        "Para makapag-scan ng dokumento, kailangan namin ng pahintulot na gamitin ang camera mo. Pinindot mo yata ang 'Deny' kanina.",
-        "warning",
-        [
+    if (permission?.granted) setIsCameraOpen(true);
+    else {
+      const result = await requestPermission();
+      if (result.granted) setIsCameraOpen(true);
+      else {
+        showAlert("Camera Permission", "Kailangan ng camera access para makapag-scan.", "warning", [
           { text: "Bumalik", style: "cancel", onPress: () => navigation.goBack() },
           { text: "Pumunta sa Settings", onPress: () => Linking.openSettings() }
-        ]
-      );
+        ]);
+      }
     }
   };
 
   const resetScanner = () => {
     setCapturedImage(null);
     setIsCameraOpen(true);
-    setIsAnalyzing(false);
     setScanFeedback("Position document inside the frame");
     setIsProcessing(false);
     setIsFlashOn(false);
@@ -122,7 +116,6 @@ export default function ScannerScreen({ navigation }: any) {
   };
 
   const triggerErrorAlert = (msg: string) => {
-    setIsAnalyzing(false);
     setIsProcessing(false);
     let alertTitle = "System Error";
     let alertType: AlertType = "error";
@@ -142,7 +135,6 @@ export default function ScannerScreen({ navigation }: any) {
           setCapturedImage(photo.uri);
           setIsCameraOpen(false);
           setIsFlashOn(false);
-          setIsAnalyzing(true);
 
           const formattedUri = photo.uri.startsWith('file://') ? photo.uri : `file://${photo.uri}`;
           let extractedText = "";
@@ -159,30 +151,27 @@ export default function ScannerScreen({ navigation }: any) {
           if (networkState.isConnected) {
             startAnalysisWithImageOnly(extractedText, savedId);
           } else {
-            setIsAnalyzing(false);
-            showAlert("Offline Mode", "Walang internet connection. Na-extract na ang text at naka-save sa Recent Files. Pwede mo i-review ang text at i-analyze mamaya.", "info", [{ text: "OK", onPress: () => navigation.goBack() }]);
+            triggerErrorAlert("Offline Mode. Na-save sa Recent Files.");
           }
         }
       } catch (error) { triggerErrorAlert("Hindi makuha ang picture. Subukan ulit."); }
     }
   };
 
-  const startAnalysisWithImageOnly = async (extractedText: string, dbId: string) => {
-    try {
+  const startAnalysisWithImageOnly = (extractedText: string, dbId: string) => {
+    // 🚀 TAWAGIN ANG REUSABLE TRIGGER AT IPASA ANG SIGNAL AT dbId
+    triggerBackgroundProcess(async (signal: AbortSignal) => {
       const locallySanitizedText = sanitizeLocalText(extractedText);
-      const data = await postEndpoint('/simplify', { text: locallySanitizedText });
+      const data = await postEndpoint('/simplify', { text: locallySanitizedText }, signal);
 
-      if (data.status === 'error') { triggerErrorAlert("AI Error: " + (data.message || "Server processing failed.")); return; }
-      if (data.status === 'success') {
-        setIsAnalyzing(false);
+      if (data && data.status === 'success') {
         const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, sanitizedText: locallySanitizedText };
         await updateHistoryToScanned(dbId, combinedAnalysisResult, extractedText, locallySanitizedText);
-        navigation.replace('ResultScreen', { analysisResult: combinedAnalysisResult });
-      } else { triggerErrorAlert("AI Error: " + (data.message || "Server processing failed.")); }
-    } catch (error) {
-      console.error("🔥 ERROR:", error);
-      triggerErrorAlert("System Error. Please check your internet connection.");
-    }
+        return combinedAnalysisResult;
+      } else {
+        throw new Error(data?.message || "Server processing failed.");
+      }
+    }, dbId); // 🚀 DITO: dbId na lang ang ipinasa, yung screenName nasa loob na ng hook
   };
 
   // 🟢 ANALYZING UI
@@ -190,7 +179,12 @@ export default function ScannerScreen({ navigation }: any) {
     return (
       <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <ProcessingLoader title="Analyzing Contract" messages={LOADING_MESSAGES} />
+        <ProcessingLoader
+          title="Analyzing Contract"
+          messages={LOADING_MESSAGES}
+          onMinimize={() => navigation.navigate('Main', { screen: 'Scan' })}
+          onCancel={() => cancelProcess()}
+        />
         <AlertRender />
       </View>
     );
@@ -201,12 +195,7 @@ export default function ScannerScreen({ navigation }: any) {
     return (
       <View style={uiStyles.cameraContainer}>
         <StatusBar barStyle="light-content" />
-        <CameraView
-          style={{ flex: 1, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-          facing="back"
-          ref={cameraRef}
-          enableTorch={isFlashOn}
-        />
+        <CameraView style={{ flex: 1, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} facing="back" ref={cameraRef} enableTorch={isFlashOn} />
 
         <View style={uiStyles.scanOverlayBlock} />
         <View style={uiStyles.scanMiddleRow}>
@@ -246,7 +235,6 @@ export default function ScannerScreen({ navigation }: any) {
     );
   }
 
-  // ⏳ DEFAULT LOADING CAMERA STATE
   return (
     <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -257,7 +245,6 @@ export default function ScannerScreen({ navigation }: any) {
   );
 }
 
-// 🎨 SLEEK & SHARP UI STYLES FOR SCANNER
 const uiStyles = StyleSheet.create({
   cameraContainer: { flex: 1, backgroundColor: '#000' },
   scanOverlayBlock: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.70)' },
