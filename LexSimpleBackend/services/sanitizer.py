@@ -1,41 +1,55 @@
+import cv2
+import numpy as np
+import pytesseract
 import re
 
-def sanitize_legal_text(raw_text: str) -> str:
+# Ito yung path ng Tesseract sa Windows mo base sa screenshot mo
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+def sanitize_legal_text(text: str) -> str:
     """
-    Nililinis ang text para itago ang mga sensitive info (DPA Compliance).
-    TYPO-RESILIENT UPDATE: Kayang i-handle ang OCR errors tulad ng "of legal aEe" o "FilipinD".
+    Nililinis ang extracted text (e.g., PII removal o whitespace formatting) bago ipasa sa AI.
+    Kung may specific masking logic ka dito dati, pwede mong ibalik.
     """
-    if not raw_text: return ""
-    sanitized = raw_text
+    if not text:
+        return ""
+    # Basic cleanup: tinatanggal ang mga sobrang spaces o newlines
+    clean_text = re.sub(r'\s+', ' ', text)
+    return clean_text.strip()
 
-    sanitized = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '[REDACTED_EMAIL]', sanitized)
-    sanitized = re.sub(r'(\+63|0)9\d{2}[-\s]?\d{3}[-\s]?\d{4}', '[REDACTED_PHONE]', sanitized)
 
-    entities_to_redact = []
+def clean_and_extract_image(image_bytes: bytes, filter_type: str) -> str:
+    """
+    Tinatanggap ang raw image bytes, nililinis gamit ang OpenCV base sa filter,
+    at ine-extract ang text gamit ang Tesseract OCR.
+    """
+    # 1. Convert bytes to OpenCV Image format (numpy array)
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    # 1. Smart Address Catcher
-    addr_pattern = r'(?i)(?:address(?: at)?|residing(?: at)?|located(?: at)?|location:)\s+([^\(\);\n]{5,80}?)(?=\s*(?:\(|hereinafter|;|$))'
-    for match in re.finditer(addr_pattern, sanitized):
-        entities_to_redact.append(("[REDACTED_ADDRESS]", match.group(1).strip()))
+    if img is None:
+        return ""
 
-    # 2. TYPO-RESILIENT Legal Name/Entity Catcher 💡
-    legal_name_pattern = r'(?i)([A-Z][A-Za-z0-9\.\-\s\&]{3,50}?),\s*(?:of legal|a duly|Filipin[a-z]|single|married|widow|an entity)'
-    for match in re.finditer(legal_name_pattern, sanitized):
-        val = match.group(1).strip()
-        val = re.sub(r'(?i)^-and-\s*', '', val).strip()
-        if len(val) > 3 and "address" not in val.lower() and "hereinafter" not in val.lower():
-            entities_to_redact.append(("[REDACTED_NAME]", val))
+    # 2. Apply Filters (Parang Adobe Scan)
+    if filter_type == 'grayscale':
+        processed_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+    elif filter_type == 'bw':
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Standard thresholding para maging pure black and white
+        _, processed_img = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        
+    elif filter_type == 'magic':
+        # Magic Color: Adaptive thresholding para matanggal ang shadows at ma-enhance ang text
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        processed_img = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+    else:
+        # Default kung walang filter
+        processed_img = img
 
-    # 3. Fallback Labels
-    label_pattern = r'(?i)(?:Tenant|Landlord|Lessor|Lessee|Buyer|Seller|Name)\s*:\s*([A-Z][a-zA-Z\.\-\s]{3,40})(?=\n|,|$)'
-    for match in re.finditer(label_pattern, sanitized):
-        entities_to_redact.append(("[REDACTED_NAME]", match.group(1).strip()))
-
-    # 4. EXECUTE GLOBAL REDACTION
-    entities_to_redact.sort(key=lambda x: len(x[1]), reverse=True)
-
-    for entity_type, entity_value in entities_to_redact:
-        safe_entity = re.escape(entity_value)
-        sanitized = re.sub(f'(?i){safe_entity}', entity_type, sanitized)
-
-    return sanitized
+    # 3. I-run ang OCR sa nilinis na image
+    extracted_text = pytesseract.image_to_string(processed_img)
+    
+    return extracted_text.strip()

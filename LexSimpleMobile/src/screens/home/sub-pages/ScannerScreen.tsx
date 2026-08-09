@@ -1,28 +1,25 @@
+// src/screens/home/sub-pages/ScannerScreen.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking, Image } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as Network from 'expo-network';
-import { postEndpoint } from '../../../services/AiEngine';
 
 import { COLORS, SCAN_FRAME_HEIGHT } from '../../../theme/globalStyles';
 import ProcessingLoader from '../../../components/ProcessingLoader';
-import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
-import { sanitizeLocalText } from '../../../utils/sanitizer';
+import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
-import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 
-export default function ScannerScreen({ navigation }: any) {
+export default function ScannerScreen({ route, navigation }: any) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const hasInitialized = useRef(false);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
-  // 🚀 MULTI-CAPTURE STATE
-  const [capturedPages, setCapturedPages] = useState<string[]>([]);
+  // MULTI-CAPTURE STATE
+  const [capturedPages, setCapturedPages] = useState<string[]>(route.params?.existingPages || []);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(true);
   const [scanFeedback, setScanFeedback] = useState("Position document inside the frame");
@@ -30,16 +27,7 @@ export default function ScannerScreen({ navigation }: any) {
 
   const { showAlert, AlertRender } = useCustomAlert();
   const { isDarkMode, colors: T } = useTheme();
-
-  const { isProcessing: isAnalyzing, triggerBackgroundProcess, cancelProcess } = useBackgroundProcessScreen('ScannerScreen');
-
-  const LOADING_MESSAGES = [
-    "Extracting text offline...",
-    "Sanitizing sensitive data locally...",
-    "Connecting to Lex-Simple AI...",
-    "Analyzing legal terms...",
-    "Simplifying for you..."
-  ];
+  const { isProcessing: isAnalyzing, cancelProcess } = useBackgroundProcessScreen('ScannerScreen');
 
   useEffect(() => {
     if (!permission || hasInitialized.current) return;
@@ -47,6 +35,12 @@ export default function ScannerScreen({ navigation }: any) {
     handleOpenCamera();
   }, [permission]);
 
+  useEffect(() => {
+    if (route.params?.existingPages) {
+      setCapturedPages(route.params.existingPages);
+    }
+  }, [route.params?.existingPages]);
+  
   useEffect(() => {
     if (isCameraOpen && capturedPages.length === 0) {
       Animated.loop(
@@ -90,7 +84,6 @@ export default function ScannerScreen({ navigation }: any) {
       try {
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
         if (photo) {
-          // 🚀 ADD TO PAGES ARRAY
           setCapturedPages(prev => [...prev, photo.uri]);
           setScanFeedback("Position next document inside the frame");
         }
@@ -106,13 +99,12 @@ export default function ScannerScreen({ navigation }: any) {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsMultipleSelection: true, // 🚀 ALLOW MULTIPLE SELECTION
+        allowsMultipleSelection: true,
         quality: 0.8,
       });
 
       if (!result.canceled) {
         const newUris = result.assets.map(a => a.uri);
-        // 🚀 ADD ALL SELECTED TO PAGES ARRAY
         setCapturedPages(prev => [...prev, ...newUris]);
       }
     } catch (error) {
@@ -122,44 +114,16 @@ export default function ScannerScreen({ navigation }: any) {
 
   const handleDoneCapture = async () => {
     if (capturedPages.length === 0) return;
-
-    // 🚀 TINANGGAL ANG setCapturedPages([])
     navigation.navigate('BatchEditScreen', { pages: capturedPages });
   };
 
-  const startBatchAnalysis = (imageUris: string[]) => {
-    triggerBackgroundProcess(async (signal: AbortSignal) => {
-      // 🚀 TEMP: SEND FIRST IMAGE ONLY FOR NOW TO TEST EXISTING BACKEND
-      // SA PHASE 2 NATIN IPAPALITAN ITO NG /simplify_batch ENDPOINT
-      const firstImage = imageUris[0];
-
-      const formData = new FormData();
-      formData.append('file', {
-        uri: firstImage,
-        name: `scan_page_1.jpg`,
-        type: 'image/jpeg'
-      });
-
-      const { postFileEndpoint } = require('../../../services/AiEngine');
-      const data = await postFileEndpoint('/simplify_file', formData, signal);
-
-      if (data && data.status === 'success') {
-        const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, sanitizedText: data.sanitizedText };
-        return combinedAnalysisResult;
-      } else {
-        throw new Error(data?.message || "Server processing failed.");
-      }
-    });
-  };
-
-  // 🟢 ANALYZING UI
   if (isAnalyzing) {
     return (
       <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <ProcessingLoader
           title="Analyzing Contract"
-          messages={LOADING_MESSAGES}
+          messages={["Extracting text...", "Connecting to Lex-Simple AI..."]}
           onMinimize={() => navigation.navigate('Main', { screen: 'Scan' })}
           onCancel={() => cancelProcess()}
         />
@@ -168,7 +132,6 @@ export default function ScannerScreen({ navigation }: any) {
     );
   }
 
-  // 🟢 CAMERA UI
   if (isCameraOpen && permission?.granted) {
     return (
       <View style={uiStyles.cameraContainer}>
@@ -213,7 +176,6 @@ export default function ScannerScreen({ navigation }: any) {
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 30 }}>
-            {/* 🚀 DONE BUTTON (Visible if > 0 pages) */}
             {capturedPages.length > 0 && (
               <TouchableOpacity style={uiStyles.doneBtn} onPress={handleDoneCapture}>
                 <Ionicons name="checkmark-circle" size={60} color={COLORS.primaryLight} />
@@ -224,7 +186,6 @@ export default function ScannerScreen({ navigation }: any) {
               <View style={uiStyles.shutterInner} />
             </TouchableOpacity>
 
-            {/* 🚀 TRASH BUTTON (Visible if > 0 pages) */}
             {capturedPages.length > 0 && (
               <TouchableOpacity style={uiStyles.trashBtn} onPress={resetScanner}>
                 <Ionicons name="trash-outline" size={30} color="#EF4444" />
