@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
@@ -30,7 +30,7 @@ export default function DictionaryDetailScreen({ route }: any) {
   const [isFetchingAi, setIsFetchingAi] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  const { colors: T } = useTheme(); // 🚀 GLOBAL THEME
+  const { colors: T } = useTheme();
 
   const filteredData = useMemo(() => {
     if (activeCategory === 'all') return dictionaryData;
@@ -91,7 +91,6 @@ export default function DictionaryDetailScreen({ route }: any) {
       const data = await postEndpoint('/explain', { title: term, raw_text: rawText });
 
       if (data && data.status === 'success') {
-        // 🚀 FIX: Kunin ang 'definition' mula sa 'data' object ng response
         const explanationText = data.data?.definition || data.definition || "No explanation available.";
         setAiExplanations(prev => ({ ...prev, [index]: { definition: explanationText } }));
       } else {
@@ -154,7 +153,12 @@ export default function DictionaryDetailScreen({ route }: any) {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <Ionicons name={isAiOpen ? "close-circle" : "sparkles"} size={14} color="#fff" style={{ marginRight: 5 }} />
+                    {/* 🚀 CUSTOM CHAT AI ICON (Applied white tintColor) */}
+                    <Image
+                      source={require('../../../../assets/icons/chat_ai.png')}
+                      style={{ width: 14, height: 14, marginRight: 5, tintColor: '#FFFFFF' }}
+                      resizeMode="contain"
+                    />
                     <Text style={uiStyles.aiButtonText}>{isAiOpen ? 'Close AI' : 'Explain via AI'}</Text>
                   </>
                 )}
@@ -166,6 +170,7 @@ export default function DictionaryDetailScreen({ route }: any) {
         {isAiOpen && aiData && (
           <View style={[uiStyles.aiResultBox, { backgroundColor: T.bg, borderColor: COLORS.primaryLight }]}>
             <View style={uiStyles.aiHeaderRow}>
+              {/* 🚀 REVERTED TO BULB ICON */}
               <Ionicons name="bulb" size={16} color={COLORS.warning} />
               <Text style={uiStyles.aiResultTitle}>Explanation</Text>
             </View>
@@ -238,7 +243,6 @@ export default function DictionaryDetailScreen({ route }: any) {
   );
 }
 
-// 🎨 SLEEK & SHARP UI STYLES
 const uiStyles = StyleSheet.create({
   card: {
     borderRadius: 10,

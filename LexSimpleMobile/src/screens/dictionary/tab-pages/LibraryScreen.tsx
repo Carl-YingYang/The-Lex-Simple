@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Platform, StatusBar, ActivityIndicator, StyleSheet
+  View, Text, TextInput, TouchableOpacity, ScrollView, Platform, StatusBar, ActivityIndicator, StyleSheet, Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Fuse from 'fuse.js';
@@ -9,10 +9,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import defaultDictionary from '../../../data/legal_dictionary.json';
 import { COLORS } from '../../../theme/globalStyles';
 import LoadingSpinner from '../../../components/LoadingSpinner';
-import { useCustomAlert, AlertType } from '../../../components/CustomAlert';
+import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 
-// 🚀 REUSABLE RESULT CARD (Sleek UI)
 const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
   const [activeTab, setActiveTab] = useState<'ai' | 'basis' | 'example'>(isOfflineMode ? 'basis' : 'ai');
   const [isTextExpanded, setIsTextExpanded] = useState(false);
@@ -39,8 +38,6 @@ const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
 
   return (
     <View style={[uiStyles.contentBox, { backgroundColor: T.bg, borderColor: T.border }]}>
-
-      {/* TITLE AT LEGAL BASIS */}
       <View style={{ marginBottom: 15 }}>
         <Text style={[uiStyles.termTitle, { color: T.text }]}>{item.term}</Text>
         <Text style={[uiStyles.basisText, { color: COLORS.primaryLight }]} numberOfLines={2}>
@@ -50,7 +47,6 @@ const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
 
       <View style={[uiStyles.divider, { backgroundColor: T.border }]} />
 
-      {/* TABS (Itatago kapag offline) */}
       {!isOfflineMode && (
         <View style={[uiStyles.tabsWrapper, { backgroundColor: T.card, borderColor: T.border }]}>
           <TouchableOpacity style={[uiStyles.tabBtn, activeTab === 'basis' && { backgroundColor: COLORS.primary }]} onPress={() => { setActiveTab('basis'); setIsTextExpanded(false); }}>
@@ -65,7 +61,6 @@ const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
         </View>
       )}
 
-      {/* DYNAMIC CONTENT */}
       {isOfflineMode || activeTab === 'basis' ? (
         <View style={{ marginTop: 12 }}>
           <Text style={[uiStyles.contentTitle, { color: T.subText }]}>RAW LEGAL PROVISION</Text>
@@ -76,7 +71,8 @@ const ResultCard = ({ item, isOfflineMode, getRawText, T }: any) => {
       ) : activeTab === 'ai' ? (
         <View style={{ marginTop: 12 }}>
           <View style={uiStyles.aiHeaderRow}>
-            <Ionicons name="sparkles" size={14} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
+            {/* 🚀 REMOVED tintColor to preserve original image colors */}
+            <Image source={require('../../../../assets/icons/message_ai.png')} style={{ width: 16, height: 16, marginRight: 6 }} resizeMode="contain" />
             <Text style={[uiStyles.contentTitle, { color: T.subText }]}>AI SIMPLIFIED EXPLANATION</Text>
           </View>
           <View style={[uiStyles.innerBox, { backgroundColor: T.card, borderColor: T.border }]}>
@@ -100,13 +96,12 @@ export default function LibraryScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState('');
-
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [dictionaryData, setDictionaryData] = useState<any[]>(defaultDictionary);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  const { colors: T, isDarkMode } = useTheme(); // 🚀 GLOBAL THEME
+  const { colors: T, isDarkMode } = useTheme();
 
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
   const localFileUri = FileSystem.documentDirectory + 'lex_offline_db.json';
@@ -223,7 +218,6 @@ export default function LibraryScreen({ navigation }: any) {
       } else {
         setError('Term not found in the online database.');
       }
-
     } catch (networkError) {
       console.log('Network Error: Falling back to Offline Mode.');
 
@@ -256,7 +250,6 @@ export default function LibraryScreen({ navigation }: any) {
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
-      {/* HEADER */}
       <View style={uiStyles.header}>
         <View>
           <Text style={[uiStyles.headerTitle, { color: T.text }]}>Lex-Library</Text>
@@ -273,17 +266,16 @@ export default function LibraryScreen({ navigation }: any) {
             </>
           ) : (
             <>
-              <Ionicons name="sync" size={14} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
+              <Ionicons name="cloud-download-outline" size={16} color={COLORS.primaryLight} style={{ marginRight: 6 }} />
               <Text style={[uiStyles.syncBtnText, { color: T.text }]}>UPDATE</Text>
             </>
           )}
         </TouchableOpacity>
       </View>
 
-      {/* SEARCH BAR */}
       <View style={uiStyles.searchArea}>
         <View style={[uiStyles.searchWrapper, { backgroundColor: T.card, borderColor: T.border }]}>
-          <Ionicons name="search" size={20} color={T.subText} />
+          <Ionicons name="search-outline" size={20} color={T.subText} />
           <TextInput
             style={[uiStyles.searchInput, { color: T.text }]}
             placeholder="Search legal term or Article..."
@@ -295,18 +287,17 @@ export default function LibraryScreen({ navigation }: any) {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={clearSearch} style={{ padding: 5 }}>
-              <Ionicons name="close-circle" size={20} color={T.subText} />
+              <Ionicons name="close-circle-outline" size={20} color={T.subText} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* CONTENT */}
       {loading && <LoadingSpinner message="Searching Lex-Simple Engine..." />}
 
       {error !== '' && !loading && (
         <View style={uiStyles.centerMessage}>
-          <Ionicons name="warning-outline" size={48} color={COLORS.danger} style={{ marginBottom: 15 }} />
+          <Ionicons name="alert-circle-outline" size={48} color={COLORS.danger} style={{ marginBottom: 15 }} />
           <Text style={[uiStyles.errorText, { color: T.text }]}>{error}</Text>
         </View>
       )}
@@ -314,7 +305,8 @@ export default function LibraryScreen({ navigation }: any) {
       {results.length === 0 && !loading && error === '' && (
         <View style={uiStyles.emptyStateContainer}>
           <View style={[uiStyles.emptyStateIconBg, { backgroundColor: T.card, borderColor: T.border }]}>
-            <Ionicons name="library" size={48} color={COLORS.primaryLight} />
+            {/* 🚀 REMOVED tintColor to preserve original image colors */}
+            <Image source={require('../../../../assets/icons/library.png')} style={{ width: 48, height: 48 }} resizeMode="contain" />
           </View>
           <Text style={[uiStyles.emptyStateTitle, { color: T.text }]}>Search the Lexicon</Text>
           <Text style={[uiStyles.emptyStateSub, { color: T.subText }]}>
@@ -322,7 +314,7 @@ export default function LibraryScreen({ navigation }: any) {
           </Text>
 
           <TouchableOpacity style={[uiStyles.browseBtn, { borderColor: COLORS.primaryLight }]} onPress={() => navigation.navigate('DictionaryDetailScreen', { dictionaryData })}>
-            <Ionicons name="list" size={18} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
+            <Ionicons name="book-outline" size={18} color={COLORS.primaryLight} style={{ marginRight: 8 }} />
             <Text style={uiStyles.browseBtnText}>Browse Offline Dictionary</Text>
           </TouchableOpacity>
         </View>
@@ -330,14 +322,13 @@ export default function LibraryScreen({ navigation }: any) {
 
       {results.length > 0 && !loading && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}>
-
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
             <Text style={[uiStyles.feedbackText, { color: T.subText }]}>
               Showing results for <Text style={{ color: T.text, fontWeight: 'bold' }}>"{searchQuery}"</Text>
             </Text>
 
             <View style={[uiStyles.statusBadge, { backgroundColor: isOfflineMode ? T.card : 'rgba(16, 185, 129, 0.15)', borderColor: isOfflineMode ? T.border : COLORS.success }]}>
-              <Ionicons name={isOfflineMode ? 'cloud-offline' : 'checkmark-circle'} size={12} color={isOfflineMode ? T.subText : COLORS.success} style={{ marginRight: 6 }} />
+              <Ionicons name={isOfflineMode ? 'cloud-offline-outline' : 'shield-checkmark-outline'} size={12} color={isOfflineMode ? T.subText : COLORS.success} style={{ marginRight: 6 }} />
               <Text style={[uiStyles.statusBadgeText, { color: isOfflineMode ? T.subText : COLORS.success }]}>
                 {isOfflineMode ? 'OFFLINE MATCH' : 'AI VERIFIED'}
               </Text>
@@ -346,7 +337,7 @@ export default function LibraryScreen({ navigation }: any) {
 
           {isOfflineMode && (
             <View style={[uiStyles.offlineWarningBox, { backgroundColor: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
-              <Ionicons name="cloud-offline" size={18} color={COLORS.warning} style={{ marginRight: 8 }} />
+              <Ionicons name="wifi-outline" size={18} color={COLORS.warning} style={{ marginRight: 8 }} />
               <Text style={[uiStyles.offlineWarningText, { color: T.text }]}>
                 Viewing in Offline Mode. Connect to the internet for AI-simplified explanations.
               </Text>
@@ -367,12 +358,10 @@ export default function LibraryScreen({ navigation }: any) {
   );
 }
 
-// 🎨 SLEEK & SHARP UI STYLES
 const uiStyles = StyleSheet.create({
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16,
-    // 🚀 AYOS: Nagdagdag ng safe area padding para hindi sumanib sa status bar
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 50,
     paddingBottom: 15,
   },
@@ -410,7 +399,6 @@ const uiStyles = StyleSheet.create({
   offlineWarningBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 20 },
   offlineWarningText: { flex: 1, fontSize: 12, lineHeight: 18 },
 
-  // RESULT CARD STYLES
   contentBox: { borderRadius: 12, padding: 16, marginBottom: 20, borderWidth: 1 },
   termTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 4, lineHeight: 28 },
   basisText: { fontSize: 13, fontWeight: 'bold' },

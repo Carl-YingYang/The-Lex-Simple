@@ -9,6 +9,9 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import fitz
 
+from services.prompts import get_chat_reply_prompt
+from db.chroma_store import query_vector_db
+
 from services.llm_service import analyze_legal_text, search_legal_dictionary, explain_raw_statutory_text
 from services.chat_service import generate_chat_reply
 from services.sanitizer import sanitize_legal_text 
@@ -94,14 +97,93 @@ async def simplify_uploaded_file(file: UploadFile = File(...)):
         if os.path.exists(file_location): os.remove(file_location)
         print(f"🔥 /simplify_file Error: {str(e)}")
         return {"status": "error", "message": "Server error processing file."}
+
+# ============================================================================
+# 🧠 HELPER FUNCTIONS FOR CONTEXT-AWARE CHAT
+# ============================================================================
+
+def normalize_chat_history(history: list, limit: int = 15) -> list:
+    """Cleans and formats history for the LLM messages array."""
+    if not history: return []
+    clean = []
+    for msg in history[-limit:]:
+        role = str(msg.get("role", "")).lower()
+        content = str(msg.get("content", "")).strip()
+        if not content: continue
+        if role in ["user", "human"]: clean.append({"role": "user", "content": content})
+        elif role in ["assistant", "ai", "model"]: clean.append({"role": "assistant", "content": content})
+    return clean
+
+def is_follow_up(message: str) -> bool:
+    """Determines if a message is a conversational follow-up."""
+    msg_lower = message.lower()
+    indicators = ["bakit", "paano", "ano", "yun", "ganon", "ganyan", "exception", "applicable", "meaning", "ibig sabihin", "example", "bawal", "what if", "so", "eh", "meron", "mayroon", "kapag", "kung"]
+    if len(message.split()) <= 4: return True
+    return any(ind in msg_lower for ind in indicators)
+
+def build_contextual_query(message: str, history: list) -> str:
+    """Builds a retrieval query using previous context if it's a follow-up."""
     
+    # 🚀 HANDLE DIRECT REPLY CONTEXT FROM FRONTEND
+    # If the user replied to a specific message, use that message's text for RAG
+    if "[DIRECT REPLY CONTEXT]" in message:
+        match = re.search(r'SELECTED MESSAGE:\s*(.*?)(?:\n\n|\n\[)', message, re.DOTALL)
+        if match:
+            selected_text = match.group(1).strip()
+            current_q_match = re.search(r'\[CURRENT USER QUESTION\]\s*(.*)', message, re.DOTALL)
+            current_q = current_q_match.group(1).strip() if current_q_match else ""
+            # Combine the selected message and current question for a rich RAG query
+            return f"{selected_text} {current_q}"
+    
+    # If user introduces a new specific Article, treat as new topic
+    current_article = re.search(r'(article|section)\s*\d+', message, re.IGNORECASE)
+    if current_article:
+        return message 
+        
+    if is_follow_up(message):
+        last_user_msgs = [m["content"] for m in history if m["role"] == "user"]
+        if last_user_msgs:
+            # Combine last user question with current to preserve semantic meaning
+            return f"{last_user_msgs[-1]} {message}"
+            
+    return message
+
+# ============================================================================
+# 🤖 CHAT ENDPOINT
+# ============================================================================
+
 @router.post("/chat")
 def chat_with_ai(request: ChatRequest):
+    """
+    Context-aware legal chat endpoint.
+    Implements Contextual RAG and Article Resolution.
+    """
     try:
-        msg_lower = request.message.lower()
+        if not request.message or not request.message.strip():
+            raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+        # 1. Normalize History (Keep last 15 messages)
+        history = normalize_chat_history(request.history)
+
+        # 2. Build Contextual Query for RAG
+        # This converts short follow-ups like "Bakit ganon?" into rich queries
+        contextual_query = build_contextual_query(request.message.strip(), history)
+        print(f"[DEBUG] RAG Query: {contextual_query}")
+
+        # 3. RAG Search (ChromaDB) using the contextual query
         context_data = ""
-        context_source = ""
-        
+        try:
+            search_results = query_vector_db(contextual_query, n_results=3)
+            if search_results and search_results.get('documents'):
+                for doc_list in search_results['documents']:
+                    if doc_list:
+                        context_data += "\n".join(doc_list) + "\n---\n"
+        except Exception as e:
+            print(f"RAG Search Error: {e}")
+
+        # 4. SQLite Exact Article Lookup
+        # Still check for exact Article in the current message for fast exact matches
+        msg_lower = request.message.lower()
         match = re.search(r'\b(article|art\.?|section|sec\.?)\s+([0-9ivxlc]+[a-z]?)\b', msg_lower)
         if match:
             prefix = "SECTION" if match.group(1).startswith("sec") else "ARTICLE"
@@ -116,41 +198,33 @@ def chat_with_ai(request: ChatRequest):
                 rows = cursor.fetchall()
                 conn.close()
                 if rows:
-                    context_data = "\n\n".join([dict(row)["chunk_text"] for row in rows])
-                    context_source = "PHILIPPINE LAW DICTIONARY"
+                    sqlite_context = "\n\n".join([dict(row)["chunk_text"] for row in rows])
+                    # Prepend SQLite context as it's more authoritative
+                    context_data = sqlite_context + "\n---\n" + context_data
             except Exception as e:
-                print(f"Dictionary DB Error: {e}")
+                print(f"SQLite Article Lookup Error: {e}")
 
-        if not context_data:
-            guide_keywords = ["pao", "ibp", "lawyer", "abogado", "free", "attorney", "ulas", "magkano", "tulong", "legal aid", "merit"]
-            active_kws = [kw for kw in guide_keywords if kw in msg_lower]
-            if active_kws:
-                try:
-                    conn = sqlite3.connect("./lex_guides.db")
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
-                    kw = active_kws[0]
-                    cursor.execute("SELECT chunk_text FROM guides WHERE chunk_text LIKE ? OR title LIKE ? LIMIT 2", (f"%{kw}%", f"%{kw}%"))
-                    rows = cursor.fetchall()
-                    conn.close()
-                    if rows:
-                        context_data = "\n\n".join([dict(row)["chunk_text"] for row in rows])
-                        context_source = "LEGAL ASSISTANCE GUIDES"
-                except Exception as e:
-                    print(f"Guides SQLite Error: {e}")
+        # 5. Call LLM Service
+        # Pass the retrieved context and history to the chat service
+        ai_response = generate_chat_reply(
+            user_msg=request.message.strip(),
+            retrieved_context=context_data.strip(),
+            history=history
+        )
 
-        final_prompt = request.message
-        if context_data:
-            final_prompt = f"USER QUESTION: {request.message}\n\nCONTEXT FROM {context_source}:\n{context_data}\n\nCRITICAL INSTRUCTION: Sagutin ang tanong gamit LAMANG ang context sa itaas. I-explain in conversational Taglish. Bawal mag-imbento."
-        elif "[ATTACHED DOCUMENT CONTEXT:" in request.message:
-            final_prompt = request.message
-        else:
-            final_prompt = f"USER QUESTION: {request.message}\n\nCRITICAL INSTRUCTION: Wala kang nakitang eksaktong context sa database para dito. Sabihin AGAD na: 'Pasensya na, wala sa database ko ang eksaktong batas o guide tungkol diyan.' Bawal kang mag-imbento ng Article number o mag-assume na tungkol ito sa PAO kung hindi binanggit."
+        return {
+            "status": "success",
+            "reply": ai_response
+        }
 
-        ai_response = generate_chat_reply(final_prompt, request.history)
-        return {"status": "success", "reply": ai_response}
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[CHAT ROUTER ERROR] {type(e).__name__}: {e}")
+        return {
+            "status": "error",
+            "message": "Chat service error."
+        }
 
 @router.post("/explain")
 def explain_statutory_text(request: ExplainRequest):
