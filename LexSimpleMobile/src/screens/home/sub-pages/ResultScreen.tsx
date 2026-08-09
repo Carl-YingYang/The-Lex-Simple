@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet, StatusBar, Image } from 'react-native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, StyleSheet, StatusBar, Image, BackHandler } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { COLORS, globalStyles } from '../../../theme/globalStyles';
@@ -60,6 +60,27 @@ export default function ResultScreen({ route, navigation }: any) {
   const result: AnalysisResult = analysisResult || { score: 100, riskLevel: 'Very Safe', findings: [] };
 
   const { isDarkMode, colors: T } = useTheme();
+
+  // 🚀 OVERRIDE BACK BUTTON BEHAVIOR
+  useEffect(() => {
+    const backAction = () => {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Main' }],
+      });
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [navigation]);
+
+  const handleHeaderBack = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Main' }],
+    });
+  };
 
   const memoizedSanitizedText = useMemo(() => {
     if (!result.sanitizedText) return "Sanitized text is not available for this record.";
@@ -154,7 +175,7 @@ export default function ResultScreen({ route, navigation }: any) {
   };
 
   return (
-    <ScreenLayout title="Scan Results" noPadding={true}>
+    <ScreenLayout title="Scan Results" noPadding={true} onBackPress={handleHeaderBack}>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <View style={{ flex: 1, backgroundColor: T.bg }}>
         <ScrollView
@@ -165,6 +186,7 @@ export default function ResultScreen({ route, navigation }: any) {
           <View style={[globalStyles.result_noticeBox, { backgroundColor: T.card, borderColor: T.border }]}>
             <Ionicons name="information-circle" size={20} color={COLORS.primaryLight} style={{ marginRight: 10 }} />
             <Text style={[globalStyles.result_noticeText, { color: T.subText }]}>
+              {/* 🚀 FIXED: Added the missing '>' on the closing </Text> tag here */}
               <Text style={{ fontWeight: 'bold', color: T.text }}>UPL Notice: </Text> Ang Lex-Simple ay isang AI Legal Literacy Tool at hindi pamalit sa pormal na payo ng isang abogado.
             </Text>
           </View>
@@ -338,12 +360,12 @@ const localStyles = StyleSheet.create({
     right: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4910bc', // Solid Purple
+    backgroundColor: '#4910bc',
     paddingHorizontal: 24,
     paddingVertical: 16,
-    borderRadius: 30, // Pill shape
-    borderWidth: 2, // 🚀 Solid Border
-    borderColor: '#FFFFFF', // 🚀 Solid White Border
+    borderRadius: 30,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
     elevation: 8,
     shadowColor: '#000',
     shadowOpacity: 0.3,

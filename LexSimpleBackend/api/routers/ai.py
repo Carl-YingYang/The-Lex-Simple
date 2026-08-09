@@ -4,7 +4,8 @@ import shutil
 import sqlite3
 import pdfplumber
 import docx
-from fastapi import APIRouter, UploadFile, File, HTTPException
+import json
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import fitz
@@ -14,7 +15,8 @@ from db.chroma_store import query_vector_db
 
 from services.llm_service import analyze_legal_text, search_legal_dictionary, explain_raw_statutory_text
 from services.chat_service import generate_chat_reply
-from services.sanitizer import sanitize_legal_text 
+# Idinagdag ang clean_and_extract_image mula sa sanitizer
+from services.sanitizer import sanitize_legal_text, clean_and_extract_image
 from orchestrator.pipeline import Orchestrator, ProcessRequest
 
 router = APIRouter()
@@ -97,6 +99,49 @@ async def simplify_uploaded_file(file: UploadFile = File(...)):
         if os.path.exists(file_location): os.remove(file_location)
         print(f"🔥 /simplify_file Error: {str(e)}")
         return {"status": "error", "message": "Server error processing file."}
+
+# ============================================================================
+# 🚀 BATCH IMAGE OCR & FILTERING ENDPOINT
+# ============================================================================
+
+@router.post("/simplify_batch")
+async def simplify_batch(
+    files: List[UploadFile] = File(...),
+    filters: str = Form(...) 
+):
+    try:
+        # I-parse yung JSON string ng filters na pinasa ng frontend
+        filters_list = json.loads(filters)
+    except Exception:
+        filters_list = []
+
+    full_extracted_text = ""
+
+    # I-loop lahat ng na-upload na pictures
+    for i, file in enumerate(files):
+        img_bytes = await file.read()
+        
+        # Kunin ang filter para sa page na ito (default ay 'none' kung wala)
+        current_filter = filters_list[i] if i < len(filters_list) else 'none'
+        
+        # Ipasa sa OpenCV at OCR
+        page_text = clean_and_extract_image(img_bytes, current_filter)
+        
+        # Pagsamahin ang text na may page separators
+        if page_text:
+            full_extracted_text += f"\n\n--- PAGE {i + 1} ---\n\n{page_text}"
+
+    if not full_extracted_text.strip() or len(full_extracted_text.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Walang sapat na text na na-extract sa mga larawan.")
+
+    try:
+        # Ipasa ang na-extract na text sa main pipeline niyo
+        result = _orchestrator.process(ProcessRequest(text=full_extracted_text))
+        print(f"[ORCHESTRATOR] /simplify_batch routed to {result.source_layer}, llm_calls={result.llm_calls_made}")
+        return result.data
+    except Exception as e:
+        print(f"🔥 /simplify_batch Error: {str(e)}")
+        return {"status": "error", "message": "Server error processing batch images."}
 
 # ============================================================================
 # 🧠 HELPER FUNCTIONS FOR CONTEXT-AWARE CHAT

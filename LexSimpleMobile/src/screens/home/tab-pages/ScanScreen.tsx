@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, TextInput, Image, Modal,
-  KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet, Dimensions, StatusBar
+  KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet, Dimensions, StatusBar, FlatList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -15,12 +15,20 @@ import FloatingProcessIndicator from '../../../components/FloatingProcessIndicat
 import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 
 // 🚀 IMPORT ANG MGA CUSTOM ICONS
-const AskAiGridIcon = require('../../../../assets/icons/chat_ai.png'); // Para sa Grid Button
-const AskAiListIcon = require('../../../../assets/icons/message_ai.png'); // 🟡 Para sa Recent Files List
-const DocFileIcon = require('../../../../assets/icons/files.png'); // Para sa Document Thumbnail
+const AskAiGridIcon = require('../../../../assets/icons/chat_ai.png');
+const AskAiListIcon = require('../../../../assets/icons/message_ai.png');
+const DocFileIcon = require('../../../../assets/icons/files.png');
 
 export interface ScanHistoryItem {
-  id: string; uri: string; title: string; date: string; type: 'camera' | 'gallery' | 'document'; status: 'unscanned' | 'scanned'; analysisResult?: any; ocrText?: string;
+  id: string;
+  uri?: string;
+  images?: string[]; // 🚀 ADDED: Suporta para sa array of images mula sa Batch Edit
+  title: string;
+  date: string;
+  type: 'camera' | 'gallery' | 'document';
+  status: 'unscanned' | 'scanned';
+  analysisResult?: any;
+  ocrText?: string;
 }
 
 const { width } = Dimensions.get('window');
@@ -50,7 +58,7 @@ export default function ScanScreen({ navigation }: any) {
       const storedHistory = await AsyncStorage.getItem('@lex_scan_history');
       if (storedHistory) {
         const historyArray = JSON.parse(storedHistory);
-        historyArray.sort((a, b) => parseInt(b.id) - parseInt(a.id));
+        historyArray.sort((a: any, b: any) => parseInt(b.id) - parseInt(a.id));
         setHistoryItems(historyArray);
       }
     } catch (error) { console.error("Failed to load history", error); }
@@ -78,7 +86,7 @@ export default function ScanScreen({ navigation }: any) {
 
   const getDisplayTitle = (item: ScanHistoryItem) => {
     let finalTitle = item.title;
-    if (item.title === 'Camera Scan' || item.title === 'Gallery Upload' || item.title === 'Document File') {
+    if (item.title === 'Camera Scan' || item.title === 'Gallery Upload' || item.title === 'Document File' || item.title.includes('pages)')) {
       if (item.status === 'scanned' && item.analysisResult?.documentTitle) finalTitle = item.analysisResult.documentTitle;
       else if (item.ocrText) {
         const lines = item.ocrText.split('\n').filter(line => line.trim().length > 4);
@@ -224,24 +232,52 @@ export default function ScanScreen({ navigation }: any) {
               return (
                 <View key={item.id} style={[localStyles.historyCard, { backgroundColor: T.card, borderColor: T.border, opacity: isGlobalProcessing && !isCurrentlyAnalyzing ? 0.6 : 1 }]}>
 
-                  <TouchableOpacity
-                    style={[localStyles.thumbnailWrapper, { backgroundColor: T.bg, borderWidth: 1, borderColor: T.border }]}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      if (isCurrentlyAnalyzing) return;
-                      if (item.type === 'document') {
-                        navigation.navigate('SanitizedOcrScreen', { sanitizedText: item.ocrText || "Walang text content.", customTitle: getDisplayTitle(item), isDocumentView: true });
-                      } else {
-                        setSelectedImage(item.uri);
-                      }
-                    }}
-                  >
+                  {/* 🚀 SCROLLABLE THUMBNAIL IMPLEMENTATION */}
+                  <View style={[localStyles.thumbnailWrapper, { backgroundColor: T.bg, borderWidth: 1, borderColor: T.border }]}>
                     {item.type === 'document' ? (
-                      <Image source={DocFileIcon} style={{ width: 28, height: 28, resizeMode: 'contain' }} />
+                      <TouchableOpacity
+                        style={localStyles.thumbnailInner}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          if (isCurrentlyAnalyzing) return;
+                          navigation.navigate('SanitizedOcrScreen', { sanitizedText: item.ocrText || "Walang text content.", customTitle: getDisplayTitle(item), isDocumentView: true });
+                        }}
+                      >
+                        <Image source={DocFileIcon} style={{ width: 28, height: 28, resizeMode: 'contain' }} />
+                      </TouchableOpacity>
+                    ) : item.images && item.images.length > 0 ? (
+                      <FlatList
+                        data={item.images}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        pagingEnabled
+                        keyExtractor={(img, imgIndex) => imgIndex.toString()}
+                        renderItem={({ item: img }) => (
+                          <TouchableOpacity
+                            style={localStyles.thumbnailInner}
+                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (isCurrentlyAnalyzing) return;
+                              setSelectedImage(img);
+                            }}
+                          >
+                            <Image source={{ uri: img }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+                          </TouchableOpacity>
+                        )}
+                      />
                     ) : (
-                      <Image source={{ uri: item.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      <TouchableOpacity
+                        style={localStyles.thumbnailInner}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          if (isCurrentlyAnalyzing || !item.uri) return;
+                          setSelectedImage(item.uri);
+                        }}
+                      >
+                        <Image source={{ uri: item.uri }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+                      </TouchableOpacity>
                     )}
-                  </TouchableOpacity>
+                  </View>
 
                   <View style={localStyles.historyContent}>
                     <View style={localStyles.historyTopRow}>
@@ -278,7 +314,6 @@ export default function ScanScreen({ navigation }: any) {
 
                           {item.status === 'scanned' && (
                             <TouchableOpacity style={[localStyles.iconBtnSmall, { borderWidth: 1, borderColor: T.border }]} onPress={() => handleAskAi(item)} disabled={isGlobalProcessing}>
-                              {/* 🚀 CUSTOM PNG ICON (YELLOW TINT) PARA SA ASK AI SA RECENT FILES */}
                               <Image source={AskAiListIcon} style={{ width: 16, height: 16, tintColor: '#F59E0B' }} resizeMode="contain" />
                             </TouchableOpacity>
                           )}
@@ -356,7 +391,8 @@ const localStyles = StyleSheet.create({
   filterText: { fontSize: 14, fontWeight: '600' },
   historyList: {},
   historyCard: { flexDirection: 'row', borderRadius: 8, padding: 14, marginBottom: 12, borderWidth: 1, alignItems: 'center' },
-  thumbnailWrapper: { width: 56, height: 56, borderRadius: 8, marginRight: 14, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  thumbnailWrapper: { width: 56, height: 56, borderRadius: 8, marginRight: 14, overflow: 'hidden' },
+  thumbnailInner: { width: 56, height: 56, justifyContent: 'center', alignItems: 'center' },
   historyContent: { flex: 1, justifyContent: 'center' },
   historyTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   historyTitle: { fontSize: 15, fontWeight: 'bold' },
