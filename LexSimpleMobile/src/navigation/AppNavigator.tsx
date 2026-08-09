@@ -24,6 +24,7 @@ import OfflineDetailScreen from '../screens/home/sub-pages/OfflineDetailScreen';
 import SanitizedOcrScreen from '../screens/home/sub-pages/SanitizedOcrScreen';
 import AboutScreen from '../screens/profile/sub-pages/AboutScreen';
 import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
+import BatchEditScreen from '../screens/home/sub-pages/BatchEditScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -111,6 +112,7 @@ export default function AppNavigator() {
             <Stack.Screen name="AboutScreen" component={AboutScreen} />
             <Stack.Screen name="LegalAidScreen" component={LegalAidScreen} />
             <Stack.Screen name="SanitizedOcrScreen" component={SanitizedOcrScreen} />
+            <Stack.Screen name="BatchEditScreen" component={BatchEditScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </BackgroundProcessProvider>

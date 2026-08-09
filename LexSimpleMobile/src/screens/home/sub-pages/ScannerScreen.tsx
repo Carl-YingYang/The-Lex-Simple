@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking, Image } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
+import * as ImagePicker from 'expo-image-picker';
 import * as Network from 'expo-network';
 import { postEndpoint } from '../../../services/AiEngine';
 
@@ -21,16 +21,16 @@ export default function ScannerScreen({ navigation }: any) {
   const hasInitialized = useRef(false);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  // 🚀 MULTI-CAPTURE STATE
+  const [capturedPages, setCapturedPages] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(true);
   const [scanFeedback, setScanFeedback] = useState("Position document inside the frame");
   const [isFlashOn, setIsFlashOn] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
   const { isDarkMode, colors: T } = useTheme();
 
-  // 🚀 REUSABLE HOOK
   const { isProcessing: isAnalyzing, triggerBackgroundProcess, cancelProcess } = useBackgroundProcessScreen('ScannerScreen');
 
   const LOADING_MESSAGES = [
@@ -41,19 +41,14 @@ export default function ScannerScreen({ navigation }: any) {
     "Simplifying for you..."
   ];
 
-  // 🚀 FIX: KAPAG MAY ONGOING PROCESS (isAnalyzing), WAG MAG-OPEN NG CAMERA
   useEffect(() => {
-    if (isAnalyzing) {
-      hasInitialized.current = true; // Mark as initialized so it doesn't run when isAnalyzing becomes false
-      return;
-    }
     if (!permission || hasInitialized.current) return;
     hasInitialized.current = true;
     handleOpenCamera();
-  }, [permission, isAnalyzing]);
+  }, [permission]);
 
   useEffect(() => {
-    if (isCameraOpen && !capturedImage) {
+    if (isCameraOpen && capturedPages.length === 0) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(scanLineAnim, { toValue: SCAN_FRAME_HEIGHT - 4, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -64,7 +59,7 @@ export default function ScannerScreen({ navigation }: any) {
       scanLineAnim.stopAnimation();
       scanLineAnim.setValue(0);
     }
-  }, [isCameraOpen, capturedImage]);
+  }, [isCameraOpen, capturedPages]);
 
   const handleOpenCamera = async () => {
     if (permission?.granted) setIsCameraOpen(true);
@@ -81,48 +76,11 @@ export default function ScannerScreen({ navigation }: any) {
   };
 
   const resetScanner = () => {
-    setCapturedImage(null);
+    setCapturedPages([]);
     setIsCameraOpen(true);
     setScanFeedback("Position document inside the frame");
     setIsProcessing(false);
     setIsFlashOn(false);
-  };
-
-  const saveToOfflineHistory = async (imageUri: string, type: 'camera' | 'gallery', extractedText: string): Promise<string> => {
-    const newId = Date.now().toString();
-    try {
-      const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
-      const historyArray = existingHistory ? JSON.parse(existingHistory) : [];
-      const newItem = {
-        id: newId, uri: imageUri, title: type === 'camera' ? 'Camera Scan' : 'Gallery Upload',
-        date: new Date().toLocaleString(), type: type, status: 'unscanned', ocrText: extractedText
-      };
-      await AsyncStorage.setItem('@lex_scan_history', JSON.stringify([newItem, ...historyArray]));
-    } catch (error) { console.error("Error saving offline", error); }
-    return newId;
-  };
-
-  const updateHistoryToScanned = async (id: string, analysisData: any, ocrText: string, sanitizedText?: string) => {
-    try {
-      const existingHistory = await AsyncStorage.getItem('@lex_scan_history');
-      if (!existingHistory) return;
-      let historyArray = JSON.parse(existingHistory);
-      historyArray = historyArray.map((item: any) => {
-        if (item.id === id) return { ...item, status: 'scanned', analysisResult: { ...analysisData, sanitizedText: sanitizedText }, ocrText: ocrText };
-        return item;
-      });
-      await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(historyArray));
-    } catch (error) { console.error("Error updating history", error); }
-  };
-
-  const triggerErrorAlert = (msg: string) => {
-    setIsProcessing(false);
-    let alertTitle = "System Error";
-    let alertType: AlertType = "error";
-    const lowerMsg = msg.toLowerCase();
-    if (lowerMsg.includes('unreadable') || lowerMsg.includes('blurry') || lowerMsg.includes('empty')) { alertTitle = "Unreadable Image"; alertType = "warning"; }
-    else if (lowerMsg.includes('connection') || lowerMsg.includes('network') || lowerMsg.includes('server')) { alertTitle = "Connection Error"; alertType = "error"; }
-    showAlert(alertTitle, msg, alertType, [{ text: "Try Again", style: "destructive", onPress: resetScanner }]);
   };
 
   const manualTakePicture = async () => {
@@ -132,46 +90,66 @@ export default function ScannerScreen({ navigation }: any) {
       try {
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
         if (photo) {
-          setCapturedImage(photo.uri);
-          setIsCameraOpen(false);
-          setIsFlashOn(false);
-
-          const formattedUri = photo.uri.startsWith('file://') ? photo.uri : `file://${photo.uri}`;
-          let extractedText = "";
-          try {
-            const ocrResult = await TextRecognition.recognize(formattedUri);
-            extractedText = ocrResult.text;
-          } catch (ocrError) { triggerErrorAlert("Hindi ma-process ng system ang larawan."); return; }
-
-          if (!extractedText || extractedText.trim().length < 20) { triggerErrorAlert("Masyadong malabo o walang laman ang imahe. Hindi mabasa ang text."); return; }
-
-          const savedId = await saveToOfflineHistory(photo.uri, 'camera', extractedText);
-          const networkState = await Network.getNetworkStateAsync();
-
-          if (networkState.isConnected) {
-            startAnalysisWithImageOnly(extractedText, savedId);
-          } else {
-            triggerErrorAlert("Offline Mode. Na-save sa Recent Files.");
-          }
+          // 🚀 ADD TO PAGES ARRAY
+          setCapturedPages(prev => [...prev, photo.uri]);
+          setScanFeedback("Position next document inside the frame");
         }
-      } catch (error) { triggerErrorAlert("Hindi makuha ang picture. Subukan ulit."); }
+      } catch (error) {
+        showAlert("Camera Error", "Hindi makuha ang picture. Subukan ulit.", "error");
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
-  const startAnalysisWithImageOnly = (extractedText: string, dbId: string) => {
-    // 🚀 TAWAGIN ANG REUSABLE TRIGGER AT IPASA ANG SIGNAL AT dbId
+  const pickFromGallery = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true, // 🚀 ALLOW MULTIPLE SELECTION
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        const newUris = result.assets.map(a => a.uri);
+        // 🚀 ADD ALL SELECTED TO PAGES ARRAY
+        setCapturedPages(prev => [...prev, ...newUris]);
+      }
+    } catch (error) {
+      showAlert("Gallery Error", "Hindi mabuksan ang gallery.", "error");
+    }
+  };
+
+  const handleDoneCapture = async () => {
+    if (capturedPages.length === 0) return;
+
+    // 🚀 TINANGGAL ANG setCapturedPages([])
+    navigation.navigate('BatchEditScreen', { pages: capturedPages });
+  };
+
+  const startBatchAnalysis = (imageUris: string[]) => {
     triggerBackgroundProcess(async (signal: AbortSignal) => {
-      const locallySanitizedText = sanitizeLocalText(extractedText);
-      const data = await postEndpoint('/simplify', { text: locallySanitizedText }, signal);
+      // 🚀 TEMP: SEND FIRST IMAGE ONLY FOR NOW TO TEST EXISTING BACKEND
+      // SA PHASE 2 NATIN IPAPALITAN ITO NG /simplify_batch ENDPOINT
+      const firstImage = imageUris[0];
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri: firstImage,
+        name: `scan_page_1.jpg`,
+        type: 'image/jpeg'
+      });
+
+      const { postFileEndpoint } = require('../../../services/AiEngine');
+      const data = await postFileEndpoint('/simplify_file', formData, signal);
 
       if (data && data.status === 'success') {
-        const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, sanitizedText: locallySanitizedText };
-        await updateHistoryToScanned(dbId, combinedAnalysisResult, extractedText, locallySanitizedText);
+        const combinedAnalysisResult = { ...data.data, rag_context_used: data.rag_context_used, sanitizedText: data.sanitizedText };
         return combinedAnalysisResult;
       } else {
         throw new Error(data?.message || "Server processing failed.");
       }
-    }, dbId); // 🚀 DITO: dbId na lang ang ipinasa, yung screenName nasa loob na ng hook
+    });
   };
 
   // 🟢 ANALYZING UI
@@ -191,7 +169,7 @@ export default function ScannerScreen({ navigation }: any) {
   }
 
   // 🟢 CAMERA UI
-  if (isCameraOpen && permission?.granted && !capturedImage) {
+  if (isCameraOpen && permission?.granted) {
     return (
       <View style={uiStyles.cameraContainer}>
         <StatusBar barStyle="light-content" />
@@ -215,19 +193,44 @@ export default function ScannerScreen({ navigation }: any) {
           <TouchableOpacity style={uiStyles.scanIconBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
-          <TouchableOpacity style={uiStyles.scanIconBtn} onPress={() => setIsFlashOn(!isFlashOn)}>
-            <Ionicons name={isFlashOn ? "flash" : "flash-off"} size={22} color={isFlashOn ? "#fcd34d" : "white"} />
-          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity style={uiStyles.scanIconBtn} onPress={() => setIsFlashOn(!isFlashOn)}>
+              <Ionicons name={isFlashOn ? "flash" : "flash-off"} size={22} color={isFlashOn ? "#fcd34d" : "white"} />
+            </TouchableOpacity>
+            <TouchableOpacity style={uiStyles.scanIconBtn} onPress={pickFromGallery}>
+              <Ionicons name="images-outline" size={22} color="white" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={uiStyles.scanBottomSafeZone}>
           <View style={uiStyles.scanFeedbackPill}>
             <Ionicons name="scan-outline" size={14} color="white" style={{ marginRight: 6 }} />
-            <Text style={uiStyles.scanFeedbackText}>{scanFeedback}</Text>
+            <Text style={uiStyles.scanFeedbackText}>
+              {capturedPages.length > 0 ? `${capturedPages.length} page(s) captured` : scanFeedback}
+            </Text>
           </View>
-          <TouchableOpacity style={uiStyles.shutterOuter} onPress={manualTakePicture} disabled={isProcessing}>
-            <View style={uiStyles.shutterInner} />
-          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 30 }}>
+            {/* 🚀 DONE BUTTON (Visible if > 0 pages) */}
+            {capturedPages.length > 0 && (
+              <TouchableOpacity style={uiStyles.doneBtn} onPress={handleDoneCapture}>
+                <Ionicons name="checkmark-circle" size={60} color={COLORS.primaryLight} />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={uiStyles.shutterOuter} onPress={manualTakePicture} disabled={isProcessing}>
+              <View style={uiStyles.shutterInner} />
+            </TouchableOpacity>
+
+            {/* 🚀 TRASH BUTTON (Visible if > 0 pages) */}
+            {capturedPages.length > 0 && (
+              <TouchableOpacity style={uiStyles.trashBtn} onPress={resetScanner}>
+                <Ionicons name="trash-outline" size={30} color="#EF4444" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <AlertRender />
@@ -263,5 +266,7 @@ const uiStyles = StyleSheet.create({
   scanTopControls: { position: 'absolute', top: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 20 : 50, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', zIndex: 20 },
   scanIconBtn: { width: 40, height: 40, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   shutterOuter: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)' },
-  shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'white' }
+  shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'white' },
+  doneBtn: { justifyContent: 'center', alignItems: 'center' },
+  trashBtn: { justifyContent: 'center', alignItems: 'center' }
 });
