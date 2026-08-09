@@ -1,14 +1,12 @@
 import React, { useRef, useEffect } from 'react';
-import { Animated, TouchableWithoutFeedback, View, StyleSheet, LogBox } from 'react-native';
+import { Animated, TouchableWithoutFeedback, View, StyleSheet, LogBox, Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 
 import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
-// 🚀 IMPORT ROOT NAVIGATION
 import { navigationRef } from './RootNavigation';
 
 LogBox.ignoreLogs(['The app is running using the Legacy Architecture']);
@@ -49,17 +47,42 @@ function MainTabs() {
   return (
     <Tab.Navigator initialRouteName="Scan" screenOptions={({ route }) => ({
       headerShown: false,
-      tabBarStyle: { backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border, height: 70, paddingBottom: 8, paddingTop: 8, elevation: 0, shadowOpacity: 0 },
+      tabBarStyle: {
+        backgroundColor: colors.bg,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        height: 70,
+        paddingBottom: 8,
+        paddingTop: 8,
+        elevation: 0,
+        shadowOpacity: 0
+      },
       tabBarShowLabel: true,
       tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginTop: 2 },
       tabBarActiveTintColor: '#A78BFA',
       tabBarInactiveTintColor: isDarkMode ? '#64748b' : '#8E8E93',
       tabBarIcon: ({ focused, color }) => {
-        let iconName: any;
-        if (route.name === 'Library') iconName = focused ? 'book' : 'book-outline';
-        else if (route.name === 'Scan') iconName = focused ? 'scan' : 'scan-outline';
-        else if (route.name === 'Profile') iconName = focused ? 'person' : 'person-outline';
-        return <Ionicons name={iconName} size={28} color={color} />;
+        let iconSource: any;
+
+        if (route.name === 'Library') {
+          iconSource = require('../../assets/icons/library.png');
+        } else if (route.name === 'Scan') {
+          iconSource = require('../../assets/icons/scan.png');
+        } else if (route.name === 'Profile') {
+          iconSource = require('../../assets/icons/profile.png');
+        }
+
+        return (
+          <Image
+            source={iconSource}
+            style={{
+              width: 26,
+              height: 26,
+              tintColor: color // Automatically changes color based on active/inactive state
+            }}
+            resizeMode="contain"
+          />
+        );
       },
       tabBarButton: (props) => <TabBarButton {...props} />,
     })}>
@@ -74,7 +97,6 @@ export default function AppNavigator() {
   return (
     <ThemeProvider>
       <BackgroundProcessProvider>
-        {/* 🚀 ILAGAY ANG navigationRef DITO */}
         <NavigationContainer ref={navigationRef} theme={DarkTheme}>
           <FloatingProcessIndicator />
           <Stack.Navigator screenOptions={{ headerShown: false }}>

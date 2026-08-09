@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, StyleSheet, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { COLORS, globalStyles } from '../../../theme/globalStyles';
@@ -16,9 +16,9 @@ export default function LegalAidScreen({ navigation }: any) {
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
-  const { colors: T, isDarkMode } = useTheme(); // 🚀 GLOBAL THEME
+  const { colors: T, isDarkMode } = useTheme();
 
-  const API_BASE_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev';
+  const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
   const localFileUri = FileSystem.documentDirectory + 'lex_guides_db.json';
 
   useEffect(() => {
@@ -72,7 +72,6 @@ export default function LegalAidScreen({ navigation }: any) {
     setSelectedGuide(null);
   };
 
-  // 🚀 AYOS: GUMAMIT NG T.text at T.subText PARA SUMUNOD SA THEME
   const renderFormattedText = (rawText: string) => {
     const lines = rawText.split('\n');
 
@@ -80,7 +79,7 @@ export default function LegalAidScreen({ navigation }: any) {
       let currentLine = line.trim();
       if (!currentLine) return null;
 
-      if (currentLine.match(/^(Step \d+|Official Action:|Official Basis:|Proseso:|Proseso ng Pagsusuri:|Consultation Fee:|Documentary Requirements:|Kahalagahan:|Sino ang pwede:)/i)) {
+      if (currentLine.match(/^(Step \d+|Official Action:|Official Basis:|Proseso:|Proseso ng Pagsusuri:|Consultation Fee:|Documentary Requirements:|Kahaligahan:|Sino ang pwede:)/i)) {
         return <Text key={index} style={[uiStyles.stepTitle, { color: COLORS.primaryLight }]}>{currentLine}</Text>;
       }
 
@@ -125,7 +124,13 @@ export default function LegalAidScreen({ navigation }: any) {
 
   return (
     <ScreenLayout title="Legal Assistance" noPadding={true}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 40, backgroundColor: T.bg }}>
+      {/* Main Screen ScrollView - Added nestedScrollEnabled and flexGrow */}
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ flexGrow: 1, padding: 16, paddingBottom: 40, backgroundColor: T.bg }}
+        nestedScrollEnabled={true}
+      >
 
         {/* HEADER BANNER */}
         <View style={[uiStyles.headerBanner, { backgroundColor: T.card, borderColor: T.border }]}>
@@ -190,8 +195,16 @@ export default function LegalAidScreen({ navigation }: any) {
             <Text style={[uiStyles.fullScreenTitle, { color: T.text }]} numberOfLines={2}>{selectedGuide?.title}</Text>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 50, backgroundColor: T.bg }}>
-            {selectedGuide && renderFormattedText(selectedGuide.content)}
+          {/* Modal ScrollView - Added nestedScrollEnabled and flexGrow to fix scrolling bugs */}
+          <ScrollView
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ flexGrow: 1, padding: 20, paddingBottom: 50, backgroundColor: T.bg }}
+            nestedScrollEnabled={true}
+          >
+            <View>
+              {selectedGuide && renderFormattedText(selectedGuide.content)}
+            </View>
           </ScrollView>
 
         </View>
@@ -202,7 +215,6 @@ export default function LegalAidScreen({ navigation }: any) {
   );
 }
 
-// 🎨 SLEEK & SHARP UI STYLES
 const uiStyles = StyleSheet.create({
   headerBanner: {
     flexDirection: 'row',
@@ -300,7 +312,7 @@ const uiStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingTop: 50,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 50,
     paddingBottom: 15,
     borderBottomWidth: 1,
   },
