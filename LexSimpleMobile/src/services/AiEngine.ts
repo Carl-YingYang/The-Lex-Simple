@@ -29,6 +29,32 @@ export async function postFileEndpoint(endpoint: string, formData: FormData, sig
     }
 }
 
+// 🚀 NEW: BATCH UPLOAD ENDPOINT
+export async function postBatchFileEndpoint(endpoint: string, formData: FormData) {
+    try {
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Server Response Error:", errorText);
+            throw new Error(`Server Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error(`[AI Engine] Error fetching ${endpoint}:`, error);
+        throw error;
+    }
+}
+
 export async function postEndpoint(endpoint: string, body: any, signal?: AbortSignal) {
     try {
         const response = await fetch(`${BASE_URL}${endpoint}`, {
