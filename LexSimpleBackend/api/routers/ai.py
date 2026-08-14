@@ -9,7 +9,9 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import fitz
+import pytesseract
 
+from services.image_processor import clean_document_image
 from services.prompts import get_chat_reply_prompt
 from db.chroma_store import query_vector_db
 
@@ -100,49 +102,61 @@ async def simplify_uploaded_file(file: UploadFile = File(...)):
         print(f"🔥 /simplify_file Error: {str(e)}")
         return {"status": "error", "message": "Server error processing file."}
 
-# ============================================================================
-# 🚀 BATCH IMAGE OCR & FILTERING ENDPOINT
-# ============================================================================
-
 @router.post("/simplify_batch")
-async def simplify_batch(
-    files: List[UploadFile] = File(...),
-    filters: str = Form(...) 
-):
-    try:
-        # I-parse yung JSON string ng filters na pinasa ng frontend
-        filters_list = json.loads(filters)
-    except Exception:
-        filters_list = []
-
+async def simplify_batch_files(files: List[UploadFile] = File(...)):
+    """
+    Batch Processing Endpoint.
+    Tatanggap ng maraming images, lilinisin sa OpenCV, at e-extract ang text nang sabay.
+    """
+    temp_dir = "temp_uploads"
+    os.makedirs(temp_dir, exist_ok=True)
     full_extracted_text = ""
 
-    # I-loop lahat ng na-upload na pictures
-    for i, file in enumerate(files):
-        img_bytes = await file.read()
-        
-        # Kunin ang filter para sa page na ito (default ay 'none' kung wala)
-        current_filter = filters_list[i] if i < len(filters_list) else 'none'
-        
-        # Ipasa sa OpenCV at OCR
-        page_text = clean_and_extract_image(img_bytes, current_filter)
-        
-        # Pagsamahin ang text na may page separators
-        if page_text:
-            full_extracted_text += f"\n\n--- PAGE {i + 1} ---\n\n{page_text}"
-
-    if not full_extracted_text.strip() or len(full_extracted_text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Walang sapat na text na na-extract sa mga larawan.")
-
     try:
-        # Ipasa ang na-extract na text sa main pipeline niyo
-        result = _orchestrator.process(ProcessRequest(text=full_extracted_text))
+        for file in files:
+            file_location = f"{temp_dir}/{file.filename}"
+            
+            # Save the uploaded file temporarily
+            with open(file_location, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            # 🚀 APPLY OPENCV AUTO-CLEAN (Adobe Scan Magic)
+            if file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                clean_document_image(file_location)
+
+            # Extract text using Tesseract OCR
+            # (Kung PDF ito, pwede nating gamitin ang PyMuPDF na meron ka na)
+            if file.filename.lower().endswith('.pdf'):
+                import fitz
+                doc = fitz.open(file_location)
+                for page in doc:
+                    full_extracted_text += page.get_text() + "\n"
+                doc.close()
+            else:
+                # Image OCR
+                text = pytesseract.image_to_string(file_location)
+                full_extracted_text += text + "\n\n--- PAGE BREAK ---\n\n"
+            
+            # Delete temp file
+            if os.path.exists(file_location):
+                os.remove(file_location)
+
+        if not full_extracted_text.strip():
+            return {"status": "error", "message": "No text could be extracted from the batch."}
+
+        # 🚀 BACKEND SANITIZATION (DPA Compliant for Large Batches)
+        # Linilinis din natin sa backend dahil raw images ang na-send dito
+        safe_text = sanitize_legal_text(full_extracted_text)
+        
+        # 🚀 SEND SANITIZED TEXT TO ORCHESTRATOR (Rule Engine / AI)
+        result = _orchestrator.process(ProcessRequest(text=safe_text))
+        
         print(f"[ORCHESTRATOR] /simplify_batch routed to {result.source_layer}, llm_calls={result.llm_calls_made}")
         return result.data
+
     except Exception as e:
         print(f"🔥 /simplify_batch Error: {str(e)}")
-        return {"status": "error", "message": "Server error processing batch images."}
-
+        return {"status": "error", "message": "Server error processing batch files."}
 # ============================================================================
 # 🧠 HELPER FUNCTIONS FOR CONTEXT-AWARE CHAT
 # ============================================================================
