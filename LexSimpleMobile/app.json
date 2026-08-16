@@ -53,7 +53,8 @@
             ]
           }
         }
-      ]
+      ],
+      "react-native-document-scanner-plugin"
     ],
     "extra": {
       "apiUrl": "https://presuppurative-unconceitedly-peyton.ngrok-free.dev"
