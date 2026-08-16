@@ -1,4 +1,3 @@
-// src/screens/home/sub-pages/ScannerScreen.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking } from 'react-native';
@@ -18,8 +17,13 @@ export default function ScannerScreen({ route, navigation }: any) {
   const hasInitialized = useRef(false);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
-  // MULTI-CAPTURE STATE
-  const [capturedPages, setCapturedPages] = useState<string[]>(route.params?.existingPages || []);
+  // 🚀 FIX: BULLETPROOF ARRAY INITIALIZATION (Para iwas 'length of undefined' crash)
+  const initialPages = route?.params?.existingPages || [];
+  const [capturedPages, setCapturedPages] = useState<string[]>(initialPages);
+
+  // 🚀 FIX: SAFE GETTER (Sinisiguro na laging array ang bibilangin, kahit magloko ang state)
+  const safePages = Array.isArray(capturedPages) ? capturedPages : [];
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(true);
   const [scanFeedback, setScanFeedback] = useState("Position document inside the frame");
@@ -36,13 +40,13 @@ export default function ScannerScreen({ route, navigation }: any) {
   }, [permission]);
 
   useEffect(() => {
-    if (route.params?.existingPages) {
+    if (route?.params?.existingPages) {
       setCapturedPages(route.params.existingPages);
     }
-  }, [route.params?.existingPages]);
-  
+  }, [route?.params?.existingPages]);
+
   useEffect(() => {
-    if (isCameraOpen && capturedPages.length === 0) {
+    if (isCameraOpen && safePages.length === 0) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(scanLineAnim, { toValue: SCAN_FRAME_HEIGHT - 4, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -53,7 +57,7 @@ export default function ScannerScreen({ route, navigation }: any) {
       scanLineAnim.stopAnimation();
       scanLineAnim.setValue(0);
     }
-  }, [isCameraOpen, capturedPages]);
+  }, [isCameraOpen, safePages.length]);
 
   const handleOpenCamera = async () => {
     if (permission?.granted) setIsCameraOpen(true);
@@ -83,8 +87,8 @@ export default function ScannerScreen({ route, navigation }: any) {
       setScanFeedback("Capturing image...");
       try {
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
-        if (photo) {
-          setCapturedPages(prev => [...prev, photo.uri]);
+        if (photo && photo.uri) {
+          setCapturedPages(prev => [...(prev || []), photo.uri]);
           setScanFeedback("Position next document inside the frame");
         }
       } catch (error) {
@@ -103,9 +107,9 @@ export default function ScannerScreen({ route, navigation }: any) {
         quality: 0.8,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets) {
         const newUris = result.assets.map(a => a.uri);
-        setCapturedPages(prev => [...prev, ...newUris]);
+        setCapturedPages(prev => [...(prev || []), ...newUris]);
       }
     } catch (error) {
       showAlert("Gallery Error", "Hindi mabuksan ang gallery.", "error");
@@ -113,8 +117,8 @@ export default function ScannerScreen({ route, navigation }: any) {
   };
 
   const handleDoneCapture = async () => {
-    if (capturedPages.length === 0) return;
-    navigation.navigate('BatchEditScreen', { pages: capturedPages });
+    if (safePages.length === 0) return;
+    navigation.navigate('BatchEditScreen', { pages: safePages });
   };
 
   if (isAnalyzing) {
@@ -171,12 +175,12 @@ export default function ScannerScreen({ route, navigation }: any) {
           <View style={uiStyles.scanFeedbackPill}>
             <Ionicons name="scan-outline" size={14} color="white" style={{ marginRight: 6 }} />
             <Text style={uiStyles.scanFeedbackText}>
-              {capturedPages.length > 0 ? `${capturedPages.length} page(s) captured` : scanFeedback}
+              {safePages.length > 0 ? `${safePages.length} page(s) captured` : scanFeedback}
             </Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 30 }}>
-            {capturedPages.length > 0 && (
+            {safePages.length > 0 && (
               <TouchableOpacity style={uiStyles.doneBtn} onPress={handleDoneCapture}>
                 <Ionicons name="checkmark-circle" size={60} color={COLORS.primaryLight} />
               </TouchableOpacity>
@@ -186,7 +190,7 @@ export default function ScannerScreen({ route, navigation }: any) {
               <View style={uiStyles.shutterInner} />
             </TouchableOpacity>
 
-            {capturedPages.length > 0 && (
+            {safePages.length > 0 && (
               <TouchableOpacity style={uiStyles.trashBtn} onPress={resetScanner}>
                 <Ionicons name="trash-outline" size={30} color="#EF4444" />
               </TouchableOpacity>
