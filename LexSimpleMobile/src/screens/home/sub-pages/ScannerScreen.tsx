@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createScanSession } from '../../../services/scanFileStorage'; import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Animated, Easing, StyleSheet, StatusBar, Platform, Linking } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -117,8 +117,45 @@ export default function ScannerScreen({ route, navigation }: any) {
   };
 
   const handleDoneCapture = async () => {
-    if (safePages.length === 0) return;
-    navigation.navigate('BatchEditScreen', { pages: safePages });
+    if (safePages.length === 0 || isProcessing) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setScanFeedback('Saving pages offline...');
+
+    try {
+      const scanPages = createScanSession(safePages);
+
+      if (scanPages.length === 0) {
+        throw new Error('Walang pages na na-save.');
+      }
+
+      navigation.navigate('BatchEditScreen', {
+        pages: scanPages,
+      });
+    } catch (error: any) {
+      console.error(
+        '[ScannerScreen] Failed to create scan session:',
+        error
+      );
+
+      showAlert(
+        'Save Error',
+        error?.message ||
+        'Hindi ma-save offline ang captured pages.',
+        'error',
+        [
+          {
+            text: 'OK',
+            style: 'default',
+          },
+        ]
+      );
+    } finally {
+      setIsProcessing(false);
+      setScanFeedback('Position document inside the frame');
+    }
   };
 
   if (isAnalyzing) {
