@@ -102,7 +102,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
       {/* ASK AI SECTION */}
       <View style={[styles.askAiSection, { borderTopColor: T.border }]}>
-        <Text style={[styles.askAiLabel, { color: T.subText }]}>Ask AI About This Clause</Text>
+        <Text style={[styles.askAiLabel, { color: T.subText }]}>Ask Lexie About This Clause</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsScroll}>
           {dynamicPrompts.map((prompt, i) => (
@@ -122,7 +122,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts, extractLegalBasis() || undefined)}
         >
           <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
-          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Discuss in Ask AI</Text>
+          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Discuss in Lexie Insight</Text>
         </TouchableOpacity>
       </View>
     </View>

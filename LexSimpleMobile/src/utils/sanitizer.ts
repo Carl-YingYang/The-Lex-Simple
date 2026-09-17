@@ -852,3 +852,435 @@ export const sanitizeDocumentForAI = (
         hadRedactions,
     };
 };
+
+/* ============================================================
+ * PRIVACY-SAFE MULTI-PAGE PAYLOAD
+ * ============================================================ */
+
+export type OcrPageForSanitization = {
+    pageId: string;
+    sessionId: string;
+    pageNumber: number;
+    sourceUri: string;
+    text: string;
+};
+
+export type SanitizedPagePayload = {
+    pageNumber: number;
+    sanitizedText: string;
+    textHash: string;
+};
+
+export type SanitizedDocumentApiPayload = {
+    documentId: string;
+    pageCount: number;
+    pages: SanitizedPagePayload[];
+};
+
+export type SanitizedPageSummary = SanitizedPagePayload & {
+    pageId: string;
+    sourceUri: string;
+    characterCount: number;
+    redactionCount: number;
+    hadRedactions: boolean;
+};
+
+export type SanitizedDocumentResult = {
+    apiPayload: SanitizedDocumentApiPayload;
+    sanitizedPages: SanitizedPageSummary[];
+    combinedText: string;
+    blocked: boolean;
+    blockedPageNumbers: number[];
+    hadRedactions: boolean;
+};
+
+const SHA_256_INITIAL_HASHES = [
+    0x6a09e667,
+    0xbb67ae85,
+    0x3c6ef372,
+    0xa54ff53a,
+    0x510e527f,
+    0x9b05688c,
+    0x1f83d9ab,
+    0x5be0cd19,
+] as const;
+
+const SHA_256_CONSTANTS = [
+    0x428a2f98,
+    0x71374491,
+    0xb5c0fbcf,
+    0xe9b5dba5,
+    0x3956c25b,
+    0x59f111f1,
+    0x923f82a4,
+    0xab1c5ed5,
+    0xd807aa98,
+    0x12835b01,
+    0x243185be,
+    0x550c7dc3,
+    0x72be5d74,
+    0x80deb1fe,
+    0x9bdc06a7,
+    0xc19bf174,
+    0xe49b69c1,
+    0xefbe4786,
+    0x0fc19dc6,
+    0x240ca1cc,
+    0x2de92c6f,
+    0x4a7484aa,
+    0x5cb0a9dc,
+    0x76f988da,
+    0x983e5152,
+    0xa831c66d,
+    0xb00327c8,
+    0xbf597fc7,
+    0xc6e00bf3,
+    0xd5a79147,
+    0x06ca6351,
+    0x14292967,
+    0x27b70a85,
+    0x2e1b2138,
+    0x4d2c6dfc,
+    0x53380d13,
+    0x650a7354,
+    0x766a0abb,
+    0x81c2c92e,
+    0x92722c85,
+    0xa2bfe8a1,
+    0xa81a664b,
+    0xc24b8b70,
+    0xc76c51a3,
+    0xd192e819,
+    0xd6990624,
+    0xf40e3585,
+    0x106aa070,
+    0x19a4c116,
+    0x1e376c08,
+    0x2748774c,
+    0x34b0bcb5,
+    0x391c0cb3,
+    0x4ed8aa4a,
+    0x5b9cca4f,
+    0x682e6ff3,
+    0x748f82ee,
+    0x78a5636f,
+    0x84c87814,
+    0x8cc70208,
+    0x90befffa,
+    0xa4506ceb,
+    0xbef9a3f7,
+    0xc67178f2,
+] as const;
+
+const rotateRight = (
+    value: number,
+    bits: number
+): number => {
+    return (
+        (value >>> bits) |
+        (value << (32 - bits))
+    ) >>> 0;
+};
+
+const encodeUtf8 = (value: string): number[] => {
+    const bytes: number[] = [];
+
+    for (let index = 0; index < value.length; index += 1) {
+        let codePoint = value.codePointAt(index);
+
+        if (codePoint === undefined) {
+            continue;
+        }
+
+        if (codePoint > 0xffff) {
+            index += 1;
+        }
+
+        if (codePoint <= 0x7f) {
+            bytes.push(codePoint);
+        } else if (codePoint <= 0x7ff) {
+            bytes.push(
+                0xc0 | (codePoint >>> 6),
+                0x80 | (codePoint & 0x3f)
+            );
+        } else if (codePoint <= 0xffff) {
+            bytes.push(
+                0xe0 | (codePoint >>> 12),
+                0x80 | ((codePoint >>> 6) & 0x3f),
+                0x80 | (codePoint & 0x3f)
+            );
+        } else {
+            bytes.push(
+                0xf0 | (codePoint >>> 18),
+                0x80 | ((codePoint >>> 12) & 0x3f),
+                0x80 | ((codePoint >>> 6) & 0x3f),
+                0x80 | (codePoint & 0x3f)
+            );
+        }
+    }
+
+    return bytes;
+};
+
+/**
+ * Dependency-free SHA-256 for hashing sanitized text on-device.
+ *
+ * This is used only for integrity verification. It does not encrypt text.
+ */
+export const sha256Text = (value: string): string => {
+    const bytes = encodeUtf8(value);
+    const originalBitLength = bytes.length * 8;
+
+    bytes.push(0x80);
+
+    while (bytes.length % 64 !== 56) {
+        bytes.push(0);
+    }
+
+    const highBits = Math.floor(
+        originalBitLength / 0x100000000
+    );
+    const lowBits = originalBitLength >>> 0;
+
+    bytes.push(
+        (highBits >>> 24) & 0xff,
+        (highBits >>> 16) & 0xff,
+        (highBits >>> 8) & 0xff,
+        highBits & 0xff,
+        (lowBits >>> 24) & 0xff,
+        (lowBits >>> 16) & 0xff,
+        (lowBits >>> 8) & 0xff,
+        lowBits & 0xff
+    );
+
+    const hashes = [...SHA_256_INITIAL_HASHES];
+    const schedule = new Array<number>(64).fill(0);
+
+    for (
+        let blockStart = 0;
+        blockStart < bytes.length;
+        blockStart += 64
+    ) {
+        for (let wordIndex = 0; wordIndex < 16; wordIndex += 1) {
+            const byteIndex = blockStart + wordIndex * 4;
+            schedule[wordIndex] = (
+                (bytes[byteIndex] << 24) |
+                (bytes[byteIndex + 1] << 16) |
+                (bytes[byteIndex + 2] << 8) |
+                bytes[byteIndex + 3]
+            ) >>> 0;
+        }
+
+        for (let wordIndex = 16; wordIndex < 64; wordIndex += 1) {
+            const previous15 = schedule[wordIndex - 15];
+            const previous2 = schedule[wordIndex - 2];
+            const smallSigma0 = (
+                rotateRight(previous15, 7) ^
+                rotateRight(previous15, 18) ^
+                (previous15 >>> 3)
+            ) >>> 0;
+            const smallSigma1 = (
+                rotateRight(previous2, 17) ^
+                rotateRight(previous2, 19) ^
+                (previous2 >>> 10)
+            ) >>> 0;
+
+            schedule[wordIndex] = (
+                schedule[wordIndex - 16] +
+                smallSigma0 +
+                schedule[wordIndex - 7] +
+                smallSigma1
+            ) >>> 0;
+        }
+
+        let a = hashes[0];
+        let b = hashes[1];
+        let c = hashes[2];
+        let d = hashes[3];
+        let e = hashes[4];
+        let f = hashes[5];
+        let g = hashes[6];
+        let h = hashes[7];
+
+        for (let round = 0; round < 64; round += 1) {
+            const bigSigma1 = (
+                rotateRight(e, 6) ^
+                rotateRight(e, 11) ^
+                rotateRight(e, 25)
+            ) >>> 0;
+            const choose = ((e & f) ^ (~e & g)) >>> 0;
+            const temporary1 = (
+                h +
+                bigSigma1 +
+                choose +
+                SHA_256_CONSTANTS[round] +
+                schedule[round]
+            ) >>> 0;
+            const bigSigma0 = (
+                rotateRight(a, 2) ^
+                rotateRight(a, 13) ^
+                rotateRight(a, 22)
+            ) >>> 0;
+            const majority = (
+                (a & b) ^
+                (a & c) ^
+                (b & c)
+            ) >>> 0;
+            const temporary2 = (
+                bigSigma0 + majority
+            ) >>> 0;
+
+            h = g;
+            g = f;
+            f = e;
+            e = (d + temporary1) >>> 0;
+            d = c;
+            c = b;
+            b = a;
+            a = (temporary1 + temporary2) >>> 0;
+        }
+
+        hashes[0] = (hashes[0] + a) >>> 0;
+        hashes[1] = (hashes[1] + b) >>> 0;
+        hashes[2] = (hashes[2] + c) >>> 0;
+        hashes[3] = (hashes[3] + d) >>> 0;
+        hashes[4] = (hashes[4] + e) >>> 0;
+        hashes[5] = (hashes[5] + f) >>> 0;
+        hashes[6] = (hashes[6] + g) >>> 0;
+        hashes[7] = (hashes[7] + h) >>> 0;
+    }
+
+    return hashes
+        .map((hash) => hash.toString(16).padStart(8, '0'))
+        .join('');
+};
+
+const countRedactions = (value: string): number => {
+    return (
+        value.match(/\[REDACTED_[A-Z_]+\]/g) ?? []
+    ).length;
+};
+
+const assertOrderedCompletePages = (
+    pages: OcrPageForSanitization[]
+): void => {
+    if (!Array.isArray(pages) || pages.length === 0) {
+        throw new Error(
+            'Walang complete OCR pages na puwedeng linisin.'
+        );
+    }
+
+    const pageIds = new Set<string>();
+    const sourceUris = new Set<string>();
+
+    pages.forEach((page, index) => {
+        const expectedPageNumber = index + 1;
+
+        if (page.pageNumber !== expectedPageNumber) {
+            throw new Error(
+                `Hindi complete o mali ang order ng OCR pages. Inaasahan ang Page ${expectedPageNumber}.`
+            );
+        }
+
+        if (!page.pageId || pageIds.has(page.pageId)) {
+            throw new Error(
+                `Duplicate o invalid ang page ID ng Page ${expectedPageNumber}.`
+            );
+        }
+
+        if (!page.sourceUri || sourceUris.has(page.sourceUri)) {
+            throw new Error(
+                `Duplicate o invalid ang image source ng Page ${expectedPageNumber}.`
+            );
+        }
+
+        if (
+            typeof page.text !== 'string' ||
+            page.text.trim().length < 20
+        ) {
+            throw new Error(
+                `Hindi sapat ang OCR text ng Page ${expectedPageNumber}.`
+            );
+        }
+
+        pageIds.add(page.pageId);
+        sourceUris.add(page.sourceUri);
+    });
+};
+
+/**
+ * Sanitize every OCR page independently, then create the one exact payload
+ * accepted by the backend /simplify endpoint.
+ *
+ * Raw OCR text and image URIs are not included in apiPayload.
+ */
+export const buildSanitizedDocumentForAI = (
+    documentId: string,
+    pages: OcrPageForSanitization[]
+): SanitizedDocumentResult => {
+    const normalizedDocumentId = documentId?.trim();
+
+    if (!normalizedDocumentId) {
+        throw new Error(
+            'Walang valid document ID para sa analysis.'
+        );
+    }
+
+    assertOrderedCompletePages(pages);
+
+    const blockedPageNumbers: number[] = [];
+    const sanitizedPages: SanitizedPageSummary[] = [];
+
+    for (const page of pages) {
+        const privacyResult = sanitizeDocumentForAI(page.text);
+        const sanitizedText = privacyResult.safeText.trim();
+
+        if (
+            privacyResult.blocked ||
+            sanitizedText.length < 20
+        ) {
+            blockedPageNumbers.push(page.pageNumber);
+        }
+
+        sanitizedPages.push({
+            pageId: page.pageId,
+            sourceUri: page.sourceUri,
+            pageNumber: page.pageNumber,
+            sanitizedText,
+            textHash: sha256Text(sanitizedText),
+            characterCount: sanitizedText.length,
+            redactionCount: countRedactions(sanitizedText),
+            hadRedactions: privacyResult.hadRedactions,
+        });
+    }
+
+    const combinedText = sanitizedPages
+        .map(
+            (page) =>
+                `--- Page ${page.pageNumber} ---\n${page.sanitizedText}`
+        )
+        .join('\n\n');
+
+    const apiPayload: SanitizedDocumentApiPayload = {
+        documentId: normalizedDocumentId,
+        pageCount: sanitizedPages.length,
+        pages: sanitizedPages.map((page) => ({
+            pageNumber: page.pageNumber,
+            sanitizedText: page.sanitizedText,
+            textHash: page.textHash,
+        })),
+    };
+
+    return {
+        apiPayload,
+        sanitizedPages,
+        combinedText,
+        blocked: blockedPageNumbers.length > 0,
+        blockedPageNumbers,
+        hadRedactions: sanitizedPages.some(
+            (page) => page.hadRedactions
+        ),
+    };
+};
+
+

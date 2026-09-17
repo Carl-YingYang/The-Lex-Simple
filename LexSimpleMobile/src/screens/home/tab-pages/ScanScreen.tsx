@@ -1,417 +1,1272 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, {
+    useCallback,
+    useMemo,
+    useState,
+} from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, TextInput, Image, Modal,
-  KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet, Dimensions, StatusBar, FlatList
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import ImageViewer from 'react-native-image-zoom-viewer';
 
-import { COLORS } from '../../../theme/globalStyles';
 import { useCustomAlert } from '../../../components/CustomAlert';
-import { useTheme } from '../../../theme/ThemeContext';
 import FloatingProcessIndicator from '../../../components/FloatingProcessIndicator';
 import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
+import { useTheme } from '../../../theme/ThemeContext';
 
-// 🚀 IMPORT ANG MGA CUSTOM ICONS
-const AskAiGridIcon = require('../../../../assets/icons/chat_ai.png');
-const AskAiListIcon = require('../../../../assets/icons/message_ai.png');
-const DocFileIcon = require('../../../../assets/icons/files.png');
+
+const HISTORY_STORAGE_KEY = '@lex_scan_history';
+const PRIMARY = '#3478F6';
+const PRIMARY_SOFT = '#66A0FF';
+const SUCCESS = '#10B981';
+const WARNING = '#F59E0B';
+
+type HistoryFilter = 'all' | 'scanned' | 'unscanned';
 
 export interface ScanHistoryItem {
-  id: string;
-  uri?: string;
-  images?: string[]; // 🚀 ADDED: Suporta para sa array of images mula sa Batch Edit
-  title: string;
-  date: string;
-  type: 'camera' | 'gallery' | 'document';
-  status: 'unscanned' | 'scanned';
-  analysisResult?: any;
-  ocrText?: string;
+    id: string;
+    uri?: string;
+    images?: string[];
+    pageUris?: string[];
+    title: string;
+    date: string;
+    type: 'camera' | 'gallery' | 'document';
+    status: 'unscanned' | 'scanned';
+    analysisResult?: any;
+    ocrText?: string;
+    sanitizedText?: string;
 }
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 32 - 12) / 2;
+type SourceOptionProps = {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    title: string;
+    accent: string;
+    backgroundColor: string;
+    borderColor: string;
+    textColor: string;
+    iconBackgroundColor: string;
+    onPress: () => void;
+};
+
+const SourceOption = ({
+    icon,
+    title,
+    accent,
+    backgroundColor,
+    borderColor,
+    textColor,
+    iconBackgroundColor,
+    onPress,
+}: SourceOptionProps) => (
+    <TouchableOpacity
+        style={[
+            styles.sourceOption,
+            { backgroundColor, borderColor },
+        ]}
+        onPress={onPress}
+        activeOpacity={0.82}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+    >
+        <View
+            style={[
+                styles.sourceOptionIcon,
+                {
+                    borderColor: accent,
+                    backgroundColor: iconBackgroundColor,
+                },
+            ]}
+        >
+            <Ionicons
+                name={icon}
+                size={21}
+                color={accent}
+            />
+        </View>
+
+        <Text
+            style={[styles.sourceOptionText, { color: textColor }]}
+            numberOfLines={2}
+        >
+            {title}
+        </Text>
+    </TouchableOpacity>
+);
+
+const getHistoryImages = (
+    item: ScanHistoryItem
+): string[] => {
+    const candidates = item.pageUris?.length
+        ? item.pageUris
+        : item.images?.length
+          ? item.images
+          : item.uri
+            ? [item.uri]
+            : [];
+
+    return candidates.filter(
+        (value): value is string =>
+            typeof value === 'string' &&
+            value.trim().length > 0
+    );
+};
+
+const getItemDate = (value: string): string => {
+    if (!value) {
+        return 'Walang petsa';
+    }
+
+    return value.split(',')[0]?.trim() || value;
+};
+
+const isGenericTitle = (value: string): boolean => {
+    const normalized = value.trim().toLocaleLowerCase();
+
+    return (
+        normalized === 'camera scan' ||
+        normalized === 'gallery upload' ||
+        normalized === 'document file' ||
+        normalized === 'document scan' ||
+        normalized.startsWith('document scan (') ||
+        normalized.includes('pages)')
+    );
+};
 
 export default function ScanScreen({ navigation }: any) {
-  const [historyItems, setHistoryItems] = useState<ScanHistoryItem[]>([]);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'scanned' | 'unscanned'>('all');
+    const { isDarkMode, toggleTheme, colors: T } = useTheme();
+    const {
+        isProcessing: isGlobalProcessing,
+        activeFileId,
+    } = useBackgroundProcess();
+    const { showAlert, AlertRender } = useCustomAlert();
 
-  const { isDarkMode, toggleTheme, colors: T } = useTheme();
-  const { isProcessing: isGlobalProcessing, activeFileId, processRoute } = useBackgroundProcess();
+    const [historyItems, setHistoryItems] = useState<
+        ScanHistoryItem[]
+    >([]);
+    const [activeFilter, setActiveFilter] =
+        useState<HistoryFilter>('all');
+    const [renameModalVisible, setRenameModalVisible] =
+        useState(false);
+    const [itemToRename, setItemToRename] =
+        useState<ScanHistoryItem | null>(null);
+    const [newTitle, setNewTitle] = useState('');
 
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [renameModalVisible, setRenameModalVisible] = useState(false);
-  const [itemToRename, setItemToRename] = useState<ScanHistoryItem | null>(null);
-  const [newTitle, setNewTitle] = useState("");
-  const [visibleCount, setVisibleCount] = useState(5);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const loadHistory = useCallback(async (): Promise<void> => {
+        try {
+            const storedHistory = await AsyncStorage.getItem(
+                HISTORY_STORAGE_KEY
+            );
 
-  const { showAlert, AlertRender } = useCustomAlert();
+            if (!storedHistory) {
+                setHistoryItems([]);
+                return;
+            }
 
-  useFocusEffect(useCallback(() => { loadHistory(); }, []));
-  useEffect(() => { setVisibleCount(5); }, [activeFilter, historyItems.length]);
+            const parsed = JSON.parse(storedHistory);
+            if (!Array.isArray(parsed)) {
+                setHistoryItems([]);
+                return;
+            }
 
-  const loadHistory = async () => {
-    try {
-      const storedHistory = await AsyncStorage.getItem('@lex_scan_history');
-      if (storedHistory) {
-        const historyArray = JSON.parse(storedHistory);
-        historyArray.sort((a: any, b: any) => parseInt(b.id) - parseInt(a.id));
-        setHistoryItems(historyArray);
-      }
-    } catch (error) { console.error("Failed to load history", error); }
-  };
+            const sortedHistory = [...parsed].sort(
+                (a, b) =>
+                    Number.parseInt(String(b?.id), 10) -
+                    Number.parseInt(String(a?.id), 10)
+            );
 
-  const showLegalInfo = () => {
-    showAlert("Legal Literacy Tool", "Ang Lex-Simple ay isang AI Legal Literacy Tool at hindi pamalit sa pormal na payo ng isang lisensyadong abogado.", "info", [{ text: "Naintindihan ko", style: "default" }]);
-  };
-
-  const handleGridPress = (screen: string) => {
-    if (isGlobalProcessing) {
-      showAlert("May Proseso Pa", "May kasalukuyang nag-aanalyze pa. Hintayin matapos o i-cancel muna ito.", "warning");
-      return;
-    }
-    navigation.navigate(screen);
-  };
-
-  const handleCardPress = (item: ScanHistoryItem) => {
-    if (item.status === 'scanned' && item.analysisResult) {
-      navigation.navigate('ResultScreen', { analysisResult: item.analysisResult, historyItem: item });
-    } else {
-      navigation.navigate('OfflineDetailScreen', { scanItem: item });
-    }
-  };
-
-  const getDisplayTitle = (item: ScanHistoryItem) => {
-    let finalTitle = item.title;
-    if (item.title === 'Camera Scan' || item.title === 'Gallery Upload' || item.title === 'Document File' || item.title.includes('pages)')) {
-      if (item.status === 'scanned' && item.analysisResult?.documentTitle) finalTitle = item.analysisResult.documentTitle;
-      else if (item.ocrText) {
-        const lines = item.ocrText.split('\n').filter(line => line.trim().length > 4);
-        if (lines.length > 0) finalTitle = lines[0].trim();
-      }
-    }
-    return finalTitle.length > 25 ? finalTitle.substring(0, 25) + '...' : finalTitle;
-  };
-
-  const openRenameModal = (item: ScanHistoryItem) => { setItemToRename(item); setNewTitle(getDisplayTitle(item)); setRenameModalVisible(true); };
-
-  const saveRenamedTitle = async () => {
-    if (!itemToRename || !newTitle.trim()) return;
-    try {
-      const updatedHistory = historyItems.map(item => item.id === itemToRename.id ? { ...item, title: newTitle.trim() } : item);
-      setHistoryItems(updatedHistory);
-      await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(updatedHistory));
-      setRenameModalVisible(false);
-    } catch (error) { showAlert("Error", "Hindi ma-save ang bagong pangalan.", "error", [{ text: "OK" }]); }
-  };
-
-  const handleAskAi = (item: ScanHistoryItem) => {
-    if (!item.analysisResult) return;
-    const res = item.analysisResult;
-    const riskConfig = res.score >= 90 ? 'VERY SAFE' : res.score >= 70 ? 'ACCEPTABLE' : res.score >= 50 ? 'RISKY' : 'HIGH RISK';
-    let fullContextData = `MGA DETALYE NG DOKUMENTO:\nTitle: ${getDisplayTitle(item)}\nComplexity Score: ${res.score}/100\nRisk Level: ${riskConfig}\n\nMGA NAKITANG FINDINGS:\n`;
-    if (res.findings && res.findings.length > 0) res.findings.forEach((f: any, i: number) => { fullContextData += `\n${i + 1}. ${f.title}\n   - Paliwanag: ${f.description}\n   - Payo: ${f.advice}\n   - Orihinal na text: "${f.foundText}"\n`; });
-    else fullContextData += "Walang nakitang high-risk na clauses.";
-    navigation.navigate('AskAiScreen', { attachedFile: { name: getDisplayTitle(item), data: fullContextData } });
-  };
-
-  const handleDelete = async (id: string) => {
-    showAlert("Delete File", "Sigurado ka bang gusto mong burahin ito?", "warning", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete", style: "destructive", onPress: async () => {
-          const newHistory = historyItems.filter(item => item.id !== id);
-          setHistoryItems(newHistory);
-          await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(newHistory));
+            setHistoryItems(sortedHistory);
+        } catch (error) {
+            console.error(
+                '[ScanScreen] Failed to load history:',
+                error
+            );
+            setHistoryItems([]);
         }
-      }
-    ]);
-  };
+    }, []);
 
-  const filteredHistory = historyItems.filter(item => activeFilter === 'all' ? true : item.status === activeFilter);
-  const displayedHistory = filteredHistory.slice(0, visibleCount);
+    useFocusEffect(
+        useCallback(() => {
+            void loadHistory();
+        }, [loadHistory])
+    );
 
-  const handleScroll = (event: any) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 50;
-    if (isCloseToBottom && !isLoadingMore && visibleCount < filteredHistory.length) {
-      setIsLoadingMore(true);
-      setTimeout(() => { setVisibleCount(prev => prev + 5); setIsLoadingMore(false); }, 800);
-    }
-  };
+    const getDisplayTitle = useCallback(
+        (item: ScanHistoryItem): string => {
+            let title = item.title?.trim() || 'Document';
 
-  return (
-    <View style={{ flex: 1, backgroundColor: T.bg }}>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <FloatingProcessIndicator />
+            if (isGenericTitle(title)) {
+                const analyzedTitle =
+                    item.analysisResult?.documentTitle;
 
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 20 }}
-        showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-      >
-        <View style={localStyles.header}>
-          <View>
-            <Text style={[localStyles.greeting, { color: T.subText }]}>Welcome back,</Text>
-            <Text style={[localStyles.headerTitle, { color: T.text }]}>Lex-Simple</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TouchableOpacity style={[localStyles.themeBtn, { backgroundColor: T.card, borderColor: T.border }]} onPress={() => toggleTheme()}>
-              <Ionicons name={isDarkMode ? "moon" : "sunny"} size={20} color={T.text} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[localStyles.themeBtn, { backgroundColor: T.card, borderColor: T.border }]} onPress={showLegalInfo}>
-              <Ionicons name="information-circle-outline" size={20} color={T.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
+                if (
+                    item.status === 'scanned' &&
+                    typeof analyzedTitle === 'string' &&
+                    analyzedTitle.trim()
+                ) {
+                    title = analyzedTitle.trim();
+                } else if (item.ocrText) {
+                    const firstUsefulLine = item.ocrText
+                        .split('\n')
+                        .map((line) => line.trim())
+                        .find(
+                            (line) =>
+                                line.length > 4 &&
+                                !/^--- Page \d+ ---$/i.test(line)
+                        );
 
-        <View style={[localStyles.disclaimerBox, { backgroundColor: T.card, borderColor: T.border }]}>
-          <Ionicons name="shield-checkmark" size={18} color={COLORS.success} style={{ marginRight: 8 }} />
-          <Text style={[localStyles.disclaimerText, { color: T.subText }]}>
-            <Text style={{ fontWeight: 'bold', color: T.text }}>UPL Notice: </Text>Legal Literacy Tool lang ito. Hindi pamalit sa abogado.
-          </Text>
-        </View>
+                    if (firstUsefulLine) {
+                        title = firstUsefulLine;
+                    }
+                }
+            }
 
-        <View style={localStyles.gridContainer}>
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#6D28D9', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('ScannerScreen')} disabled={isGlobalProcessing}>
-            <Ionicons name="scan" size={26} color="#6D28D9" style={{ marginBottom: 10 }} />
-            <Text style={[localStyles.cardTitle, { color: T.text }]}>Scan</Text>
-            <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Camera & Docs</Text>
-          </TouchableOpacity>
+            return title.length > 42
+                ? `${title.slice(0, 42).trim()}...`
+                : title;
+        },
+        []
+    );
 
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#3B82F6', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('UploadImageScreen')} disabled={isGlobalProcessing}>
-            <Ionicons name="image-outline" size={26} color="#3B82F6" style={{ marginBottom: 10 }} />
-            <Text style={[localStyles.cardTitle, { color: T.text }]}>Upload</Text>
-            <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Photos & Gallery</Text>
-          </TouchableOpacity>
+    const filteredHistory = useMemo(
+        () =>
+            historyItems.filter((item) =>
+                activeFilter === 'all'
+                    ? true
+                    : item.status === activeFilter
+            ),
+        [activeFilter, historyItems]
+    );
 
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#10B981', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('ConvertScreen')} disabled={isGlobalProcessing}>
-            <Ionicons name="document-text-outline" size={26} color="#10B981" style={{ marginBottom: 10 }} />
-            <Text style={[localStyles.cardTitle, { color: T.text }]}>Convert</Text>
-            <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>PDF, Word, TXT</Text>
-          </TouchableOpacity>
+    const showLegalInfo = (): void => {
+        showAlert(
+            'Legal Literacy Tool',
+            'Tumutulong ang Lex-Simple na ipaliwanag ang legal text. Hindi ito kapalit ng payo mula sa lisensyadong abogado.',
+            'info',
+            [{ text: 'Naintindihan ko' }]
+        );
+    };
 
-          <TouchableOpacity style={[localStyles.gridCard, { backgroundColor: T.card, borderLeftWidth: 5, borderColor: '#F59E0B', opacity: isGlobalProcessing ? 0.5 : 1 }]} onPress={() => handleGridPress('AskAiScreen')} disabled={isGlobalProcessing}>
-            <Image source={AskAiGridIcon} style={[localStyles.gridIcon, { tintColor: '#F59E0B' }]} />
-            <Text style={[localStyles.cardTitle, { color: T.text }]}>Ask AI</Text>
-            <Text style={[localStyles.cardSubtitle, { color: T.subText }]}>Chat & Analyze</Text>
-          </TouchableOpacity>
-        </View>
+    const handleCardPress = (item: ScanHistoryItem): void => {
+        if (item.status === 'scanned' && item.analysisResult) {
+            navigation.navigate('ResultScreen', {
+                analysisResult: item.analysisResult,
+                historyItem: item,
+            });
+            return;
+        }
 
-        <View style={{ height: 1, backgroundColor: T.border, marginVertical: 24 }} />
+        navigation.navigate('OfflineDetailScreen', {
+            scanItem: item,
+        });
+    };
 
-        <View style={localStyles.sectionHeader}>
-          <Text style={[localStyles.sectionTitle, { color: T.text }]}>Recent Files</Text>
-          <View style={localStyles.filterRow}>
-            <TouchableOpacity style={[localStyles.filterChip, { backgroundColor: activeFilter === 'all' ? '#6D28D9' : T.card, borderColor: activeFilter === 'all' ? '#6D28D9' : T.border }]} onPress={() => setActiveFilter('all')}>
-              <Text style={[localStyles.filterText, { color: activeFilter === 'all' ? '#fff' : T.subText }]}>All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[localStyles.filterChip, { backgroundColor: activeFilter === 'scanned' ? '#6D28D9' : T.card, borderColor: activeFilter === 'scanned' ? '#6D28D9' : T.border }]} onPress={() => setActiveFilter('scanned')}>
-              <Text style={[localStyles.filterText, { color: activeFilter === 'scanned' ? '#fff' : T.subText }]}>Scanned</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[localStyles.filterChip, { backgroundColor: activeFilter === 'unscanned' ? '#6D28D9' : T.card, borderColor: activeFilter === 'unscanned' ? '#6D28D9' : T.border }]} onPress={() => setActiveFilter('unscanned')}>
-              <Text style={[localStyles.filterText, { color: activeFilter === 'unscanned' ? '#fff' : T.subText }]}>Unscanned</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+    const openRenameModal = (item: ScanHistoryItem): void => {
+        setItemToRename(item);
+        setNewTitle(getDisplayTitle(item));
+        setRenameModalVisible(true);
+    };
 
-        <View style={localStyles.historyList}>
-          {filteredHistory.length === 0 ? (
-            <View style={localStyles.emptyState}>
-              <Ionicons name="folder-open-outline" size={48} color={T.subText} />
-              <Text style={{ color: T.subText, marginTop: 12, fontSize: 16 }}>No recent files found.</Text>
-            </View>
-          ) : (
-            displayedHistory.map((item) => {
-              const isCurrentlyAnalyzing = isGlobalProcessing && activeFileId === item.id;
+    const closeRenameModal = (): void => {
+        setRenameModalVisible(false);
+        setItemToRename(null);
+        setNewTitle('');
+    };
 
-              return (
-                <View key={item.id} style={[localStyles.historyCard, { backgroundColor: T.card, borderColor: T.border, opacity: isGlobalProcessing && !isCurrentlyAnalyzing ? 0.6 : 1 }]}>
+    const saveRenamedTitle = async (): Promise<void> => {
+        const cleanTitle = newTitle.trim();
+        if (!itemToRename || !cleanTitle) {
+            return;
+        }
 
-                  {/* 🚀 SCROLLABLE THUMBNAIL IMPLEMENTATION */}
-                  <View style={[localStyles.thumbnailWrapper, { backgroundColor: T.bg, borderWidth: 1, borderColor: T.border }]}>
-                    {item.type === 'document' ? (
-                      <TouchableOpacity
-                        style={localStyles.thumbnailInner}
-                        activeOpacity={0.8}
-                        onPress={() => {
-                          if (isCurrentlyAnalyzing) return;
-                          navigation.navigate('SanitizedOcrScreen', { sanitizedText: item.ocrText || "Walang text content.", customTitle: getDisplayTitle(item), isDocumentView: true });
-                        }}
-                      >
-                        <Image source={DocFileIcon} style={{ width: 28, height: 28, resizeMode: 'contain' }} />
-                      </TouchableOpacity>
-                    ) : item.images && item.images.length > 0 ? (
-                      <FlatList
-                        data={item.images}
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        pagingEnabled
-                        keyExtractor={(img, imgIndex) => imgIndex.toString()}
-                        renderItem={({ item: img }) => (
-                          <TouchableOpacity
-                            style={localStyles.thumbnailInner}
-                            activeOpacity={0.8}
-                            onPress={() => {
-                              if (isCurrentlyAnalyzing) return;
-                              setSelectedImage(img);
-                            }}
-                          >
-                            <Image source={{ uri: img }} style={{ width: 56, height: 56 }} resizeMode="cover" />
-                          </TouchableOpacity>
+        try {
+            const updatedHistory = historyItems.map((item) =>
+                item.id === itemToRename.id
+                    ? { ...item, title: cleanTitle }
+                    : item
+            );
+
+            await AsyncStorage.setItem(
+                HISTORY_STORAGE_KEY,
+                JSON.stringify(updatedHistory)
+            );
+            setHistoryItems(updatedHistory);
+            closeRenameModal();
+        } catch (error) {
+            console.error(
+                '[ScanScreen] Rename failed:',
+                error
+            );
+            showAlert(
+                'Hindi Napalitan ang Pangalan',
+                'Subukan ulit pagkatapos ng ilang sandali.',
+                'error',
+                [{ text: 'OK' }]
+            );
+        }
+    };
+
+    const deleteItem = async (id: string): Promise<void> => {
+        try {
+            const updatedHistory = historyItems.filter(
+                (item) => item.id !== id
+            );
+
+            await AsyncStorage.setItem(
+                HISTORY_STORAGE_KEY,
+                JSON.stringify(updatedHistory)
+            );
+            setHistoryItems(updatedHistory);
+        } catch (error) {
+            console.error(
+                '[ScanScreen] Delete failed:',
+                error
+            );
+            showAlert(
+                'Hindi Nabura ang File',
+                'Subukan ulit pagkatapos ng ilang sandali.',
+                'error',
+                [{ text: 'OK' }]
+            );
+        }
+    };
+
+    const handleDelete = (item: ScanHistoryItem): void => {
+        showAlert(
+            'Burahin ang File?',
+            `Permanenteng aalisin ang “${getDisplayTitle(item)}” sa Recent Files.`,
+            'warning',
+            [
+                { text: 'Huwag Burahin', style: 'cancel' },
+                {
+                    text: 'Burahin',
+                    style: 'destructive',
+                    onPress: () => void deleteItem(item.id),
+                },
+            ]
+        );
+    };
+
+    const openHistoryOptions = (
+        item: ScanHistoryItem
+    ): void => {
+        showAlert(
+            getDisplayTitle(item),
+            'Piliin kung ano ang gusto mong gawin sa file.',
+            'info',
+            [
+                {
+                    text: 'Palitan ang Pangalan',
+                    onPress: () => openRenameModal(item),
+                },
+                {
+                    text: 'Burahin',
+                    style: 'destructive',
+                    onPress: () => handleDelete(item),
+                },
+                {
+                    text: 'Kanselahin',
+                    style: 'cancel',
+                },
+            ]
+        );
+    };
+
+    const renderHistoryItem = ({
+        item,
+    }: {
+        item: ScanHistoryItem;
+    }) => {
+        const isAnalyzing =
+            isGlobalProcessing && activeFileId === item.id;
+        const images = getHistoryImages(item);
+        const previewUri = images[0];
+        const pageCount = images.length;
+
+        return (
+            <View
+                style={[
+                    styles.historyCard,
+                    {
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                    },
+                ]}
+            >
+                <TouchableOpacity
+                    style={styles.historyMainPress}
+                    onPress={() => handleCardPress(item)}
+                    disabled={isAnalyzing}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Buksan ang ${getDisplayTitle(item)}`}
+                >
+                    <View
+                        style={[
+                            styles.previewBox,
+                            {
+                                backgroundColor: T.bg,
+                                borderColor: T.border,
+                            },
+                        ]}
+                    >
+                        {item.type === 'document' || !previewUri ? (
+                            <Ionicons
+                                name="document-text-outline"
+                                size={27}
+                                color={PRIMARY_SOFT}
+                            />
+                        ) : (
+                            <Image
+                                source={{ uri: previewUri }}
+                                style={styles.previewImage}
+                                resizeMode="cover"
+                            />
                         )}
-                      />
-                    ) : (
-                      <TouchableOpacity
-                        style={localStyles.thumbnailInner}
-                        activeOpacity={0.8}
-                        onPress={() => {
-                          if (isCurrentlyAnalyzing || !item.uri) return;
-                          setSelectedImage(item.uri);
-                        }}
-                      >
-                        <Image source={{ uri: item.uri }} style={{ width: 56, height: 56 }} resizeMode="cover" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
 
-                  <View style={localStyles.historyContent}>
-                    <View style={localStyles.historyTopRow}>
-                      <TouchableOpacity style={{ flex: 1 }} onPress={() => handleCardPress(item)} activeOpacity={0.7}>
-                        <Text style={[localStyles.historyTitle, { color: T.text }]} numberOfLines={1}>{getDisplayTitle(item)}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => openRenameModal(item)} disabled={isGlobalProcessing}>
-                        <Ionicons name="pencil" size={14} color={T.subText} />
-                      </TouchableOpacity>
+                        {pageCount > 1 && (
+                            <View style={styles.pageCountBadge}>
+                                <Text style={styles.pageCountText}>
+                                    {pageCount}
+                                </Text>
+                            </View>
+                        )}
                     </View>
 
-                    <View style={localStyles.historyMetaRow}>
-                      <Ionicons name={item.type === 'camera' ? 'camera' : item.type === 'gallery' ? 'images' : 'document'} size={12} color={T.subText} />
-                      <Text style={[localStyles.historyMetaText, { color: T.subText }]}> {item.type.toUpperCase()} • {item.date.split(',')[0]}</Text>
-                    </View>
+                    <View style={styles.historyContent}>
+                        <Text
+                            style={[
+                                styles.historyTitle,
+                                { color: T.text },
+                            ]}
+                            numberOfLines={2}
+                        >
+                            {getDisplayTitle(item)}
+                        </Text>
 
-                    <View style={localStyles.historyActionsRow}>
-                      {isCurrentlyAnalyzing ? (
-                        <View style={[localStyles.actionBtn, { backgroundColor: 'rgba(167, 139, 250, 0.1)' }]}>
-                          <ActivityIndicator size="small" color={COLORS.primaryLight} style={{ marginRight: 6 }} />
-                          <Text style={[localStyles.actionBtnText, { color: COLORS.primaryLight }]}>Analyzing...</Text>
-                        </View>
-                      ) : (
-                        <>
-                          <TouchableOpacity
-                            style={[localStyles.actionBtn, { borderWidth: 1, borderColor: item.status === 'scanned' ? COLORS.primaryLight : 'transparent', backgroundColor: item.status === 'scanned' ? 'transparent' : '#6D28D9' }]}
-                            onPress={() => handleCardPress(item)}
-                          >
-                            <Ionicons name={item.status === 'scanned' ? "document-text" : "sparkles"} size={12} color={item.status === 'scanned' ? '#A78BFA' : '#fff'} />
-                            <Text style={[localStyles.actionBtnText, { color: item.status === 'scanned' ? '#A78BFA' : '#fff' }]}>
-                              {item.status === 'scanned' ? 'View Results' : 'Analyze'}
+                        <View style={styles.metaRow}>
+                            <Ionicons
+                                name={
+                                    item.type === 'camera'
+                                        ? 'camera-outline'
+                                        : item.type === 'gallery'
+                                          ? 'images-outline'
+                                          : 'document-outline'
+                                }
+                                size={13}
+                                color={T.subText}
+                            />
+                            <Text
+                                style={[
+                                    styles.metaText,
+                                    { color: T.subText },
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {item.type === 'camera'
+                                    ? 'Camera'
+                                    : item.type === 'gallery'
+                                      ? 'Gallery'
+                                      : 'File'}
+                                {'  ·  '}
+                                {getItemDate(item.date)}
+                                {pageCount > 1
+                                    ? `  ·  ${pageCount} pahina`
+                                    : ''}
                             </Text>
-                          </TouchableOpacity>
+                        </View>
 
-                          {item.status === 'scanned' && (
-                            <TouchableOpacity style={[localStyles.iconBtnSmall, { borderWidth: 1, borderColor: T.border }]} onPress={() => handleAskAi(item)} disabled={isGlobalProcessing}>
-                              <Image source={AskAiListIcon} style={{ width: 16, height: 16, tintColor: '#F59E0B' }} resizeMode="contain" />
-                            </TouchableOpacity>
-                          )}
+                        <View style={styles.historyStatusRow}>
+                            <View style={styles.historyStatusLabel}>
+                                <Ionicons
+                                    name={
+                                        isAnalyzing
+                                            ? 'time-outline'
+                                            : item.status === 'scanned'
+                                              ? 'checkmark-circle-outline'
+                                              : 'ellipse-outline'
+                                    }
+                                    size={14}
+                                    color={
+                                        isAnalyzing
+                                            ? WARNING
+                                            : item.status === 'scanned'
+                                              ? SUCCESS
+                                              : T.subText
+                                    }
+                                />
+                                <Text
+                                    style={[
+                                        styles.historyStatusText,
+                                        {
+                                            color: isAnalyzing
+                                                ? WARNING
+                                                : item.status === 'scanned'
+                                                  ? SUCCESS
+                                                  : T.subText,
+                                        },
+                                    ]}
+                                >
+                                    {isAnalyzing
+                                        ? 'Sinusuri ngayon'
+                                        : item.status === 'scanned'
+                                          ? 'May resulta'
+                                          : 'Hindi pa nasuri'}
+                                </Text>
+                            </View>
 
-                          <TouchableOpacity style={[localStyles.iconBtnSmall, { borderWidth: 1, borderColor: T.border }]} onPress={() => handleDelete(item.id)} disabled={isGlobalProcessing}>
-                            <Ionicons name="trash" size={14} color="#EF4444" />
-                          </TouchableOpacity>
-                        </>
-                      )}
+                        </View>
                     </View>
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </View>
+                </TouchableOpacity>
 
-        {isLoadingMore && (
-          <View style={localStyles.loadingMoreBox}>
-            <ActivityIndicator size="small" color={COLORS.primaryLight} />
-            <Text style={[localStyles.loadingMoreText, { color: T.subText }]}>Loading more...</Text>
-          </View>
-        )}
-      </ScrollView>
-
-      <Modal visible={!!selectedImage} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)} statusBarTranslucent>
-        <View style={localStyles.viewerContainer}>
-          <TouchableOpacity style={localStyles.viewerCloseBtn} onPress={() => setSelectedImage(null)}>
-            <Ionicons name="close" size={26} color="white" />
-          </TouchableOpacity>
-          {selectedImage && (
-            <ImageViewer imageUrls={[{ url: selectedImage }]} enableSwipeDown={true} onSwipeDown={() => setSelectedImage(null)} renderIndicator={() => <View />} backgroundColor="transparent" />
-          )}
-        </View>
-      </Modal>
-
-      <Modal visible={renameModalVisible} transparent={true} animationType="slide" onRequestClose={() => setRenameModalVisible(false)} statusBarTranslucent>
-        <KeyboardAvoidingView style={localStyles.modalBackground} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-          <View style={[localStyles.renameBox, { backgroundColor: T.card }]}>
-            <Text style={[localStyles.renameTitle, { color: T.text }]}>Rename File</Text>
-            <TextInput style={[localStyles.renameInput, { backgroundColor: T.bg, color: T.text, borderColor: T.border }]} value={newTitle} onChangeText={setNewTitle} placeholder="Enter new name" placeholderTextColor={T.subText} autoFocus />
-            <View style={localStyles.renameActionRow}>
-              <TouchableOpacity style={[localStyles.renameCancelBtn, { backgroundColor: T.bg }]} onPress={() => setRenameModalVisible(false)}>
-                <Text style={{ color: T.text, fontWeight: '600' }}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={localStyles.renameSaveBtn} onPress={saveRenamedTitle}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Save</Text>
-              </TouchableOpacity>
+                {!isAnalyzing && (
+                    <TouchableOpacity
+                        style={styles.historyMenuButton}
+                        onPress={() => openHistoryOptions(item)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Iba pang options"
+                    >
+                        <Ionicons
+                            name="ellipsis-horizontal"
+                            size={20}
+                            color={T.subText}
+                        />
+                    </TouchableOpacity>
+                )}
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        );
+    };
 
-      <AlertRender />
-    </View>
-  );
+    const ListHeader = (
+        <View>
+            <View style={styles.header}>
+                <View style={styles.headerCopy}>
+                    <Text
+                        style={[
+                            styles.screenTitle,
+                            { color: T.text },
+                        ]}
+                    >
+                        Lex-Simple
+                    </Text>
+                </View>
+
+                <View style={styles.headerActions}>
+                    <TouchableOpacity
+                        style={[
+                            styles.headerButton,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                        onPress={toggleTheme}
+                        accessibilityRole="button"
+                        accessibilityLabel="Palitan ang theme"
+                    >
+                        <Ionicons
+                            name={
+                                isDarkMode
+                                    ? 'moon-outline'
+                                    : 'sunny-outline'
+                            }
+                            size={20}
+                            color={T.text}
+                        />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[
+                            styles.headerButton,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                        onPress={showLegalInfo}
+                        accessibilityRole="button"
+                        accessibilityLabel="Impormasyon tungkol sa Lex-Simple"
+                    >
+                        <Ionicons
+                            name="information-circle-outline"
+                            size={21}
+                            color={T.text}
+                        />
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            <View
+                style={[
+                    styles.disclaimer,
+                    {
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                    },
+                ]}
+            >
+                <Ionicons
+                    name="information-circle-outline"
+                    size={19}
+                    color={PRIMARY_SOFT}
+                />
+                <Text
+                    style={[
+                        styles.disclaimerText,
+                        { color: T.subText },
+                    ]}
+                >
+                    Hindi ito legal advice o kapalit ng abogado.
+                </Text>
+            </View>
+
+            <Text
+                style={[styles.sourceHeading, { color: T.text }]}
+            >
+                Saan manggagaling ang document?
+            </Text>
+
+            <View style={styles.sourceRow}>
+                <SourceOption
+                    icon="camera-outline"
+                    title="Camera"
+                    accent={PRIMARY_SOFT}
+                    backgroundColor={T.card}
+                    borderColor={T.border}
+                    textColor={T.text}
+                    iconBackgroundColor={T.bg}
+                    onPress={() =>
+                        navigation.navigate('ScannerScreen')
+                    }
+                />
+                <SourceOption
+                    icon="images-outline"
+                    title="Gallery"
+                    accent="#8B5CF6"
+                    backgroundColor={T.card}
+                    borderColor={T.border}
+                    textColor={T.text}
+                    iconBackgroundColor={T.bg}
+                    onPress={() =>
+                        navigation.navigate('UploadImageScreen')
+                    }
+                />
+                <SourceOption
+                    icon="document-attach-outline"
+                    title="PDF / Word"
+                    accent={SUCCESS}
+                    backgroundColor={T.card}
+                    borderColor={T.border}
+                    textColor={T.text}
+                    iconBackgroundColor={T.bg}
+                    onPress={() =>
+                        navigation.navigate('ConvertScreen')
+                    }
+                />
+            </View>
+
+            <TouchableOpacity
+                style={[
+                    styles.askAiButton,
+                    {
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                    },
+                ]}
+                onPress={() => navigation.navigate('AskAiScreen')}
+                activeOpacity={0.82}
+                accessibilityRole="button"
+                accessibilityLabel="Magtanong sa Ask AI"
+            >
+                <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={20}
+                    color={WARNING}
+                />
+                <Text
+                    style={[styles.askAiText, { color: T.text }]}
+                >
+                    Magtanong sa Ask AI
+                </Text>
+            </TouchableOpacity>
+
+            <View
+                style={[
+                    styles.divider,
+                    { backgroundColor: T.border },
+                ]}
+            />
+
+            <View style={styles.recentHeader}>
+                <View>
+                    <Text
+                        style={[
+                            styles.sectionTitle,
+                            { color: T.text },
+                        ]}
+                    >
+                        Recent Files
+                    </Text>
+                </View>
+            </View>
+
+            <View style={styles.filterRow}>
+                {(
+                    [
+                        ['all', 'Lahat'],
+                        ['scanned', 'Tapos'],
+                        ['unscanned', 'Hindi pa'],
+                    ] as const
+                ).map(([value, label]) => {
+                    const selected = activeFilter === value;
+
+                    return (
+                        <TouchableOpacity
+                            key={value}
+                            style={[
+                                styles.filterButton,
+                                {
+                                    backgroundColor: selected
+                                        ? PRIMARY
+                                        : T.card,
+                                    borderColor: selected
+                                        ? PRIMARY
+                                        : T.border,
+                                },
+                            ]}
+                            onPress={() => setActiveFilter(value)}
+                        >
+                            <Text
+                                style={[
+                                    styles.filterText,
+                                    {
+                                        color: selected
+                                            ? '#FFFFFF'
+                                            : T.subText,
+                                    },
+                                ]}
+                            >
+                                {label}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+        </View>
+    );
+
+    return (
+        <SafeAreaView
+            style={[styles.safeArea, { backgroundColor: T.bg }]}
+            edges={['top']}
+        >
+            <StatusBar
+                barStyle={
+                    isDarkMode
+                        ? 'light-content'
+                        : 'dark-content'
+                }
+                backgroundColor={T.bg}
+            />
+
+            <FloatingProcessIndicator />
+
+            <FlatList
+                data={filteredHistory}
+                keyExtractor={(item) => item.id}
+                renderItem={renderHistoryItem}
+                ListHeaderComponent={ListHeader}
+                ListEmptyComponent={
+                    <View
+                        style={[
+                            styles.emptyState,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                    >
+                        <Ionicons
+                            name="folder-open-outline"
+                            size={34}
+                            color={T.subText}
+                        />
+                        <Text
+                            style={[
+                                styles.emptyTitle,
+                                { color: T.text },
+                            ]}
+                        >
+                            Walang file dito
+                        </Text>
+                        <Text
+                            style={[
+                                styles.emptyText,
+                                { color: T.subText },
+                            ]}
+                        >
+                            Mag-scan o mag-upload ng document para magsimula.
+                        </Text>
+                    </View>
+                }
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+            />
+
+            <Modal
+                visible={renameModalVisible}
+                transparent
+                animationType="none"
+                onRequestClose={closeRenameModal}
+                statusBarTranslucent
+            >
+                <KeyboardAvoidingView
+                    style={styles.modalBackdrop}
+                    behavior={
+                        Platform.OS === 'ios' ? 'padding' : 'height'
+                    }
+                >
+                    <View
+                        style={[
+                            styles.renamePanel,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                    >
+                        <View style={styles.renameHeader}>
+                            <Text
+                                style={[
+                                    styles.renameTitle,
+                                    { color: T.text },
+                                ]}
+                            >
+                                Palitan ang Pangalan
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.compactIconButton}
+                                onPress={closeRenameModal}
+                            >
+                                <Ionicons
+                                    name="close"
+                                    size={21}
+                                    color={T.subText}
+                                />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text
+                            style={[
+                                styles.inputLabel,
+                                { color: T.subText },
+                            ]}
+                        >
+                            Pangalan ng file
+                        </Text>
+                        <TextInput
+                            style={[
+                                styles.renameInput,
+                                {
+                                    backgroundColor: T.bg,
+                                    borderColor: T.border,
+                                    color: T.text,
+                                },
+                            ]}
+                            value={newTitle}
+                            onChangeText={setNewTitle}
+                            placeholder="Halimbawa: Lease Agreement"
+                            placeholderTextColor={T.subText}
+                            maxLength={80}
+                            autoFocus
+                            returnKeyType="done"
+                            onSubmitEditing={() =>
+                                void saveRenamedTitle()
+                            }
+                        />
+
+                        <View style={styles.renameActions}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.renameCancelButton,
+                                    {
+                                        backgroundColor: T.bg,
+                                        borderColor: T.border,
+                                    },
+                                ]}
+                                onPress={closeRenameModal}
+                            >
+                                <Text
+                                    style={[
+                                        styles.renameCancelText,
+                                        { color: T.text },
+                                    ]}
+                                >
+                                    Kanselahin
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.renameSaveButton,
+                                    !newTitle.trim() &&
+                                        styles.disabledButton,
+                                ]}
+                                onPress={() =>
+                                    void saveRenamedTitle()
+                                }
+                                disabled={!newTitle.trim()}
+                            >
+                                <Text style={styles.renameSaveText}>
+                                    I-save
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            <AlertRender />
+        </SafeAreaView>
+    );
 }
 
-const localStyles = StyleSheet.create({
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  greeting: { fontSize: 14, marginBottom: 2 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold' },
-  themeBtn: { width: 40, height: 40, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
-  disclaimerBox: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, padding: 14, marginBottom: 20, borderWidth: 1 },
-  disclaimerText: { fontSize: 14, lineHeight: 20, flex: 1 },
-  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  gridCard: { width: CARD_WIDTH, borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, height: 110, justifyContent: 'center', alignItems: 'flex-start' },
-  gridIcon: { width: 28, height: 28, marginBottom: 10, resizeMode: 'contain' },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 0 },
-  cardSubtitle: { fontSize: 14, marginTop: 4 },
-  sectionHeader: { marginBottom: 16 },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
-  filterRow: { flexDirection: 'row', gap: 8 },
-  filterChip: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, borderWidth: 1 },
-  filterText: { fontSize: 14, fontWeight: '600' },
-  historyList: {},
-  historyCard: { flexDirection: 'row', borderRadius: 8, padding: 14, marginBottom: 12, borderWidth: 1, alignItems: 'center' },
-  thumbnailWrapper: { width: 56, height: 56, borderRadius: 8, marginRight: 14, overflow: 'hidden' },
-  thumbnailInner: { width: 56, height: 56, justifyContent: 'center', alignItems: 'center' },
-  historyContent: { flex: 1, justifyContent: 'center' },
-  historyTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  historyTitle: { fontSize: 15, fontWeight: 'bold' },
-  historyMetaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  historyMetaText: { fontSize: 12 },
-  historyActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, gap: 4 },
-  actionBtnText: { fontSize: 12, fontWeight: 'bold' },
-  iconBtnSmall: { width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(128,128,128,0.1)', justifyContent: 'center', alignItems: 'center' },
-  emptyState: { alignItems: 'center', padding: 40, opacity: 0.5 },
-  loadingMoreBox: { paddingVertical: 20, alignItems: 'center' },
-  loadingMoreText: { fontSize: 14, marginTop: 8 },
-  viewerContainer: { flex: 1, backgroundColor: '#000' },
-  viewerCloseBtn: { position: 'absolute', top: 50, right: 20, zIndex: 99, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
-  modalBackground: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  renameBox: { width: '100%', borderRadius: 12, padding: 24 },
-  renameTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
-  renameInput: { borderRadius: 8, padding: 14, marginBottom: 20, borderWidth: 1, fontSize: 16 },
-  renameActionRow: { flexDirection: 'row', gap: 12 },
-  renameCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
-  renameSaveBtn: { flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: '#6D28D9', alignItems: 'center' }
+const styles = StyleSheet.create({
+    safeArea: {
+        flex: 1,
+    },
+    listContent: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 40,
+    },
+    header: {
+        minHeight: 58,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 14,
+    },
+    headerCopy: {
+        flex: 1,
+    },
+    screenTitle: {
+        fontSize: 25,
+        fontWeight: '900',
+        letterSpacing: -0.4,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    headerButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 7,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+    },
+    disclaimer: {
+        minHeight: 44,
+        borderRadius: 7,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 14,
+    },
+    disclaimerText: {
+        flex: 1,
+        marginLeft: 10,
+        fontSize: 11,
+        lineHeight: 15,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+        letterSpacing: -0.2,
+    },
+    sourceHeading: {
+        fontSize: 14,
+        fontWeight: '900',
+        marginBottom: 10,
+    },
+    sourceRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    sourceOption: {
+        flex: 1,
+        minWidth: 0,
+        minHeight: 76,
+        borderRadius: 6,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 6,
+        paddingVertical: 8,
+    },
+    sourceOptionIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 6,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    sourceOptionText: {
+        fontSize: 11,
+        lineHeight: 14,
+        fontWeight: '800',
+        textAlign: 'center',
+        marginTop: 5,
+    },
+    askAiButton: {
+        minHeight: 46,
+        marginTop: 8,
+        borderRadius: 6,
+        borderWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingHorizontal: 12,
+    },
+    askAiText: {
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    divider: {
+        height: 1,
+        marginVertical: 18,
+    },
+    recentHeader: {
+        minHeight: 34,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    filterRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 7,
+        marginBottom: 13,
+    },
+    filterButton: {
+        minHeight: 36,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterText: {
+        fontSize: 11,
+        fontWeight: '800',
+    },
+    historyCard: {
+        minHeight: 114,
+        borderWidth: 1,
+        borderRadius: 7,
+        marginBottom: 10,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    historyMainPress: {
+        minHeight: 112,
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 10,
+        paddingRight: 42,
+    },
+    previewBox: {
+        width: 66,
+        height: 88,
+        borderRadius: 5,
+        borderWidth: 1,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    previewImage: {
+        width: '100%',
+        height: '100%',
+    },
+    pageCountBadge: {
+        position: 'absolute',
+        right: 4,
+        bottom: 4,
+        minWidth: 22,
+        height: 20,
+        paddingHorizontal: 5,
+        borderRadius: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+    },
+    pageCountText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '900',
+    },
+    historyContent: {
+        flex: 1,
+        minWidth: 0,
+    },
+    historyTitle: {
+        fontSize: 14,
+        lineHeight: 18,
+        fontWeight: '900',
+        paddingRight: 2,
+    },
+    compactIconButton: {
+        width: 34,
+        height: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    metaRow: {
+        minHeight: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 2,
+        marginBottom: 6,
+    },
+    metaText: {
+        flex: 1,
+        minWidth: 0,
+        fontSize: 10,
+        marginLeft: 5,
+    },
+    historyStatusRow: {
+        minHeight: 26,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    historyStatusLabel: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+    },
+    historyStatusText: {
+        fontSize: 10,
+        fontWeight: '800',
+    },
+    historyMenuButton: {
+        position: 'absolute',
+        top: 8,
+        right: 7,
+        width: 34,
+        height: 34,
+        borderRadius: 5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyState: {
+        minHeight: 170,
+        borderRadius: 7,
+        borderWidth: 1,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyTitle: {
+        fontSize: 15,
+        fontWeight: '900',
+        marginTop: 12,
+    },
+    emptyText: {
+        maxWidth: 270,
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: 'center',
+        marginTop: 5,
+    },
+    modalBackdrop: {
+        flex: 1,
+        paddingHorizontal: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+    },
+    renamePanel: {
+        width: '100%',
+        maxWidth: 390,
+        borderRadius: 8,
+        borderWidth: 1,
+        padding: 18,
+    },
+    renameHeader: {
+        minHeight: 38,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    renameTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+    },
+    inputLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        marginBottom: 7,
+    },
+    renameInput: {
+        minHeight: 48,
+        borderRadius: 6,
+        borderWidth: 1,
+        paddingHorizontal: 13,
+        paddingVertical: 10,
+        fontSize: 14,
+    },
+    renameActions: {
+        flexDirection: 'row',
+        gap: 9,
+        marginTop: 16,
+    },
+    renameCancelButton: {
+        flex: 1,
+        minHeight: 46,
+        borderRadius: 6,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    renameCancelText: {
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    renameSaveButton: {
+        flex: 1,
+        minHeight: 46,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: PRIMARY,
+    },
+    disabledButton: {
+        opacity: 0.45,
+    },
+    renameSaveText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '900',
+    },
 });
