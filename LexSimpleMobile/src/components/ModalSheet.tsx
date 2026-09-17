@@ -1,15 +1,26 @@
 import React from 'react';
-import { View, ScrollView, TouchableOpacity, Pressable, StyleSheet, Text } from 'react-native';
+import {
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import type { DimensionValue } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
 import { useTheme } from '../theme/ThemeContext';
 
+// MODAL SHEET VERSION: 1.0.0
+// Same modal structure with sharper visual styling.
 interface ModalSheetProps {
     title: string;
     iconName: string;
     iconColor: string;
     onClose: () => void;
     children: React.ReactNode;
-    maxHeightPercent?: string;
+    maxHeightPercent?: DimensionValue;
     showsVerticalScrollIndicator?: boolean;
 }
 
@@ -26,38 +37,81 @@ export default function ModalSheet({
 
     return (
         <View style={styles.overlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+            <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Isara ang modal"
+            />
+
             <View
+                testID="modal-sheet-v1"
                 style={[
                     styles.sheetContainer,
                     {
                         maxHeight: maxHeightPercent,
                         backgroundColor: T.card,
-                        borderColor: T.border
-                    }
+                        borderColor: T.border,
+                    },
                 ]}
             >
                 {/* HEADER */}
-                <View style={[styles.header, { borderBottomColor: T.border, backgroundColor: T.bg }]}>
+                <View
+                    style={[
+                        styles.header,
+                        {
+                            borderBottomColor: T.border,
+                            backgroundColor: T.bg,
+                        },
+                    ]}
+                >
                     <View style={styles.headerTitleArea}>
-                        <Ionicons name={iconName as any} size={20} color={iconColor} style={{ marginRight: 10 }} />
-                        <Text style={[styles.title, { color: T.text }]} numberOfLines={1}>
+                        <Ionicons
+                            name={iconName as any}
+                            size={19}
+                            color={iconColor}
+                            style={styles.headerIcon}
+                        />
+                        <Text
+                            style={[
+                                styles.title,
+                                { color: T.text },
+                            ]}
+                            numberOfLines={1}
+                        >
                             {title}
                         </Text>
                     </View>
+
                     <TouchableOpacity
                         onPress={onClose}
-                        style={[styles.closeBtn, { backgroundColor: T.card, borderColor: T.border }]}
+                        style={[
+                            styles.closeBtn,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                        activeOpacity={0.72}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Isara"
                     >
-                        <Ionicons name="close" size={18} color={T.text} />
+                        <Ionicons
+                            name="close"
+                            size={18}
+                            color={T.text}
+                        />
                     </TouchableOpacity>
                 </View>
 
                 {/* BODY */}
                 <ScrollView
                     style={styles.body}
-                    contentContainerStyle={{ padding: 20 }}
-                    showsVerticalScrollIndicator={showsVerticalScrollIndicator}
+                    contentContainerStyle={styles.bodyContent}
+                    showsVerticalScrollIndicator={
+                        showsVerticalScrollIndicator
+                    }
                 >
                     {children}
                 </ScrollView>
@@ -69,51 +123,64 @@ export default function ModalSheet({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.85)',
+        paddingHorizontal: 16,
+        backgroundColor: 'rgba(0,0,0,0.72)',
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 16,
     },
     sheetContainer: {
         width: '100%',
         maxWidth: 500,
-        borderRadius: 12,
         borderWidth: 1,
+        borderRadius: 8,
         overflow: 'hidden',
-        elevation: 10,
-        shadowColor: '#000',
-        shadowOpacity: 0.3,
-        shadowRadius: 15,
-        shadowOffset: { width: 0, height: 10 },
+        elevation: 5,
+        shadowColor: '#000000',
+        shadowOpacity: 0.18,
+        shadowRadius: 7,
+        shadowOffset: {
+            width: 0,
+            height: 4,
+        },
     },
     header: {
+        minHeight: 56,
+        paddingHorizontal: 15,
+        paddingVertical: 11,
+        borderBottomWidth: 1,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        borderBottomWidth: 1,
     },
     headerTitleArea: {
+        flex: 1,
+        minWidth: 0,
+        marginRight: 10,
         flexDirection: 'row',
         alignItems: 'center',
-        flex: 1,
-        marginRight: 10,
+    },
+    headerIcon: {
+        marginRight: 9,
     },
     title: {
+        flex: 1,
         fontSize: 16,
-        fontWeight: '700',
-        letterSpacing: 0.3,
+        lineHeight: 21,
+        fontWeight: '800',
+        letterSpacing: 0.15,
     },
     closeBtn: {
         width: 32,
         height: 32,
-        borderRadius: 8,
+        borderWidth: 1,
+        borderRadius: 6,
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 1,
     },
     body: {
         flex: 1,
-    }
+    },
+    bodyContent: {
+        padding: 20,
+    },
 });

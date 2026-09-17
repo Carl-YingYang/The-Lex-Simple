@@ -61,11 +61,23 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
         - Avoid randomness, creativity drift, or stylistic variation
 
         4. CLAUSE COVERAGE GUARANTEE
-        - Process ALL clauses from OCR text
+        - Process ALL clauses present in the current OCR chunk
         - Preserve order strictly (top → bottom)
         - Do NOT skip or merge unrelated clauses
         - If clause boundaries are unclear:
         → split logically based on meaning
+
+        5. CHUNK AND SOURCE GROUNDING
+        - The OCR input may be one ordered chunk from a multi-page document
+        - Analyze ONLY the OCR text included in the current chunk
+        - Do NOT assume or invent content from earlier or later chunks
+        - Page and chunk labels are navigation markers, not legal clauses
+        - RAG context may clarify meaning, but it is NEVER the source of foundText
+        - original_text MUST be copied verbatim from the current OCR chunk
+        - If an exact supporting snippet does not exist in the OCR chunk:
+        → do not create that finding
+        - If the chunk contains no supportable risk finding:
+        → return an empty clauses array
 
         --------------------------------------------------
         PROCESSING PIPELINE (INTERNAL ONLY – DO NOT OUTPUT)
@@ -272,19 +284,24 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
         Structure:
 
         {{
-        "score": 0,
         "documentTitle": "STRICTLY 1 TO 4 WORDS MAXIMUM. Use the most common, short legal term (e.g., 'Lease Agreement', 'Deed of Sale', 'NDA', 'Loan Contract'). DO NOT use long sentences.",
-        "riskLevel": "Very Safe | Acceptable | Risky | High Risk",
-        "findings": [
+        "clauses": [
             {{
-            "title": "Short natural clause label",
-            "description": "Clear, natural Taglish explanation with real-life meaning and impact.",
-            "advice": "Specific, practical, non-legal guidance.",
-            "foundText": "Exact original snippet from OCR",
+            "clause_title": "Short natural clause label",
+            "explanation": "Clear, natural Taglish explanation with real-life meaning and impact.",
+            "practical_advice": "Specific, practical, non-legal guidance.",
+            "score_deduction": 1,
+            "original_text": "Exact verbatim snippet copied only from the current OCR chunk",
             "confidence": "0-100%"
             }}
         ]
         }}
+
+        IMPORTANT:
+        • Do not calculate the final document score in this chunk response
+        • The backend combines all chunks and calculates the score deterministically
+        • score_deduction must be an integer from 1 to 100 for every returned clause
+        • If there is no grounded finding, return "clauses": []
 
         --------------------------------------------------
         RAG CONTEXT (PRIORITY SOURCE)

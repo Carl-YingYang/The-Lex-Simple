@@ -1,1503 +1,1529 @@
+import React, {
+    useEffect,
+    useRef,
+    useState,
+} from 'react';
+import {
+    FlatList,
+    Image,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
+    ViewToken,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Network from 'expo-network';
+import { useCustomAlert } from '../../../components/CustomAlert';
+import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
+import { analyzeSanitizedDocument } from '../../../services/AiEngine';
+import {
+    isOcrCancelledError,
+    recognizePagesOffline,
+} from '../../../services/localOcrService';
+import type { BatchOcrResult } from '../../../services/localOcrService';
+import { buildSanitizedDocumentForAI } from '../../../utils/sanitizer';
+import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
 
-import {
-
-    rotatePageClockwise,
-
-} from '../../../services/localImageEditor';
-
-import React, { useRef, useState } from 'react';
-
-import {
-
-    View,
-
-    Text,
-
-    TouchableOpacity,
-
-    Image,
-
-    StyleSheet,
-
-    StatusBar,
-
-    Dimensions,
-
-    FlatList,
-
-    LayoutChangeEvent,
-
-    PanResponder,
-
-    DimensionValue, // <-- IMPORTANTE: Dinagdag para sa TypeScript fix
-
-} from 'react-native';
-
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { Ionicons } from '@expo/vector-icons';
-
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
-
-import ProcessingLoader from '../../../components/ProcessingLoader';
-
-import { useCustomAlert } from '../../../components/CustomAlert';
-
-const { width } = Dimensions.get('window');
-
-type ActiveMenu = 'main' | 'crop' | 'adjust' | 'filters';
-
-type FilterType = 'original' | 'magic' | 'grayscale' | 'bw';
-
-type NumericMap = Record<number, number>;
-
-type StringMap = Record<number, string>;
-
-type CropState = {
-
-    enabled: boolean;
-
-    top: number;
-
-    left: number;
-
-    right: number;
-
-    bottom: number;
-
+// BATCH EDIT SCREEN VERSION: 3.0.0
+const COLORS = {
+    black: '#000000',
+    background: '#090B10',
+    surface: '#11151C',
+    elevated: '#181E28',
+    border: '#2A3240',
+    primary: '#3478F6',
+    primaryLight: '#66A0FF',
+    text: '#FFFFFF',
+    subText: '#B8C0CC',
+    muted: '#788395',
+    success: '#22C55E',
+    warning: '#F59E0B',
+    danger: '#EF4444',
 };
-
-type CropMap = Record<number, CropState>;
-
-const MIN_ADJUST = -100;
-
-const MAX_ADJUST = 100;
-
-const DEFAULT_CROP: CropState = {
-
-    enabled: false,
-
-    top: 0,
-
-    left: 0,
-
-    right: 0,
-
-    bottom: 0,
-
-};
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-const valueToPercent = (value: number) => {
-
-    return (((value - MIN_ADJUST) / (MAX_ADJUST - MIN_ADJUST)) * 100);
-
-};
-
-const percentToValue = (percent: number) => {
-
-    const safePercent = clamp(percent, 0, 100);
-
-    const value = MIN_ADJUST + ((MAX_ADJUST - MIN_ADJUST) * safePercent) / 100;
-
-    return Math.round(value);
-
-};
-
-// ================================================================
-
-// TOP-LEVEL SLIDER
-
-// ================================================================
-
-type AdjustmentSliderProps = {
-
-    value: number;
-
-    onChange: (value: number) => void;
-
-};
-
-function AdjustmentSlider({ value, onChange }: AdjustmentSliderProps) {
-
-    // PanResponder is created only once. Values used by its callbacks must live
-    // in refs; otherwise it permanently captures sliderWidth === 0.
-    const sliderWidthRef = useRef(0);
-    const currentValueRef = useRef(value);
-    const onChangeRef = useRef(onChange);
-    const startDragValue = useRef(0);
-
-    currentValueRef.current = value;
-    onChangeRef.current = onChange;
-
-    const panResponder = useRef(
-
-        PanResponder.create({
-
-            onStartShouldSetPanResponder: () => true,
-
-            onMoveShouldSetPanResponder: () => true,
-
-            onPanResponderGrant: (evt) => {
-
-                const sliderWidth = sliderWidthRef.current;
-                if (sliderWidth > 0) {
-
-                    // Kapag tinap mo yung track, tatalon agad yung thumb
-
-                    const touchX = evt.nativeEvent.locationX;
-
-                    const percent = (touchX / sliderWidth) * 100;
-
-                    const tappedValue = percentToValue(percent);
-
-                    onChangeRef.current(tappedValue);
-
-                    startDragValue.current = tappedValue; // I-save kung saan nag-start para sa drag
-
-                } else {
-
-                    startDragValue.current = currentValueRef.current;
-
-                }
-
-            },
-
-            onPanResponderMove: (_evt, gestureState) => {
-
-                const sliderWidth = sliderWidthRef.current;
-                if (sliderWidth <= 0) return;
-
-                // gestureState.dx = pixels na nai-drag mo pakaliwa o pakanan
-
-                const range = MAX_ADJUST - MIN_ADJUST;
-
-                const movementValue = (gestureState.dx / sliderWidth) * range;
-
-                const newValue = startDragValue.current + movementValue;
-
-                onChangeRef.current(clamp(Math.round(newValue), MIN_ADJUST, MAX_ADJUST));
-
-            },
-
-        })
-
-    ).current;
-
-    const handleLayout = (evt: LayoutChangeEvent) => {
-
-        sliderWidthRef.current = evt.nativeEvent.layout.width;
-
-    };
-
-    const thumbLeft = `${valueToPercent(value)}%` as DimensionValue;
-
-    const centerLeft = '50%' as DimensionValue;
-
-    return (
-
-        <View
-
-            style={[styles.sliderWrapper, { height: 40 }]}
-
-            onLayout={handleLayout}
-
-            {...panResponder.panHandlers}
-
-        >
-
-            {/* pointerEvents="none" prevents these elements from blocking your drag */}
-
-            <View style={styles.sliderTrack} pointerEvents="none" />
-
-            <View style={[styles.sliderCenterMark, { left: centerLeft }]} pointerEvents="none" />
-
-            <View style={[styles.sliderThumb, { left: thumbLeft }]} pointerEvents="none" />
-
-        </View>
-
-    );
-
-}
-
-type CropCorner = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
-
-type DraggableCropOverlayProps = {
-    crop: CropState;
-    onChange: (crop: CropState) => void;
-};
-
-function DraggableCropOverlay({ crop, onChange }: DraggableCropOverlayProps) {
-    const sizeRef = useRef({ width: 0, height: 0 });
-    const cropRef = useRef(crop);
-    const onChangeRef = useRef(onChange);
-    const startCropRef = useRef(crop);
-    const respondersRef = useRef<Record<CropCorner, ReturnType<typeof PanResponder.create>> | null>(null);
-
-    cropRef.current = crop;
-    onChangeRef.current = onChange;
-
-    const makeResponder = (corner: CropCorner) => PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-            startCropRef.current = cropRef.current;
-        },
-        onPanResponderMove: (_event, gesture) => {
-            const { width: overlayWidth, height: overlayHeight } = sizeRef.current;
-            if (overlayWidth <= 0 || overlayHeight <= 0) return;
-
-            const start = startCropRef.current;
-            const dx = (gesture.dx / overlayWidth) * 100;
-            const dy = (gesture.dy / overlayHeight) * 100;
-            const minimumVisible = 15;
-            const next: CropState = { ...start, enabled: true };
-
-            if (corner === 'topLeft' || corner === 'bottomLeft') {
-                next.left = clamp(start.left + dx, 0, 100 - start.right - minimumVisible);
-            } else {
-                next.right = clamp(start.right - dx, 0, 100 - start.left - minimumVisible);
-            }
-
-            if (corner === 'topLeft' || corner === 'topRight') {
-                next.top = clamp(start.top + dy, 0, 100 - start.bottom - minimumVisible);
-            } else {
-                next.bottom = clamp(start.bottom - dy, 0, 100 - start.top - minimumVisible);
-            }
-
-            onChangeRef.current(next);
-        },
-    });
-
-    if (!respondersRef.current) {
-        respondersRef.current = {
-            topLeft: makeResponder('topLeft'),
-            topRight: makeResponder('topRight'),
-            bottomLeft: makeResponder('bottomLeft'),
-            bottomRight: makeResponder('bottomRight'),
-        };
+const HISTORY_STORAGE_KEY = '@lex_scan_history';
+const createLegacyPage = (
+    uri: string,
+    index: number
+): ScanPage => ({
+    id: `legacy_page_${Date.now()}_${index}`,
+    sessionId: 'legacy',
+    originalUri: uri,
+    editedUri: uri,
+    rotation: 0,
+    status: 'ready',
+    source: 'legacy',
+});
+const normalizeRoutePages = (
+    rawPages: unknown
+): ScanPage[] => {
+    if (!Array.isArray(rawPages)) {
+        return [];
     }
-
-    const responders = respondersRef.current!;
-    const boxStyle = {
-        top: `${crop.top}%` as DimensionValue,
-        left: `${crop.left}%` as DimensionValue,
-        right: `${crop.right}%` as DimensionValue,
-        bottom: `${crop.bottom}%` as DimensionValue,
-    };
-
-    return (
-        <View
-            style={styles.cropGestureArea}
-            pointerEvents="box-none"
-            onLayout={(event) => {
-                sizeRef.current = event.nativeEvent.layout;
-            }}
-        >
-            <View style={[styles.cropOverlay, boxStyle]} pointerEvents="box-none">
-                <View style={styles.cropBorder} pointerEvents="box-none">
-                    <View style={[styles.cropHandle, styles.topLeft]} {...responders.topLeft.panHandlers} />
-                    <View style={[styles.cropHandle, styles.topRight]} {...responders.topRight.panHandlers} />
-                    <View style={[styles.cropHandle, styles.bottomLeft]} {...responders.bottomLeft.panHandlers} />
-                    <View style={[styles.cropHandle, styles.bottomRight]} {...responders.bottomRight.panHandlers} />
-                </View>
-            </View>
-        </View>
-    );
-}
-
-// ================================================================
-
-// MAIN SCREEN
-
-// ================================================================
-
-export default function BatchEditScreen({ route, navigation }: any) {
-
-    // PAGES
-
-    const rawPages = route?.params?.pages;
-
-    const [pages, setPages] = useState<ScanPage[]>(() => {
-
-        if (!Array.isArray(rawPages)) {
-
-            return [];
-
-        }
-
-        /**
-
-         * Backward compatibility:
-
-         * Tatanggap pa rin ng lumang string URI pages
-
-         * habang ginagawa natin ang migration.
-
-         */
-
-        return rawPages.map((page, index): ScanPage => {
-
-            if (
-
-                typeof page === 'object' &&
-
-                page !== null &&
-
-                typeof page.editedUri === 'string'
-
-            ) {
-
-                return page as ScanPage;
-
+    return rawPages
+        .map((page, index): ScanPage | null => {
+            if (isScanPage(page)) {
+                return page;
             }
-
-            const legacyUri = String(page);
-
-            return {
-
-                id: `legacy_page_${Date.now()}_${index}`,
-
-                sessionId: 'legacy',
-
-                originalUri: legacyUri,
-
-                editedUri: legacyUri,
-
-                rotation: 0,
-
-                crop: null,
-
-                brightness: 0,
-
-                contrast: 1,
-
-                filter: 'original',
-
-                status: 'ready',
-
-            };
-
-        });
-
-    });
-
-    const [isApplyingEdit, setIsApplyingEdit] = useState(false);
-
-    const flatListRef = useRef<FlatList<ScanPage>>(null);
-
+            if (typeof page === 'string' && page.trim()) {
+                return createLegacyPage(
+                    page.trim(),
+                    index
+                );
+            }
+            return null;
+        })
+        .filter((page): page is ScanPage => page !== null);
+};
+const getErrorMessage = (
+    error: unknown,
+    fallback: string
+): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+const readHistory = async (): Promise<any[]> => {
+    const storedHistory = await AsyncStorage.getItem(
+        HISTORY_STORAGE_KEY
+    );
+    if (!storedHistory) {
+        return [];
+    }
+    try {
+        const parsedHistory = JSON.parse(storedHistory);
+        return Array.isArray(parsedHistory)
+            ? parsedHistory
+            : [];
+    } catch {
+        return [];
+    }
+};
+const savePendingHistoryItem = async (
+    historyId: string,
+    pages: ScanPage[],
+    rawOcrText: string,
+    sanitizedText: string,
+    source?: string
+): Promise<void> => {
+    const history = await readHistory();
+    const newItem = {
+        id: historyId,
+        uri: pages[0]?.editedUri ?? '',
+        pageUris: pages.map((page) => page.editedUri),
+        title:
+            pages.length === 1
+                ? 'Document Scan'
+                : `Document Scan (${pages.length} pages)`,
+        date: new Date().toLocaleString(),
+        type: source === 'gallery' ? 'gallery' : 'camera',
+        status: 'unscanned',
+        ocrText: rawOcrText,
+        sanitizedText,
+    };
+    await AsyncStorage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify([newItem, ...history])
+    );
+};
+const markHistoryAsScanned = async (
+    historyId: string,
+    analysisResult: any,
+    rawOcrText: string,
+    sanitizedText: string
+): Promise<void> => {
+    const history = await readHistory();
+    const updatedHistory = history.map((item) =>
+        item.id === historyId
+            ? {
+                  ...item,
+                  status: 'scanned',
+                  analysisResult,
+                  ocrText: rawOcrText,
+                  sanitizedText,
+              }
+            : item
+    );
+    await AsyncStorage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify(updatedHistory)
+    );
+};
+export default function BatchEditScreen({
+    route,
+    navigation,
+}: any) {
+    const { width: screenWidth } = useWindowDimensions();
+    const initialRoutePages = route?.params?.pages;
+    const lastRoutePagesRef = useRef(initialRoutePages);
+    const [pages, setPages] = useState<ScanPage[]>(() =>
+        normalizeRoutePages(initialRoutePages)
+    );
     const [currentIndex, setCurrentIndex] = useState(0);
-
-    const [activeMenu, setActiveMenu] = useState<ActiveMenu>('main');
-
-    // EDIT STATES
-
-    const [pageFilters, setPageFilters] = useState<StringMap>({});
-
-    const [pageBrightness, setPageBrightness] = useState<NumericMap>({});
-
-    const [pageContrast, setPageContrast] = useState<NumericMap>({});
-
-    const [pageCrops, setPageCrops] = useState<CropMap>({});
-
-    // PROCESSING
-
-    const { isProcessing, triggerBackgroundProcess } = useBackgroundProcessScreen('BatchEditScreen');
-
+    const [isOcrRunning, setIsOcrRunning] = useState(false);
+    const [ocrProgress, setOcrProgress] = useState({
+        current: 0,
+        total: 0,
+    });
+    const mainListRef = useRef<FlatList<ScanPage>>(null);
+    const thumbnailListRef =
+        useRef<FlatList<ScanPage>>(null);
+    const ocrAbortControllerRef =
+        useRef<AbortController | null>(null);
+    const {
+        isProcessing: isAiAnalyzing,
+        isGlobalProcessing,
+        triggerBackgroundProcess,
+        cancelProcess,
+    } = useBackgroundProcessScreen('BatchEditScreen');
     const { showAlert, AlertRender } = useCustomAlert();
-
-    // CURRENT PAGE VALUES
-
-    const currentBrightness = pageBrightness[currentIndex] ?? 0;
-
-    const currentContrast = pageContrast[currentIndex] ?? 0;
-
-    const currentFilter = (pageFilters[currentIndex] as FilterType) ?? 'original';
-
-    const currentCrop = pageCrops[currentIndex] ?? DEFAULT_CROP;
-
-    // VIEWABILITY
-
-    const onViewRef = useRef(({ viewableItems }: { viewableItems: any[] }) => {
-
-        if (viewableItems?.length > 0 && typeof viewableItems[0]?.index === 'number') {
-
-            setCurrentIndex(viewableItems[0].index);
-
+    const currentPage = pages[currentIndex];
+    const documentSource =
+        route?.params?.source === 'gallery'
+            ? 'gallery'
+            : 'camera';
+    const isBusy = isOcrRunning || isAiAnalyzing;
+    useEffect(() => {
+        const nextRoutePages = route?.params?.pages;
+        if (
+            nextRoutePages === lastRoutePagesRef.current
+        ) {
+            return;
+        }
+        lastRoutePagesRef.current = nextRoutePages;
+        const normalizedPages =
+            normalizeRoutePages(nextRoutePages);
+        if (normalizedPages.length > 0) {
+            setPages(normalizedPages);
+            setCurrentIndex(
+                Math.max(0, normalizedPages.length - 1)
+            );
+            setTimeout(() => {
+                const lastIndex =
+                    normalizedPages.length - 1;
+                mainListRef.current?.scrollToIndex({
+                    index: lastIndex,
+                    animated: false,
+                });
+            }, 0);
+        }
+    }, [route?.params?.pages]);
+    const scrollToPage = (
+        index: number,
+        animated = false
+    ): void => {
+        if (index < 0 || index >= pages.length) {
+            return;
+        }
+        setCurrentIndex(index);
+        mainListRef.current?.scrollToIndex({
+            index,
+            animated,
+        });
+        thumbnailListRef.current?.scrollToIndex({
+            index,
+            animated,
+            viewPosition: 0.5,
+        });
+    };
+    const handleViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+            const visibleIndex = viewableItems.find(
+                (item) => item.isViewable
+            )?.index;
+            if (typeof visibleIndex === 'number') {
+                setCurrentIndex(visibleIndex);
+                thumbnailListRef.current?.scrollToIndex({
+                    index: visibleIndex,
+                    animated: false,
+                    viewPosition: 0.5,
+                });
+            }
+        }
+    ).current;
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 70,
+    }).current;
+    const deleteCurrentPage = (): void => {
+        if (pages.length <= 1) {
+            showAlert(
+                'Kailangan ng isang pahina',
+                'Hindi maaaring alisin ang nag-iisang pahina.',
+                'warning',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        const pageToDelete = pages[currentIndex];
+        const nextPages = pages.filter(
+            (page) => page.id !== pageToDelete.id
+        );
+        const nextIndex = Math.min(
+            currentIndex,
+            nextPages.length - 1
+        );
+        setPages(nextPages);
+        setCurrentIndex(nextIndex);
+        setTimeout(() => {
+            mainListRef.current?.scrollToIndex({
+                index: nextIndex,
+                animated: false,
+            });
+        }, 0);
+    };
+    const handleDelete = (): void => {
+        if (!currentPage || isBusy) {
+            return;
+        }
+        showAlert(
+            `Alisin ang pahina ${currentIndex + 1}?`,
+            'Hindi ito isasama sa document.',
+            'warning',
+            [
+                {
+                    text: 'Huwag alisin',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Alisin',
+                    style: 'destructive',
+                    onPress: deleteCurrentPage,
+                },
+            ]
+        );
+    };
+    const handleAddPage = (): void => {
+        if (isBusy) {
+            return;
         }
 
-    });
+        if (documentSource === 'gallery') {
+            navigation.navigate('UploadImageScreen', {
+                existingPages: pages,
+                appendToBatch: true,
+            });
+            return;
+        }
 
-    const viewConfigRef = useRef({ itemVisiblePercentThreshold: 50 });
+        navigation.navigate('ScannerScreen', {
+            existingPages: pages,
+        });
+    };
+    const handleOpenCamera = (): void => {
+        if (isBusy) {
+            return;
+        }
 
-    // ROTATE
-
-    const handleRotate = async () => {
-        const currentPage = pages[currentIndex];
-
-        if (!currentPage || isApplyingEdit) return;
-
-        setIsApplyingEdit(true);
-
-        setPages((previousPages) =>
-            previousPages.map((page, index) =>
-                index === currentIndex
-                    ? { ...page, status: 'editing' }
-                    : page
-            )
-        );
-
-        try {
-            const rotatedPage = await rotatePageClockwise(currentPage);
-
-            setPages((previousPages) =>
-                previousPages.map((page, index) =>
-                    index === currentIndex ? rotatedPage : page
-                )
-            );
-        } catch (error: any) {
-            console.error('[BatchEditScreen] Offline rotation failed:', error);
-
-            setPages((previousPages) =>
-                previousPages.map((page, index) =>
-                    index === currentIndex
-                        ? { ...page, status: 'error' }
-                        : page
-                )
-            );
-
+        navigation.navigate({
+            name: 'ScannerScreen',
+            params: {
+                existingPages: pages,
+            },
+            merge: true,
+        });
+    };
+    const openSanitizedPreview = (
+        sanitizedText: string
+    ): void => {
+        navigation.navigate('SanitizedOcrScreen', {
+            sanitizedText,
+            isOfflinePreview: true,
+            pageCount: pages.length,
+        });
+    };
+    const beginAiAnalysis = async (
+        ocrResult: BatchOcrResult
+    ): Promise<void> => {
+        const hasEveryPage =
+            ocrResult.isComplete &&
+            ocrResult.failedPages.length === 0 &&
+            ocrResult.expectedPageCount === pages.length &&
+            ocrResult.recognizedPageCount === pages.length &&
+            ocrResult.successfulPages.length === pages.length;
+        if (!hasEveryPage) {
             showAlert(
-                'Rotate Error',
-                error?.message || 'Hindi ma-rotate ang page offline.',
+                'Hindi kumpleto ang document',
+                "Hindi ipapadala sa AI hangga't hindi malinaw at kumpleto ang lahat ng pahina.",
+                'warning',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        const hasStalePage = ocrResult.successfulPages.some(
+            (ocrPage, index) => {
+                const current = pages[index];
+                return (
+                    !current ||
+                    ocrPage.pageNumber !== index + 1 ||
+                    ocrPage.pageId !== current.id ||
+                    ocrPage.sessionId !== current.sessionId ||
+                    ocrPage.sourceUri !== current.editedUri
+                );
+            }
+        );
+        if (hasStalePage) {
+            showAlert(
+                'Nagbago ang mga pahina',
+                'May pahinang nabago habang binabasa ang document. Pindutin ulit ang Ipa-check sa AI para siguradong tama ang ipapadala.',
+                'warning',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        const historyId = Date.now().toString();
+        let sanitizedResult: ReturnType<
+            typeof buildSanitizedDocumentForAI
+        >;
+        try {
+            sanitizedResult = buildSanitizedDocumentForAI(
+                historyId,
+                ocrResult.successfulPages
+            );
+        } catch (error: unknown) {
+            showAlert(
+                'Hindi maihanda ang document',
+                getErrorMessage(
+                    error,
+                    'May problema sa pagkakasunod o nilalaman ng mga pahina.'
+                ),
                 'error',
                 [{ text: 'OK' }]
             );
-        } finally {
-            setIsApplyingEdit(false);
-        }
-    };
-
-    // FILTER
-
-    const handleFilterChange = (filter: FilterType) => {
-
-        setPageFilters((prev) => ({ ...prev, [currentIndex]: filter }));
-
-    };
-
-    // BRIGHTNESS
-
-    const handleBrightnessChange = (value: number) => {
-
-        setPageBrightness((prev) => ({
-
-            ...prev,
-
-            [currentIndex]: clamp(Math.round(value), MIN_ADJUST, MAX_ADJUST),
-
-        }));
-
-    };
-
-    // CONTRAST
-
-    const handleContrastChange = (value: number) => {
-
-        setPageContrast((prev) => ({
-
-            ...prev,
-
-            [currentIndex]: clamp(Math.round(value), MIN_ADJUST, MAX_ADJUST),
-
-        }));
-
-    };
-
-    // RESET ADJUSTMENTS
-
-    const resetAdjustments = () => {
-
-        setPageBrightness((prev) => ({ ...prev, [currentIndex]: 0 }));
-
-        setPageContrast((prev) => ({ ...prev, [currentIndex]: 0 }));
-
-        setPageFilters((prev) => ({ ...prev, [currentIndex]: 'original' }));
-
-    };
-
-    // CROP
-
-    const handleAutoCrop = () => {
-
-        setPageCrops((prev) => ({
-
-            ...prev,
-
-            [currentIndex]: { enabled: true, top: 8, left: 6, right: 6, bottom: 8 },
-
-        }));
-
-    };
-
-    const handleStraighten = () => {
-        showAlert(
-            'Straighten',
-            'Perspective straighten will be added in the crop phase.',
-            'info',
-            [{ text: 'OK' }]
-        );
-    };
-
-    const handleCropDone = () => {
-
-        setPageCrops((prev) => ({
-
-            ...prev,
-
-            [currentIndex]: { ...(prev[currentIndex] ?? DEFAULT_CROP), enabled: true },
-
-        }));
-
-        setActiveMenu('main');
-
-    };
-
-    const handleCropChange = (crop: CropState) => {
-        setPageCrops((prev) => ({ ...prev, [currentIndex]: crop }));
-    };
-
-    const resetCrop = () => {
-
-        setPageCrops((prev) => ({ ...prev, [currentIndex]: DEFAULT_CROP }));
-
-    };
-
-    // NAVIGATION
-
-    const scrollToIndex = (index: number) => {
-
-        if (index < 0 || index >= pages.length) return;
-
-        flatListRef.current?.scrollToIndex({ index, animated: true });
-
-        setCurrentIndex(index);
-
-    };
-
-    // ANALYZE
-
-    const handleAnalyze = async () => {
-
-        if (pages.length === 0) {
-
-            showAlert('No Images', 'Walang image na pwedeng i-analyze.', 'warning', [{ text: 'OK' }]);
-
             return;
-
         }
-
-        const historyId = Date.now().toString();
-
-        const instructions = {
-
-            rotations: {},
-
-            filters: pageFilters,
-
-            brightness: pageBrightness,
-
-            contrast: pageContrast,
-
-            crops: pageCrops,
-
-        };
-
+        if (sanitizedResult.blocked) {
+            const blockedPages =
+                sanitizedResult.blockedPageNumbers.join(', ');
+            showAlert(
+                'Hindi ipinadala sa AI',
+                `Kailangang i-review ang sensitibo o kulang na text sa pahina ${blockedPages}.`,
+                'warning',
+                [
+                    { text: 'Bumalik', style: 'cancel' },
+                    {
+                        text: 'Tingnan ang Text',
+                        onPress: () =>
+                            openSanitizedPreview(
+                                sanitizedResult.combinedText
+                            ),
+                    },
+                ]
+            );
+            return;
+        }
         try {
-
-            const newItem = {
-
-                id: historyId,
-
-                uri: pages[0].editedUri,
-
-                pageUris: pages.map((page) => page.editedUri),
-
-                title: `Batch Scan (${pages.length} pages)`,
-
-                date: new Date().toLocaleString(),
-
-                type: route?.params?.source === 'gallery' ? 'gallery' : 'camera',
-
-                status: 'unscanned',
-
-                editInstructions: instructions,
-
-            };
-
-            const storedHistory = await AsyncStorage.getItem('@lex_scan_history');
-
-            const historyArray = storedHistory ? JSON.parse(storedHistory) : [];
-
-            await AsyncStorage.setItem('@lex_scan_history', JSON.stringify([newItem, ...historyArray]));
-
+            await savePendingHistoryItem(
+                historyId,
+                pages,
+                ocrResult.combinedText,
+                sanitizedResult.combinedText,
+                route?.params?.source
+            );
         } catch (error) {
-
-            console.error('Failed to save batch history:', error);
-
+            console.error(
+                '[BatchEditScreen] History save failed:',
+                error
+            );
         }
-
-        triggerBackgroundProcess(async (signal: AbortSignal) => {
-
-            const formData = new FormData();
-
-            pages.forEach((page: ScanPage, index: number) => {
-
-                const uri = page.editedUri;
-
-                const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
-
-                formData.append('files', {
-
-                    uri: fileUri,
-
-                    name: `scan_page_${index + 1}.jpg`,
-
-                    type: 'image/jpeg',
-
-                } as any);
-
-            });
-
-            formData.append('instructions', JSON.stringify(instructions));
-
-            try {
-
-                const { postBatchFileEndpoint } = require('../../../services/AiEngine');
-
-                const data = await postBatchFileEndpoint('/simplify_batch', formData, signal);
-
-                if (data?.status === 'success') {
-
-                    if (!data.results) data.results = [];
-
-                    try {
-
-                        const storedHistory = await AsyncStorage.getItem('@lex_scan_history');
-
-                        if (storedHistory) {
-
-                            const historyArray = JSON.parse(storedHistory);
-
-                            const updatedHistory = historyArray.map((item: any) => {
-
-                                if (item.id === historyId) {
-
-                                    return {
-
-                                        ...item,
-
-                                        status: 'scanned',
-
-                                        analysisResult: data.results?.[0] ?? data.data ?? null,
-
-                                        editInstructions: instructions,
-
-                                    };
-
-                                }
-
-                                return item;
-
-                            });
-
-                            await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(updatedHistory));
-
-                        }
-
-                    } catch (historyError) {
-
-                        console.error('Failed to update batch history:', historyError);
-
-                    }
-
-                    return data;
-
+        let hasInternet = false;
+        try {
+            const networkState =
+                await Network.getNetworkStateAsync();
+            hasInternet = Boolean(
+                networkState.isConnected &&
+                    networkState.isInternetReachable !== false
+            );
+        } catch {
+            hasInternet = false;
+        }
+        if (!hasInternet) {
+            showAlert(
+                'Walang Internet',
+                'Na-save ang document at text sa Recent Files. Kailangan ng internet para ma-check ito ng AI.',
+                'info',
+                [
+                    {
+                        text: 'Tingnan ang Text',
+                        onPress: () =>
+                            openSanitizedPreview(
+                                sanitizedResult.combinedText
+                            ),
+                    },
+                    {
+                        text: 'Bumalik sa Home',
+                        onPress: () =>
+                            navigation.navigate('Main', {
+                                screen: 'Scan',
+                            }),
+                    },
+                ]
+            );
+            return;
+        }
+        triggerBackgroundProcess(
+            async (signal: AbortSignal) => {
+                const response = await analyzeSanitizedDocument(
+                    sanitizedResult.apiPayload,
+                    signal
+                );
+                if (!response || response.status !== 'success') {
+                    throw new Error(
+                        'Hindi natapos ang AI analysis.'
+                    );
                 }
-
-                throw new Error(data?.message ?? 'Server batch processing failed.');
-
-            } catch (error) {
-
-                throw error;
-
+                const analysisResult = {
+                    ...response.data,
+                    rag_context_used:
+                        response.data.rag_context_used,
+                    sanitizedText:
+                        sanitizedResult.combinedText,
+                    inputMeta: response.inputMeta,
+                };
+                await markHistoryAsScanned(
+                    historyId,
+                    analysisResult,
+                    ocrResult.combinedText,
+                    sanitizedResult.combinedText
+                );
+                return analysisResult;
+            },
+            historyId
+        );
+    };
+    const handleAnalyze = async (): Promise<void> => {
+        if (pages.length === 0 || isBusy) {
+            return;
+        }
+        if (isGlobalProcessing) {
+            showAlert(
+                'May document pang sinusuri',
+                'Hintayin munang matapos o i-cancel ang kasalukuyang AI analysis.',
+                'warning',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        const abortController = new AbortController();
+        ocrAbortControllerRef.current = abortController;
+        setIsOcrRunning(true);
+        setOcrProgress({
+            current: 1,
+            total: pages.length,
+        });
+        try {
+            const result = await recognizePagesOffline(
+                pages,
+                (progress) => {
+                    setOcrProgress({
+                        current: progress.current,
+                        total: progress.total,
+                    });
+                    setPages((previousPages) =>
+                        previousPages.map((page) => {
+                            if (
+                                page.id !== progress.pageId
+                            ) {
+                                return page;
+                            }
+                            if (
+                                progress.status ===
+                                'processing'
+                            ) {
+                                return {
+                                    ...page,
+                                    status: 'editing',
+                                    errorMessage: undefined,
+                                };
+                            }
+                            if (
+                                progress.status === 'success'
+                            ) {
+                                return {
+                                    ...page,
+                                    status: 'ocr-complete',
+                                };
+                            }
+                            return {
+                                ...page,
+                                status: 'error',
+                            };
+                        })
+                    );
+                },
+                abortController.signal
+            );
+            const textByPageId = new Map(
+                result.successfulPages.map((page) => [
+                    page.pageId,
+                    page,
+                ])
+            );
+            const errorByPageId = new Map(
+                result.failedPages.map((page) => [
+                    page.pageId,
+                    page.message,
+                ])
+            );
+            setPages((previousPages) =>
+                previousPages.map((page) => {
+                    const successfulPage =
+                        textByPageId.get(page.id);
+                    if (successfulPage) {
+                        return {
+                            ...page,
+                            ocrText: successfulPage.text,
+                            ocrWarning:
+                                successfulPage.warning,
+                            errorMessage: undefined,
+                            status: 'ocr-complete',
+                        };
+                    }
+                    const failureMessage =
+                        errorByPageId.get(page.id);
+                    if (failureMessage) {
+                        return {
+                            ...page,
+                            errorMessage: failureMessage,
+                            status: 'error',
+                        };
+                    }
+                    return page;
+                })
+            );
+            if (
+                !result.isComplete ||
+                result.failedPages.length > 0 ||
+                result.recognizedPageCount !== pages.length
+            ) {
+                const failedPageNumbers =
+                    result.failedPages
+                        .map((page) => page.pageNumber)
+                        .join(', ');
+                const firstFailedPage =
+                    result.failedPages[0]?.pageNumber;
+                if (firstFailedPage) {
+                    scrollToPage(
+                        firstFailedPage - 1,
+                        false
+                    );
+                }
+                showAlert(
+                    'May pahinang hindi nabasa',
+                    `Hindi ipinadala sa AI. Ayusin muna ang pahina ${failedPageNumbers || 'na may error'} para kumpleto ang document.`,
+                    'warning',
+                    [
+                        {
+                            text: 'OK',
+                            style: 'cancel',
+                        },
+                    ]
+                );
+                return;
             }
-
-        }, historyId);
-
+            const warningPages = result.successfulPages
+                .filter((page) => Boolean(page.warning))
+                .map((page) => page.pageNumber);
+            if (warningPages.length > 0) {
+                showAlert(
+                    'I-review ang malabong pahina',
+                    `May mababang kalidad na OCR sa pahina ${warningPages.join(', ')}. Maaari itong magpababa sa accuracy ng analysis.`,
+                    'warning',
+                    [
+                        {
+                            text: 'Bumalik',
+                            style: 'cancel',
+                            onPress: () =>
+                                scrollToPage(
+                                    warningPages[0] - 1,
+                                    false
+                                ),
+                        },
+                        {
+                            text: 'Magpatuloy',
+                            onPress: () =>
+                                void beginAiAnalysis(result),
+                        },
+                    ]
+                );
+                return;
+            }
+            await beginAiAnalysis(result);
+        } catch (error: unknown) {
+            if (isOcrCancelledError(error)) {
+                showAlert(
+                    'Itinigil ang Pagbasa',
+                    'Walang image o text na ipinadala sa AI.',
+                    'info',
+                    [{ text: 'OK' }]
+                );
+            } else {
+                showAlert(
+                    'Hindi mabasa ang Document',
+                    getErrorMessage(
+                        error,
+                        'Subukang kumuha ng mas malinaw na larawan.'
+                    ),
+                    'error',
+                    [{ text: 'OK' }]
+                );
+            }
+        } finally {
+            ocrAbortControllerRef.current = null;
+            setIsOcrRunning(false);
+            setOcrProgress({ current: 0, total: 0 });
+        }
     };
-
-    // IMAGE PREVIEW
-
-    const renderPage = ({ item, index }: { item: ScanPage; index: number }) => {
-
-        const isCurrent = index === currentIndex;
-
-        const filter = pageFilters[index] ?? 'original';
-
-        const brightness = pageBrightness[index] ?? 0;
-
-        const contrast = pageContrast[index] ?? 0;
-
-        const crop = pageCrops[index] ?? DEFAULT_CROP;
-
-        let brightnessOpacity = Math.min(Math.abs(brightness) / 160, 0.55);
-
-        let contrastOpacity = Math.min(Math.abs(contrast) / 220, 0.35);
-
-        return (
-
-            <View style={styles.pageWrapper}>
-
-                <View style={styles.imageCanvas}>
-
-                    <View style={[styles.imageClip, crop.enabled && styles.imageCroppedPreview]}>
-
-                        <Image
-
-                            source={{ uri: item.editedUri }}
-
-                            style={styles.previewImage}
-
-                            resizeMode="contain"
-
-                        />
-
-                        {/* FILTER PREVIEW */}
-
-                        {isCurrent && filter === 'grayscale' && (
-
-                            <View pointerEvents="none" style={[styles.fullOverlay, { backgroundColor: '#777', opacity: 0.22 }]} />
-
-                        )}
-
-                        {isCurrent && filter === 'bw' && (
-
-                            <View pointerEvents="none" style={[styles.fullOverlay, { backgroundColor: '#111', opacity: 0.3 }]} />
-
-                        )}
-
-                        {isCurrent && filter === 'magic' && (
-
-                            <View pointerEvents="none" style={[styles.fullOverlay, { backgroundColor: '#FFD166', opacity: 0.1 }]} />
-
-                        )}
-
-                        {/* BRIGHTNESS PREVIEW */}
-
-                        {isCurrent && brightness !== 0 && (
-
-                            <View pointerEvents="none" style={[styles.fullOverlay, { backgroundColor: brightness > 0 ? '#FFF' : '#000', opacity: brightnessOpacity }]} />
-
-                        )}
-
-                        {/* CONTRAST PREVIEW */}
-
-                        {isCurrent && contrast !== 0 && (
-
-                            <View pointerEvents="none" style={[styles.fullOverlay, { backgroundColor: contrast > 0 ? '#000' : '#FFF', opacity: contrastOpacity }]} />
-
-                        )}
-
-                    </View>
-
-                    {/* CROP OVERLAY */}
-
-                    {isCurrent && activeMenu === 'crop' && (
-                        <DraggableCropOverlay
-                            crop={crop.enabled ? crop : { enabled: true, top: 10, left: 5, right: 5, bottom: 10 }}
-                            onChange={handleCropChange}
-                        />
-                    )}
-
-                    {/* FILTER BADGE */}
-
-                    {isCurrent && filter !== 'original' && activeMenu !== 'crop' && (
-
-                        <View style={styles.filterBadge}>
-
-                            <Text style={styles.filterBadgeText}>
-
-                                {filter === 'magic' ? 'Magic Color' : filter === 'grayscale' ? 'Grayscale' : 'B&W'}
-
-                            </Text>
-
-                        </View>
-
-                    )}
-
-                    {/* ADJUST BADGE */}
-
-                    {isCurrent && activeMenu === 'adjust' && (
-
-                        <View style={styles.adjustBadge}>
-
-                            <Text style={styles.adjustBadgeText}>
-
-                                B {brightness >= 0 ? '+' : ''}{brightness}   C {contrast >= 0 ? '+' : ''}{contrast}
-
-                            </Text>
-
-                        </View>
-
-                    )}
-
-                </View>
-
-            </View>
-
-        );
-
+    const handleCancelOcr = (): void => {
+        ocrAbortControllerRef.current?.abort();
     };
-
-    if (isProcessing) {
-
-        return (
-
-            <View style={styles.processingScreen}>
-
-                <StatusBar barStyle="light-content" backgroundColor="#121212" />
-
-                <ProcessingLoader
-
-                    title="Analyzing Documents"
-
-                    messages={[
-
-                        'Preparing document images...',
-
-                        'Applying image adjustments...',
-
-                        'Applying filters...',
-
-                        'Extracting text...',
-
-                        'Connecting to Lex-Simple AI...',
-
-                    ]}
-
-                    onCancel={() => navigation.goBack()}
-
+    const handleBack = (): void => {
+        if (isBusy) {
+            return;
+        }
+        navigation.goBack();
+    };
+    const renderPage = ({ item }: { item: ScanPage }) => (
+        <View
+            style={[
+                styles.pageSlide,
+                { width: screenWidth },
+            ]}
+        >
+            <View style={styles.documentFrame}>
+                <Image
+                    key={item.editedUri}
+                    source={{ uri: item.editedUri }}
+                    style={styles.documentImage}
+                    resizeMode="contain"
+                    accessibilityLabel="Document page preview"
                 />
-
-                <AlertRender />
-
             </View>
-
-        );
-
-    }
-
-    if (pages.length === 0) {
-
-        return (
-
-            <SafeAreaView style={styles.container}>
-
-                <StatusBar barStyle="light-content" backgroundColor="#121212" />
-
-                <View style={styles.emptyContainer}>
-
-                    <Ionicons name="images-outline" size={60} color="#777" />
-
-                    <Text style={styles.emptyTitle}>No images</Text>
-
-                    <TouchableOpacity style={styles.emptyButton} onPress={() => navigation.goBack()}>
-
-                        <Text style={styles.emptyButtonText}>Go Back</Text>
-
-                    </TouchableOpacity>
-
-                </View>
-
-            </SafeAreaView>
-
-        );
-
-    }
-
-    return (
-
-        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-
-            <StatusBar barStyle="light-content" backgroundColor="#121212" />
-
-            {/* HEADER */}
-
-            <View style={styles.header}>
-
-                <TouchableOpacity onPress={() => navigation.navigate('Main')} style={styles.headerIcon}>
-
-                    <Ionicons name="home" size={24} color="#FFF" />
-
-                </TouchableOpacity>
-
-                <View style={styles.headerTitleContainer}>
-
-                    <Text style={styles.headerTitle}>Lex-Simple Scan</Text>
-
-                    <View style={styles.headerTitleUnderline} />
-
-                </View>
-
-                <View style={styles.pageCounter}>
-
-                    <Text style={styles.pageCounterText}>
-
-                        {currentIndex + 1} / {pages.length}
-
-                    </Text>
-
-                </View>
-
-            </View>
-
-            {/* MAIN VIEWER */}
-
-            <View style={styles.mainViewer}>
-
-                <FlatList
-
-                    ref={flatListRef}
-
-                    data={pages}
-
-                    horizontal
-
-                    pagingEnabled
-
-                    showsHorizontalScrollIndicator={false}
-
-                    keyExtractor={(item) => item.id}
-
-                    renderItem={renderPage}
-
-                    onViewableItemsChanged={onViewRef.current}
-
-                    viewabilityConfig={viewConfigRef.current}
-
-                    scrollEnabled={activeMenu === 'main'}
-
-                    getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-
-                />
-
-                {currentIndex > 0 && activeMenu === 'main' && (
-
-                    <TouchableOpacity style={styles.arrowLeft} onPress={() => scrollToIndex(currentIndex - 1)}>
-
-                        <Ionicons name="chevron-back-circle" size={40} color="rgba(255,255,255,0.65)" />
-
-                    </TouchableOpacity>
-
-                )}
-
-                {currentIndex < pages.length - 1 && activeMenu === 'main' && (
-
-                    <TouchableOpacity style={styles.arrowRight} onPress={() => scrollToIndex(currentIndex + 1)}>
-
-                        <Ionicons name="chevron-forward-circle" size={40} color="rgba(255,255,255,0.65)" />
-
-                    </TouchableOpacity>
-
-                )}
-
-            </View>
-
-            {/* FILTERS MENU */}
-
-            {activeMenu === 'filters' && (
-
-                <View style={styles.subMenuContainer}>
-
-                    <View style={styles.subMenuHeader}>
-
-                        <Text style={styles.subMenuTitle}>Filters</Text>
-
-                        <TouchableOpacity onPress={() => setActiveMenu('main')}>
-
-                            <Ionicons name="close-circle" size={24} color="#FFF" />
-
-                        </TouchableOpacity>
-
-                    </View>
-
-                    <View style={styles.filterOptionsRow}>
-
-                        {(['original', 'magic', 'grayscale', 'bw'] as FilterType[]).map((filter) => {
-
-                            const active = currentFilter === filter;
-
-                            return (
-
-                                <TouchableOpacity key={filter} style={styles.filterItem} onPress={() => handleFilterChange(filter)}>
-
-                                    <View style={[styles.filterThumb, active && styles.filterThumbActive]}>
-
-                                        <Image source={{ uri: pages[currentIndex]?.editedUri }} style={styles.filterThumbImg} />
-
-                                        {filter === 'grayscale' && <View style={[styles.thumbOverlay, { backgroundColor: '#777', opacity: 0.22 }]} />}
-
-                                        {filter === 'bw' && <View style={[styles.thumbOverlay, { backgroundColor: '#111', opacity: 0.3 }]} />}
-
-                                        {filter === 'magic' && <View style={[styles.thumbOverlay, { backgroundColor: '#FFD166', opacity: 0.1 }]} />}
-
-                                    </View>
-
-                                    <Text style={[styles.filterText, active && styles.filterTextActive]}>
-
-                                        {filter === 'original' ? 'Original' : filter === 'magic' ? 'Auto-color' : filter === 'grayscale' ? 'Grayscale' : 'B&W'}
-
-                                    </Text>
-
-                                </TouchableOpacity>
-
-                            );
-
-                        })}
-
-                    </View>
-
-                </View>
-
-            )}
-
-            {/* ADJUST MENU */}
-
-            {activeMenu === 'adjust' && (
-
-                <View style={styles.subMenuContainer}>
-
-                    <View style={styles.subMenuHeader}>
-
-                        <View>
-
-                            <Text style={styles.subMenuTitle}>Adjust</Text>
-
-                            <Text style={styles.subMenuHint}>Offline preview</Text>
-
-                        </View>
-
-                        <View style={styles.adjustHeaderActions}>
-
-                            <TouchableOpacity style={styles.resetButton} onPress={resetAdjustments}>
-
-                                <Ionicons name="refresh-outline" size={17} color="#4880FF" />
-
-                                <Text style={styles.resetButtonText}>Reset</Text>
-
-                            </TouchableOpacity>
-
-                            <TouchableOpacity onPress={() => setActiveMenu('main')}>
-
-                                <Ionicons name="close-circle" size={24} color="#FFF" />
-
-                            </TouchableOpacity>
-
-                        </View>
-
-                    </View>
-
-                    {/* BRIGHTNESS */}
-
-                    <View style={styles.adjustControlBlock}>
-
-                        <View style={styles.adjustLabelRow}>
-
-                            <View style={styles.adjustLabelLeft}>
-
-                                <Ionicons name="sunny" size={21} color="#FBBF24" />
-
-                                <Text style={styles.adjustLabel}>Brightness</Text>
-
-                            </View>
-
-                            <Text style={styles.adjustValue}>{currentBrightness >= 0 ? '+' : ''}{currentBrightness}</Text>
-
-                        </View>
-
-                        <AdjustmentSlider value={currentBrightness} onChange={handleBrightnessChange} />
-
-                        <View style={styles.sliderLabels}>
-
-                            <Text style={styles.sliderLabel}>Dark</Text>
-
-                            <Text style={styles.sliderLabel}>0</Text>
-
-                            <Text style={styles.sliderLabel}>Bright</Text>
-
-                        </View>
-
-                    </View>
-
-                    {/* CONTRAST */}
-
-                    <View style={styles.adjustControlBlock}>
-
-                        <View style={styles.adjustLabelRow}>
-
-                            <View style={styles.adjustLabelLeft}>
-
-                                <Ionicons name="contrast" size={21} color="#4880FF" />
-
-                                <Text style={styles.adjustLabel}>Contrast</Text>
-
-                            </View>
-
-                            <Text style={styles.adjustValue}>{currentContrast >= 0 ? '+' : ''}{currentContrast}</Text>
-
-                        </View>
-
-                        <AdjustmentSlider value={currentContrast} onChange={handleContrastChange} />
-
-                        <View style={styles.sliderLabels}>
-
-                            <Text style={styles.sliderLabel}>Less</Text>
-
-                            <Text style={styles.sliderLabel}>0</Text>
-
-                            <Text style={styles.sliderLabel}>More</Text>
-
-                        </View>
-
-                    </View>
-
-                    <Text style={styles.helperText}>Brightness and contrast are previewed locally and saved per page.</Text>
-
-                </View>
-
-            )}
-
-            {/* CROP MENU */}
-
-            {activeMenu === 'crop' && (
-
-                <View style={styles.subMenuContainer}>
-
-                    <View style={styles.subMenuHeader}>
-
-                        <View>
-
-                            <Text style={styles.subMenuTitle}>Crop</Text>
-
-                            <Text style={styles.subMenuHint}>Frame preview</Text>
-
-                        </View>
-
-                        <TouchableOpacity onPress={() => setActiveMenu('main')}>
-
-                            <Ionicons name="close-circle" size={24} color="#FFF" />
-
-                        </TouchableOpacity>
-
-                    </View>
-
-                    <View style={styles.cropOptionsRow}>
-
-                        <TouchableOpacity style={styles.cropActionBtn} onPress={handleAutoCrop}>
-
-                            <Ionicons name="scan-outline" size={20} color="#4880FF" />
-
-                            <Text style={styles.cropActionText}>Auto-detect</Text>
-
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.cropActionBtn} onPress={handleStraighten}>
-
-                            <Ionicons name="grid-outline" size={20} color="#4880FF" />
-
-                            <Text style={styles.cropActionText}>Straighten</Text>
-
-                        </TouchableOpacity>
-
-                        {currentCrop.enabled && (
-
-                            <TouchableOpacity style={[styles.cropActionBtn, styles.cropResetBtn]} onPress={resetCrop}>
-
-                                <Ionicons name="refresh-outline" size={20} color="#EF4444" />
-
-                                <Text style={[styles.cropActionText, { color: '#EF4444' }]}>Reset</Text>
-
-                            </TouchableOpacity>
-
-                        )}
-
-                    </View>
-
-                    <TouchableOpacity style={styles.cropDoneBtn} onPress={handleCropDone}>
-
-                        <Ionicons name="checkmark" size={22} color="#FFF" />
-
-                        <Text style={styles.cropDoneText}>Done</Text>
-
-                    </TouchableOpacity>
-
-                </View>
-
-            )}
-
-            {/* MAIN TOOLBAR */}
-
-            {activeMenu === 'main' && (
-
-                <View style={styles.toolbar}>
-
-                    <TouchableOpacity style={styles.toolBtn} onPress={() => navigation.navigate({ name: 'ScannerScreen', params: { existingPages: pages.map((page) => page.editedUri) }, merge: true })}>
-
-                        <Ionicons name="camera-reverse-outline" size={24} color="#FFF" />
-
-                        <Text style={styles.toolText}>Retake</Text>
-
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.toolBtn} onPress={() => setActiveMenu('crop')}>
-
-                        <Ionicons name="crop" size={24} color="#FFF" />
-
-                        <Text style={styles.toolText}>Crop</Text>
-
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.toolBtn, isApplyingEdit && { opacity: 0.5 }]}
-                        onPress={handleRotate}
-                        disabled={isApplyingEdit}
-                    >
-
-                        <Ionicons name={isApplyingEdit ? 'hourglass-outline' : 'refresh'} size={24} color="#FFF" />
-
-                        <Text style={styles.toolText}>{isApplyingEdit ? 'Applying...' : 'Rotate'}</Text>
-
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.toolBtn} onPress={() => setActiveMenu('adjust')}>
-
-                        <Ionicons name="options-outline" size={24} color="#FFF" />
-
-                        <Text style={styles.toolText}>Adjust</Text>
-
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.toolBtn} onPress={() => setActiveMenu('filters')}>
-
-                        <Ionicons name="color-filter-outline" size={24} color="#4880FF" />
-
-                        <Text style={[styles.toolText, { color: '#4880FF' }]}>Filters</Text>
-
-                    </TouchableOpacity>
-
-                </View>
-
-            )}
-
-            {/* BOTTOM BAR */}
-
-            <View style={styles.bottomBar}>
-
-                <TouchableOpacity style={styles.keepScanningBtn} onPress={() => navigation.navigate({ name: 'ScannerScreen', params: { existingPages: pages.map((page) => page.editedUri) }, merge: true })}>
-
-                    <Text style={styles.keepScanningText}>Keep scanning</Text>
-
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.saveBtn} onPress={handleAnalyze}>
-
-                    <Text style={styles.saveBtnText}>Analyze ({pages.length})</Text>
-
-                    <Ionicons name="chevron-up" size={20} color="#FFF" style={{ marginLeft: 5 }} />
-
-                </TouchableOpacity>
-
-            </View>
-
-            <AlertRender />
-
-        </SafeAreaView>
-
+        </View>
     );
-
+    const renderThumbnail = ({
+        item,
+        index,
+    }: {
+        item: ScanPage;
+        index: number;
+    }) => {
+        const isSelected = index === currentIndex;
+        return (
+            <TouchableOpacity
+                style={[
+                    styles.thumbnailButton,
+                    isSelected &&
+                        styles.thumbnailButtonSelected,
+                ]}
+                onPress={() => scrollToPage(index)}
+                disabled={isBusy}
+                accessibilityRole="button"
+                accessibilityLabel={`Pahina ${index + 1}`}
+            >
+                <Image
+                    source={{ uri: item.editedUri }}
+                    style={styles.thumbnailImage}
+                    resizeMode="cover"
+                />
+                <View style={styles.thumbnailNumber}>
+                    <Text style={styles.thumbnailNumberText}>
+                        {index + 1}
+                    </Text>
+                </View>
+                {item.status === 'ocr-complete' && (
+                    <View
+                        style={[
+                            styles.thumbnailStatus,
+                            styles.thumbnailSuccess,
+                        ]}
+                    >
+                        <Ionicons
+                            name="checkmark"
+                            size={12}
+                            color={COLORS.text}
+                        />
+                    </View>
+                )}
+                {item.status === 'error' && (
+                    <View
+                        style={[
+                            styles.thumbnailStatus,
+                            styles.thumbnailError,
+                        ]}
+                    >
+                        <Ionicons
+                            name="alert"
+                            size={12}
+                            color={COLORS.text}
+                        />
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
+    if (isAiAnalyzing) {
+        return (
+            <SafeAreaView
+                style={styles.processingScreen}
+                edges={['top', 'bottom']}
+            >
+                <StatusBar
+                    barStyle="light-content"
+                    backgroundColor={COLORS.background}
+                />
+                <View style={styles.processingHeader}>
+                    <Text style={styles.processingHeaderTitle}>
+                        Sinusuri ang Document
+                    </Text>
+                </View>
+                <View style={styles.processingBody}>
+                    <View style={styles.processingIconBox}>
+                        <Ionicons
+                            name="document-text-outline"
+                            size={34}
+                            color={COLORS.primaryLight}
+                        />
+                    </View>
+                    <Text style={styles.processingTitle}>
+                        Sinusuri ang lahat ng pahina
+                    </Text>
+                    <Text style={styles.processingMessage}>
+                        Tinitingnan ang mga clause at posibleng panganib. Maaari kang bumalik sa home habang nagpapatuloy ito.
+                    </Text>
+                    <View style={styles.processingInfoRow}>
+                        <Ionicons
+                            name="shield-checkmark-outline"
+                            size={19}
+                            color={COLORS.success}
+                        />
+                        <Text style={styles.processingInfoText}>
+                            Nilinis na text lamang ang ipinadala. Hindi kasama ang larawan.
+                        </Text>
+                    </View>
+                    <TouchableOpacity
+                        style={styles.backgroundButton}
+                        onPress={() =>
+                            navigation.navigate('Main', {
+                                screen: 'Scan',
+                            })
+                        }
+                        accessibilityRole="button"
+                    >
+                        <Text style={styles.backgroundButtonText}>
+                            Ipagpatuloy sa Background
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.processingCancelButton}
+                        onPress={cancelProcess}
+                        accessibilityRole="button"
+                    >
+                        <Text style={styles.processingCancelText}>
+                            Itigil ang Analysis
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                <AlertRender />
+            </SafeAreaView>
+        );
+    }
+    if (pages.length === 0) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <StatusBar
+                    barStyle="light-content"
+                    backgroundColor={COLORS.background}
+                />
+                <View style={styles.emptyState}>
+                    <Ionicons
+                        name="documents-outline"
+                        size={48}
+                        color={COLORS.muted}
+                    />
+                    <Text style={styles.emptyTitle}>
+                        Walang document page
+                    </Text>
+                    <Text style={styles.emptyMessage}>
+                        Kumuha muna ng kahit isang malinaw na pahina.
+                    </Text>
+                    <TouchableOpacity
+                        style={styles.emptyButton}
+                        onPress={() =>
+                            navigation.replace(
+                                'ScannerScreen'
+                            )
+                        }
+                    >
+                        <Text style={styles.emptyButtonText}>
+                            Buksan ang Camera
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                <AlertRender />
+            </SafeAreaView>
+        );
+    }
+    return (
+        <SafeAreaView
+            style={styles.container}
+            edges={['top', 'bottom']}
+            testID="batch-edit-screen-v3"
+        >
+            <StatusBar
+                barStyle="light-content"
+                backgroundColor={COLORS.background}
+            />
+            <View style={styles.header}>
+                <TouchableOpacity
+                    style={styles.headerButton}
+                    onPress={handleBack}
+                    disabled={isBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="Bumalik"
+                >
+                    <Ionicons
+                        name="arrow-back"
+                        size={23}
+                        color={COLORS.text}
+                    />
+                </TouchableOpacity>
+                <View style={styles.headerCenter}>
+                    <Text
+                        style={styles.headerTitle}
+                        numberOfLines={1}
+                    >
+                        Suriin ang mga Pahina
+                    </Text>
+                    <Text style={styles.headerHint}>
+                        I-swipe para makita ang iba
+                    </Text>
+                </View>
+                <View style={styles.pageCounter}>
+                    <Text style={styles.pageCounterText}>
+                        {currentIndex + 1}/{pages.length}
+                    </Text>
+                </View>
+            </View>
+            <View style={styles.viewerSection}>
+                <FlatList
+                    ref={mainListRef}
+                    data={pages}
+                    horizontal
+                    pagingEnabled
+                    scrollEnabled={!isBusy}
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderPage}
+                    onViewableItemsChanged={
+                        handleViewableItemsChanged
+                    }
+                    viewabilityConfig={viewabilityConfig}
+                    getItemLayout={(_, index) => ({
+                        length: screenWidth,
+                        offset: screenWidth * index,
+                        index,
+                    })}
+                    onScrollToIndexFailed={({ index }) => {
+                        mainListRef.current?.scrollToOffset({
+                            offset: index * screenWidth,
+                            animated: false,
+                        });
+                    }}
+                />
+            </View>
+            <View style={styles.thumbnailSection}>
+                <View style={styles.thumbnailHeader}>
+                    <Text style={styles.thumbnailHeaderText}>
+                        MGA PAHINA
+                    </Text>
+                    <Text style={styles.thumbnailCountText}>
+                        {pages.length}
+                    </Text>
+                </View>
+                <FlatList
+                    ref={thumbnailListRef}
+                    horizontal
+                    data={pages}
+                    keyExtractor={(item) =>
+                        `thumb_${item.id}`
+                    }
+                    renderItem={renderThumbnail}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={
+                        styles.thumbnailListContent
+                    }
+                    onScrollToIndexFailed={() => undefined}
+                />
+            </View>
+            <View style={styles.toolBar}>
+                <TouchableOpacity
+                    style={styles.toolButton}
+                    onPress={handleAddPage}
+                    disabled={isBusy}
+                    activeOpacity={0.72}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                        documentSource === 'gallery'
+                            ? 'Magdagdag mula sa gallery'
+                            : 'Magdagdag gamit ang camera'
+                    }
+                >
+                    <Ionicons
+                        name={
+                            documentSource === 'gallery'
+                                ? 'images-outline'
+                                : 'add'
+                        }
+                        size={23}
+                        color={COLORS.primaryLight}
+                    />
+                    <Text style={styles.toolButtonText}>
+                        Dagdag
+                    </Text>
+                </TouchableOpacity>
+                <View style={styles.toolDivider} />
+                <TouchableOpacity
+                    style={styles.toolButton}
+                    onPress={handleOpenCamera}
+                    disabled={isBusy}
+                    activeOpacity={0.72}
+                    accessibilityRole="button"
+                    accessibilityLabel="Buksan ang camera"
+                >
+                    <Ionicons
+                        name="camera-outline"
+                        size={22}
+                        color={COLORS.primaryLight}
+                    />
+                    <Text style={styles.toolButtonText}>
+                        Camera
+                    </Text>
+                </TouchableOpacity>
+                <View style={styles.toolDivider} />
+                <TouchableOpacity
+                    style={styles.toolButton}
+                    onPress={handleDelete}
+                    disabled={isBusy}
+                    activeOpacity={0.72}
+                    accessibilityRole="button"
+                    accessibilityLabel="Alisin ang kasalukuyang pahina"
+                >
+                    <Ionicons
+                        name="trash-outline"
+                        size={21}
+                        color={COLORS.danger}
+                    />
+                    <Text
+                        style={[
+                            styles.toolButtonText,
+                            styles.deleteText,
+                        ]}
+                    >
+                        Alisin
+                    </Text>
+                </TouchableOpacity>
+            </View>
+            <View style={styles.bottomActionArea}>
+                <Text style={styles.privacyNote}>
+                    Sa phone muna babasahin at lilinisin ang text.
+                </Text>
+                <TouchableOpacity
+                    style={styles.analyzeButton}
+                    onPress={handleAnalyze}
+                    disabled={isBusy}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ipa-check sa AI ang ${pages.length} pahina`}
+                >
+                    <Ionicons
+                        name="shield-checkmark-outline"
+                        size={21}
+                        color={COLORS.text}
+                    />
+                    <Text style={styles.analyzeButtonText}>
+                        Ipa-check sa AI ({pages.length})
+                    </Text>
+                </TouchableOpacity>
+            </View>
+            {isOcrRunning && (
+                <View style={styles.ocrOverlay}>
+                    <View style={styles.ocrPanel}>
+                        <View style={styles.ocrIconBox}>
+                            <Ionicons
+                                name="document-text-outline"
+                                size={29}
+                                color={COLORS.primary}
+                            />
+                        </View>
+                        <Text style={styles.ocrTitle}>
+                            Binabasa ang document
+                        </Text>
+                        <Text style={styles.ocrMessage}>
+                            Pahina {ocrProgress.current} sa{' '}
+                            {ocrProgress.total}
+                        </Text>
+                        <View style={styles.progressTrack}>
+                            <View
+                                style={[
+                                    styles.progressFill,
+                                    {
+                                        width: `${Math.max(
+                                            5,
+                                            (ocrProgress.current /
+                                                Math.max(
+                                                    ocrProgress.total,
+                                                    1
+                                                )) *
+                                                100
+                                        )}%`,
+                                    },
+                                ]}
+                            />
+                        </View>
+                        <Text style={styles.ocrPrivacyText}>
+                            Offline ito. Wala pang ipinapadala sa AI.
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.cancelOcrButton}
+                            onPress={handleCancelOcr}
+                        >
+                            <Text style={styles.cancelOcrButtonText}>
+                                Itigil
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+            <AlertRender />
+        </SafeAreaView>
+    );
 }
-
-// ================================================================
-
-// STYLES
-
-// ================================================================
-
 const styles = StyleSheet.create({
-
-    container: { flex: 1, backgroundColor: '#121212' },
-
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 15, backgroundColor: '#121212' },
-
-    headerIcon: { width: 42, padding: 5, alignItems: 'flex-start' },
-
-    headerTitleContainer: { flex: 1, alignItems: 'center' },
-
-    headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-
-    headerTitleUnderline: { width: '80%', height: 2, backgroundColor: '#555', marginTop: 4, borderStyle: 'dashed' },
-
-    pageCounter: { width: 42, alignItems: 'flex-end' },
-
-    pageCounterText: { color: '#BBB', fontSize: 12, fontWeight: '700' },
-
-    mainViewer: { flex: 1, backgroundColor: '#1E1E1E', position: 'relative' },
-
-    pageWrapper: { width, height: '100%', justifyContent: 'center', alignItems: 'center', padding: 20 },
-
-    imageCanvas: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden' },
-
-    imageClip: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden' },
-
-    imageCroppedPreview: { width: '92%', height: '92%' },
-
-    previewImage: { width: '100%', height: '100%' },
-
-    fullOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-
-    arrowLeft: { position: 'absolute', left: 10, top: '45%', zIndex: 10 },
-
-    arrowRight: { position: 'absolute', right: 10, top: '45%', zIndex: 10 },
-
-    filterBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(72,128,255,0.9)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
-
-    filterBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-
-    adjustBadge: { position: 'absolute', top: 10, left: 10, backgroundColor: 'rgba(0,0,0,0.75)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-
-    adjustBadgeText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
-
-    cropGestureArea: { ...StyleSheet.absoluteFillObject },
-
-    cropOverlay: { position: 'absolute', borderWidth: 2, borderColor: '#4880FF' },
-
-    cropBorder: { flex: 1, position: 'relative' },
-
-    cropHandle: { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: '#4880FF', borderWidth: 2, borderColor: '#FFF' },
-
-    topLeft: { top: -12, left: -12 },
-
-    topRight: { top: -12, right: -12 },
-
-    bottomLeft: { bottom: -12, left: -12 },
-
-    bottomRight: { bottom: -12, right: -12 },
-
-    cropHandleBar: { position: 'absolute', backgroundColor: '#4880FF', borderWidth: 1, borderColor: '#FFF' },
-
-    topMid: { top: -6, left: '45%', width: 30, height: 12, borderRadius: 6 },
-
-    bottomMid: { bottom: -6, left: '45%', width: 30, height: 12, borderRadius: 6 },
-
-    leftMid: { left: -6, top: '45%', width: 12, height: 30, borderRadius: 6 },
-
-    rightMid: { right: -6, top: '45%', width: 12, height: 30, borderRadius: 6 },
-
-    toolbar: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#121212', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#2C2C2C' },
-
-    toolBtn: { alignItems: 'center', justifyContent: 'center', width: 60 },
-
-    toolText: { color: '#FFF', fontSize: 11, marginTop: 5 },
-
-    subMenuContainer: { backgroundColor: '#1E1E1E', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2C2C2C' },
-
-    subMenuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
-
-    subMenuTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-    subMenuHint: { color: '#777', fontSize: 11, marginTop: 3 },
-
-    filterOptionsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-
-    filterItem: { alignItems: 'center' },
-
-    filterThumb: { width: 60, height: 80, borderWidth: 2, borderColor: 'transparent', borderRadius: 8, overflow: 'hidden', marginBottom: 8, position: 'relative' },
-
-    filterThumbActive: { borderColor: '#4880FF' },
-
-    filterThumbImg: { width: '100%', height: '100%' },
-
-    thumbOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-
-    filterText: { color: '#FFF', fontSize: 12 },
-
-    filterTextActive: { color: '#4880FF', fontWeight: '700' },
-
-    adjustHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-
-    resetButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5 },
-
-    resetButtonText: { color: '#4880FF', fontSize: 12, fontWeight: '700' },
-
-    adjustControlBlock: { marginBottom: 14 },
-
-    adjustLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-
-    adjustLabelLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-
-    adjustLabel: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-
-    adjustValue: { color: '#4880FF', fontSize: 14, fontWeight: '900', minWidth: 40, textAlign: 'right' },
-
-    sliderWrapper: { height: 34, justifyContent: 'center', position: 'relative' },
-
-    sliderTrack: { position: 'absolute', left: 0, right: 0, height: 5, borderRadius: 3, backgroundColor: '#444' },
-
-    sliderCenterMark: { position: 'absolute', width: 2, height: 14, marginLeft: -1, backgroundColor: '#777' },
-
-    sliderThumb: { position: 'absolute', width: 21, height: 21, marginLeft: -10.5, borderRadius: 11, backgroundColor: '#4880FF', borderWidth: 2, borderColor: '#FFF' },
-
-    sliderLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
-
-    sliderLabel: { color: '#777', fontSize: 10 },
-
-    helperText: { color: '#777', fontSize: 11, textAlign: 'center', marginTop: 2, fontStyle: 'italic', lineHeight: 16 },
-
-    cropOptionsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginBottom: 15 },
-
-    cropActionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(72,128,255,0.12)', paddingHorizontal: 13, paddingVertical: 9, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(72,128,255,0.20)' },
-
-    cropResetBtn: { backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.16)' },
-
-    cropActionText: { color: '#4880FF', marginLeft: 7, fontWeight: 'bold', fontSize: 12 },
-
-    cropDoneBtn: { alignSelf: 'center', flexDirection: 'row', backgroundColor: '#4880FF', minWidth: 95, height: 44, paddingHorizontal: 16, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-
-    cropDoneText: { color: '#FFF', fontWeight: '800', marginLeft: 5 },
-
-    bottomBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 15, paddingBottom: 18 },
-
-    keepScanningBtn: { padding: 10 },
-
-    keepScanningText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
-
-    saveBtn: { flexDirection: 'row', backgroundColor: '#0052CC', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 25, alignItems: 'center' },
-
-    saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-    processingScreen: { flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' },
-
-    emptyContainer: { flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' },
-
-    emptyTitle: { color: '#FFF', fontSize: 18, fontWeight: '700', marginTop: 14 },
-
-    emptyButton: { marginTop: 20, backgroundColor: '#0052CC', paddingHorizontal: 20, paddingVertical: 11, borderRadius: 20 },
-
-    emptyButtonText: { color: '#FFF', fontWeight: '700' }
-
+    container: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    processingScreen: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    processingHeader: {
+        height: 62,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    processingHeaderTitle: {
+        color: COLORS.text,
+        fontSize: 17,
+        fontWeight: '900',
+    },
+    processingBody: {
+        flex: 1,
+        paddingHorizontal: 26,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    processingIconBox: {
+        width: 66,
+        height: 66,
+        borderRadius: 7,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    processingTitle: {
+        color: COLORS.text,
+        fontSize: 20,
+        fontWeight: '900',
+        textAlign: 'center',
+        marginTop: 22,
+    },
+    processingMessage: {
+        maxWidth: 360,
+        color: COLORS.subText,
+        fontSize: 14,
+        lineHeight: 21,
+        textAlign: 'center',
+        marginTop: 9,
+    },
+    processingInfoRow: {
+        width: '100%',
+        maxWidth: 360,
+        minHeight: 58,
+        marginTop: 24,
+        paddingHorizontal: 14,
+        paddingVertical: 11,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        borderRadius: 6,
+    },
+    processingInfoText: {
+        flex: 1,
+        color: COLORS.subText,
+        fontSize: 12,
+        lineHeight: 18,
+        marginLeft: 10,
+    },
+    backgroundButton: {
+        width: '100%',
+        maxWidth: 360,
+        height: 50,
+        marginTop: 24,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.primary,
+    },
+    backgroundButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: '900',
+    },
+    processingCancelButton: {
+        height: 44,
+        marginTop: 10,
+        paddingHorizontal: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    processingCancelText: {
+        color: COLORS.danger,
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    header: {
+        height: 60,
+        paddingHorizontal: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    headerButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 7,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: 8,
+    },
+    headerTitle: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: '900',
+    },
+    headerHint: {
+        color: COLORS.muted,
+        fontSize: 10,
+        marginTop: 3,
+    },
+    pageCounter: {
+        minWidth: 44,
+        height: 36,
+        paddingHorizontal: 7,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    pageCounterText: {
+        color: COLORS.text,
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    viewerSection: {
+        flex: 1,
+        minHeight: 160,
+        backgroundColor: COLORS.black,
+    },
+    pageSlide: {
+        height: '100%',
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    documentFrame: {
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        borderRadius: 5,
+        backgroundColor: '#050609',
+        borderWidth: 1,
+        borderColor: '#242A35',
+    },
+    documentImage: {
+        width: '100%',
+        height: '100%',
+    },
+    thumbnailSection: {
+        height: 84,
+        paddingTop: 7,
+        backgroundColor: COLORS.surface,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.border,
+    },
+    thumbnailHeader: {
+        height: 18,
+        paddingHorizontal: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    thumbnailHeaderText: {
+        color: COLORS.muted,
+        fontSize: 9,
+        fontWeight: '900',
+        letterSpacing: 0.9,
+    },
+    thumbnailCountText: {
+        color: COLORS.primaryLight,
+        fontSize: 10,
+        fontWeight: '900',
+        marginLeft: 7,
+    },
+    thumbnailListContent: {
+        paddingHorizontal: 10,
+        paddingTop: 3,
+    },
+    thumbnailButton: {
+        width: 46,
+        height: 54,
+        marginHorizontal: 4,
+        overflow: 'hidden',
+        borderRadius: 5,
+        borderWidth: 2,
+        borderColor: 'transparent',
+        backgroundColor: COLORS.elevated,
+    },
+    thumbnailButtonSelected: {
+        borderColor: COLORS.primaryLight,
+    },
+    thumbnailImage: {
+        width: '100%',
+        height: '100%',
+    },
+    thumbnailNumber: {
+        position: 'absolute',
+        left: 3,
+        bottom: 3,
+        minWidth: 19,
+        height: 19,
+        paddingHorizontal: 4,
+        borderRadius: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+    },
+    thumbnailNumberText: {
+        color: COLORS.text,
+        fontSize: 9,
+        fontWeight: '900',
+    },
+    thumbnailStatus: {
+        position: 'absolute',
+        top: 3,
+        right: 3,
+        width: 19,
+        height: 19,
+        borderRadius: 9.5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    thumbnailSuccess: {
+        backgroundColor: COLORS.success,
+    },
+    thumbnailError: {
+        backgroundColor: COLORS.danger,
+    },
+    toolBar: {
+        height: 60,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.border,
+    },
+    toolButton: {
+        flex: 1,
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    toolButtonText: {
+        color: COLORS.subText,
+        fontSize: 11,
+        fontWeight: '800',
+        marginTop: 4,
+    },
+    deleteText: {
+        color: COLORS.danger,
+    },
+    toolDivider: {
+        width: 1,
+        height: 28,
+        backgroundColor: COLORS.border,
+    },
+    bottomActionArea: {
+        minHeight: 83,
+        paddingHorizontal: 14,
+        paddingTop: 8,
+        paddingBottom: 5,
+        marginBottom: 5,
+        backgroundColor: COLORS.background,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.border,
+    },
+    privacyNote: {
+        color: COLORS.muted,
+        fontSize: 10,
+        textAlign: 'center',
+        marginBottom: 7,
+    },
+    analyzeButton: {
+        height: 48,
+        borderRadius: 6,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.primary,
+    },
+    analyzeButtonText: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: '900',
+        textAlign: 'center',
+        marginLeft: 9,
+    },
+    ocrOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 50,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.84)',
+    },
+    ocrPanel: {
+        width: '100%',
+        maxWidth: 350,
+        padding: 24,
+        borderRadius: 8,
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    ocrIconBox: {
+        width: 58,
+        height: 58,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.elevated,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    ocrTitle: {
+        color: COLORS.text,
+        fontSize: 18,
+        fontWeight: '900',
+        marginTop: 15,
+    },
+    ocrMessage: {
+        color: COLORS.subText,
+        fontSize: 13,
+        marginTop: 6,
+    },
+    progressTrack: {
+        width: '100%',
+        height: 6,
+        marginTop: 18,
+        overflow: 'hidden',
+        borderRadius: 3,
+        backgroundColor: COLORS.elevated,
+    },
+    progressFill: {
+        height: '100%',
+        borderRadius: 3,
+        backgroundColor: COLORS.primary,
+    },
+    ocrPrivacyText: {
+        color: COLORS.success,
+        fontSize: 11,
+        lineHeight: 17,
+        textAlign: 'center',
+        marginTop: 14,
+    },
+    cancelOcrButton: {
+        minWidth: 100,
+        height: 42,
+        marginTop: 18,
+        borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(239, 68, 68, 0.10)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 68, 68, 0.35)',
+    },
+    cancelOcrButtonText: {
+        color: COLORS.danger,
+        fontSize: 13,
+        fontWeight: '900',
+    },
+    emptyState: {
+        flex: 1,
+        paddingHorizontal: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyTitle: {
+        color: COLORS.text,
+        fontSize: 20,
+        fontWeight: '900',
+        marginTop: 16,
+    },
+    emptyMessage: {
+        color: COLORS.subText,
+        fontSize: 14,
+        lineHeight: 21,
+        textAlign: 'center',
+        marginTop: 8,
+    },
+    emptyButton: {
+        minHeight: 50,
+        marginTop: 22,
+        borderRadius: 7,
+        paddingHorizontal: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.primary,
+    },
+    emptyButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: '900',
+    },
 });

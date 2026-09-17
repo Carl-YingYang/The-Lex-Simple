@@ -1,56 +1,149 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
+import React, { useCallback } from 'react';
+import {
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { COLORS } from '../theme/globalStyles';
+
 import { useBackgroundProcess } from '../context/BackgroundProcessContext';
 import { useTheme } from '../theme/ThemeContext';
 
+// FLOATING PROCESS INDICATOR VERSION: 1.0.0
+// Compact, non-animated access point for the active in-app process.
+const PRIMARY = '#3478F6';
+const PRIMARY_SOFT = '#66A0FF';
+
+const clampProgress = (value: unknown): number => {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+        return 0;
+    }
+
+    return Math.min(100, Math.max(0, Math.round(numericValue)));
+};
+
 export default function FloatingProcessIndicator() {
-    const { isProcessing, processRoute } = useBackgroundProcess();
+    const {
+        isProcessing,
+        processRoute,
+        progress,
+    } = useBackgroundProcess();
     const { colors: T } = useTheme();
     const navigation = useNavigation<any>();
-    const spinValue = useRef(new Animated.Value(0)).current;
+    const safeProgress = clampProgress(progress);
+    const canOpenProcess = processRoute.trim().length > 0;
 
-    useEffect(() => {
-        if (isProcessing) {
-            Animated.loop(
-                Animated.timing(spinValue, {
-                    toValue: 1,
-                    duration: 1000,
-                    easing: Easing.linear,
-                    useNativeDriver: true,
-                })
-            ).start();
-        } else {
-            spinValue.stopAnimation();
-            spinValue.setValue(0);
+    const handlePress = useCallback((): void => {
+        if (!canOpenProcess) {
+            return;
         }
-    }, [isProcessing]);
 
-    if (!isProcessing) return null;
+        navigation.navigate(processRoute);
+    }, [canOpenProcess, navigation, processRoute]);
 
-    const spin = spinValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-    });
-
-    const handlePress = () => {
-        if (processRoute) {
-            navigation.navigate(processRoute);
-        }
-    };
+    if (!isProcessing) {
+        return null;
+    }
 
     return (
-        // 🚀 FIXED: Hindi na full width ang wrapper para hindi makaharang ng touches
-        <View style={styles.wrapper}>
-            <TouchableOpacity onPress={handlePress} activeOpacity={0.8}>
-                <View style={[styles.pill, { backgroundColor: T.card, borderColor: T.border }]}>
-                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                        <Ionicons name="sync-circle" size={20} color={COLORS.primaryLight} />
-                    </Animated.View>
-                    <Text style={[styles.text, { color: T.text }]}>Processing...</Text>
-                    <Ionicons name="chevron-forward" size={16} color={COLORS.primaryLight} style={{ marginLeft: 6 }} />
+        <View
+            pointerEvents="box-none"
+            style={styles.wrapper}
+        >
+            <TouchableOpacity
+                testID="floating-process-indicator-v1"
+                style={[
+                    styles.card,
+                    {
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                    },
+                    !canOpenProcess && styles.cardDisabled,
+                ]}
+                onPress={handlePress}
+                disabled={!canOpenProcess}
+                activeOpacity={0.84}
+                accessibilityRole="button"
+                accessibilityLabel="Bumalik sa kasalukuyang document analysis"
+                accessibilityHint={
+                    canOpenProcess
+                        ? 'Binubuksan ang screen ng kasalukuyang proseso.'
+                        : undefined
+                }
+            >
+                <View
+                    style={[
+                        styles.iconBox,
+                        { backgroundColor: `${PRIMARY}18` },
+                    ]}
+                >
+                    <Ionicons
+                        name="document-text-outline"
+                        size={20}
+                        color={PRIMARY_SOFT}
+                    />
+                </View>
+
+                <View style={styles.content}>
+                    <View style={styles.titleRow}>
+                        <Text
+                            numberOfLines={1}
+                            style={[
+                                styles.title,
+                                { color: T.text },
+                            ]}
+                        >
+                            Sinusuri ang dokumento
+                        </Text>
+
+                        {safeProgress > 0 && (
+                            <Text
+                                style={[
+                                    styles.progressValue,
+                                    { color: T.subText },
+                                ]}
+                            >
+                                {safeProgress}%
+                            </Text>
+                        )}
+                    </View>
+
+                    <Text
+                        numberOfLines={1}
+                        style={[
+                            styles.subtitle,
+                            { color: T.subText },
+                        ]}
+                    >
+                        I-tap para bumalik sa proseso
+                    </Text>
+
+                    <View
+                        accessible
+                        accessibilityRole="progressbar"
+                        accessibilityLabel="Progreso ng pagsusuri"
+                        accessibilityValue={{
+                            min: 0,
+                            max: 100,
+                            now: safeProgress,
+                            text: `${safeProgress} porsyento`,
+                        }}
+                        style={[
+                            styles.progressTrack,
+                            { backgroundColor: T.border },
+                        ]}
+                    >
+                        <View
+                            style={[
+                                styles.progressFill,
+                                { width: `${safeProgress}%` },
+                            ]}
+                        />
+                    </View>
                 </View>
             </TouchableOpacity>
         </View>
@@ -60,26 +153,73 @@ export default function FloatingProcessIndicator() {
 const styles = StyleSheet.create({
     wrapper: {
         position: 'absolute',
-        top: 80,
-        alignSelf: 'center', // 🚀 Naka-center lang siya, hindi na sumasakop sa buong screen
-        zIndex: 9999,
-        elevation: 10,
+        left: 14,
+        right: 14,
+        bottom: 88,
+        zIndex: 1000,
+        elevation: 8,
+        alignItems: 'center',
     },
-    pill: {
+    card: {
+        width: '100%',
+        maxWidth: 410,
+        minHeight: 64,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderRadius: 10,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-        borderWidth: 1,
-        shadowColor: '#000',
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        shadowOffset: { width: 0, height: 2 },
     },
-    text: {
-        marginLeft: 8,
+    cardDisabled: {
+        opacity: 0.72,
+    },
+    iconBox: {
+        width: 40,
+        height: 40,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    content: {
+        flex: 1,
+        minWidth: 0,
+        marginLeft: 11,
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    title: {
+        flex: 1,
+        minWidth: 0,
         fontSize: 13,
-        fontWeight: 'bold',
-    }
+        lineHeight: 18,
+        fontWeight: '900',
+    },
+    progressValue: {
+        marginLeft: 10,
+        fontSize: 11,
+        lineHeight: 16,
+        fontWeight: '900',
+        fontVariant: ['tabular-nums'],
+    },
+    subtitle: {
+        marginTop: 1,
+        fontSize: 10,
+        lineHeight: 15,
+        fontWeight: '500',
+    },
+    progressTrack: {
+        width: '100%',
+        height: 3,
+        marginTop: 7,
+        borderRadius: 2,
+        overflow: 'hidden',
+    },
+    progressFill: {
+        height: '100%',
+        borderRadius: 2,
+        backgroundColor: PRIMARY,
+    },
 });

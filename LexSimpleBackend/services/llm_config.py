@@ -1,22 +1,54 @@
 import os
+
 from dotenv import load_dotenv
 from openai import OpenAI
+
 from core.config import settings
+
 
 load_dotenv()
 
-# Gamitin natin ang GROQ API keys
-GROQ_API_KEY = settings.GROQ_API_KEY
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
-# 🧠 MODELS (UPDATED TO LATEST GROQ SUPPORTED MODELS): 
-# Llama 3.3 70B = Replacement for the old 70B (Para sa /simplify at /chat)
-CHAT_MODEL = "llama-3.3-70b-versatile"
-# Llama 3.1 8B = Replacement for the old 8B (Para sa /dictionary at /explain)
-EXTRACT_MODEL = "llama-3.1-8b-instant"
+CHAT_MODEL = os.getenv(
+    "GROQ_CHAT_MODEL",
+    "openai/gpt-oss-20b",
+).strip()
 
-def get_ai_client():
-    # 💡 GROQ COMPATIBILITY: OpenAI SDK gamitin natin, pero baguhin yung base_url papunta sa Groq
+EXTRACT_MODEL = os.getenv(
+    "GROQ_EXTRACT_MODEL",
+    "llama-3.1-8b-instant",
+).strip()
+
+
+def _get_groq_api_key() -> str:
+    configured_key = getattr(
+        settings,
+        "GROQ_API_KEY",
+        None,
+    )
+
+    if hasattr(configured_key, "get_secret_value"):
+        configured_key = configured_key.get_secret_value()
+
+    api_key = configured_key or os.getenv(
+        "GROQ_API_KEY",
+        "",
+    )
+    normalized_key = str(api_key).strip()
+
+    if not normalized_key:
+        raise RuntimeError(
+            "Missing GROQ_API_KEY. Add it to the backend .env file."
+        )
+
+    return normalized_key
+
+
+def get_ai_client() -> OpenAI:
     return OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
+        api_key=_get_groq_api_key(),
+        base_url=GROQ_BASE_URL,
+        timeout=120.0,
+        max_retries=2,
     )

@@ -1,365 +1,714 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../../../theme/globalStyles';
+
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { postEndpoint } from '../../../services/AiEngine';
 
-const CATEGORIES = [
-  { id: 'all', label: 'All Terms', keywords: [] },
-  { id: 'contracts', label: 'Contracts', keywords: ['contract', 'agreement', 'void', 'consent', 'breach', 'obligation', 'party', 'terms', 'stipulation'] },
-  { id: 'loans', label: 'Loans & Debt', keywords: ['loan', 'debt', 'interest', 'usury', 'mortgage', 'pledge', 'pay', 'credit', 'finance', 'lending', 'creditor', 'borrower', 'installment'] },
-  { id: 'rent', label: 'Rent & Lease', keywords: ['rent', 'lease', 'tenant', 'landlord', 'eviction', 'deposit', 'lessor', 'lessee', 'property'] },
-];
-
+const PRIMARY = '#3478F6';
+const PRIMARY_SOFT = '#66A0FF';
+const WARNING = '#F59E0B';
 const ITEMS_PER_PAGE = 20;
 
+type DictionaryItem = {
+    term?: string;
+    definition?: string;
+    legal_basis?: string;
+    [key: string]: unknown;
+};
+
+type Category = {
+    id: string;
+    label: string;
+    keywords: string[];
+};
+
+const CATEGORIES: Category[] = [
+    {
+        id: 'all',
+        label: 'Lahat',
+        keywords: [],
+    },
+    {
+        id: 'contracts',
+        label: 'Kontrata',
+        keywords: [
+            'contract',
+            'agreement',
+            'void',
+            'consent',
+            'breach',
+            'obligation',
+            'party',
+            'terms',
+            'stipulation',
+        ],
+    },
+    {
+        id: 'loans',
+        label: 'Utang',
+        keywords: [
+            'loan',
+            'debt',
+            'interest',
+            'usury',
+            'mortgage',
+            'pledge',
+            'pay',
+            'credit',
+            'finance',
+            'lending',
+            'creditor',
+            'borrower',
+            'installment',
+        ],
+    },
+    {
+        id: 'rent',
+        label: 'Upa',
+        keywords: [
+            'rent',
+            'lease',
+            'tenant',
+            'landlord',
+            'eviction',
+            'deposit',
+            'lessor',
+            'lessee',
+            'property',
+        ],
+    },
+];
+
+const getItemKey = (
+    item: DictionaryItem,
+    index: number
+): string => {
+    const term = String(item.term || 'legal-term')
+        .trim()
+        .toLocaleLowerCase();
+
+    return `${term}-${index}`;
+};
+
 export default function DictionaryDetailScreen({ route }: any) {
-  const { dictionaryData } = route.params || { dictionaryData: [] };
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [expandedItems, setExpandedItems] = useState<number[]>([]);
+    const routeData = route?.params?.dictionaryData;
+    const dictionaryData: DictionaryItem[] = Array.isArray(routeData)
+        ? routeData
+        : [];
 
-  const [visibleData, setVisibleData] = useState<any[]>([]);
-  const [currentPage, setCurrentPage] = useState(1);
+    const [activeCategory, setActiveCategory] = useState('all');
+    const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+    const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+    const [loadingAiKey, setLoadingAiKey] = useState<string | null>(
+        null
+    );
+    const [aiExplanations, setAiExplanations] = useState<
+        Record<string, string>
+    >({});
+    const [activeAiKey, setActiveAiKey] = useState<string | null>(null);
 
-  const [loadingAi, setLoadingAi] = useState<Record<number, boolean>>({});
-  const [aiExplanations, setAiExplanations] = useState<Record<number, any>>({});
-  const [activeAiIndex, setActiveAiIndex] = useState<number | null>(null);
-  const [isFetchingAi, setIsFetchingAi] = useState(false);
+    const { showAlert, AlertRender } = useCustomAlert();
+    const { colors: T } = useTheme();
 
-  const { showAlert, AlertRender } = useCustomAlert();
-  const { colors: T } = useTheme();
+    const filteredData = useMemo(() => {
+        if (activeCategory === 'all') {
+            return dictionaryData;
+        }
 
-  const filteredData = useMemo(() => {
-    if (activeCategory === 'all') return dictionaryData;
-    const cat = CATEGORIES.find(c => c.id === activeCategory);
-    if (!cat) return dictionaryData;
+        const category = CATEGORIES.find(
+            (item) => item.id === activeCategory
+        );
 
-    return dictionaryData.filter((item: any) => {
-      const text = String(item.term || '') + " " + String(item.definition || '');
-      return cat.keywords.some(kw => text.toLowerCase().includes(kw));
-    });
-  }, [dictionaryData, activeCategory]);
+        if (!category) {
+            return dictionaryData;
+        }
 
-  useEffect(() => {
-    setCurrentPage(1);
-    setActiveAiIndex(null);
-    setIsFetchingAi(false);
-    setVisibleData(filteredData.slice(0, ITEMS_PER_PAGE));
-  }, [filteredData]);
+        return dictionaryData.filter((item) => {
+            const searchableText = `${String(
+                item.term || ''
+            )} ${String(item.definition || '')}`.toLocaleLowerCase();
 
-  const loadMoreItems = () => {
-    const currentLength = visibleData.length;
-    const nextBatch = filteredData.slice(currentLength, currentLength + ITEMS_PER_PAGE);
-    if (nextBatch.length > 0) {
-      setVisibleData(prev => [...prev, ...nextBatch]);
-      setCurrentPage(prev => prev + 1);
-    }
-  };
+            return category.keywords.some((keyword) =>
+                searchableText.includes(keyword)
+            );
+        });
+    }, [activeCategory, dictionaryData]);
 
-  const toggleExpand = (index: number) => {
-    if (expandedItems.includes(index)) {
-      setExpandedItems(expandedItems.filter(i => i !== index));
-    } else {
-      setExpandedItems([...expandedItems, index]);
-    }
-  };
+    const visibleData = useMemo(
+        () => filteredData.slice(0, visibleCount),
+        [filteredData, visibleCount]
+    );
 
-  const handleExplainAI = async (index: number, term: string, rawText: string) => {
-    if (activeAiIndex === index) {
-      setActiveAiIndex(null);
-      return;
-    }
+    useEffect(() => {
+        setVisibleCount(ITEMS_PER_PAGE);
+        setExpandedKeys([]);
+        setActiveAiKey(null);
+        setLoadingAiKey(null);
+    }, [activeCategory]);
 
-    if (isFetchingAi) {
-      showAlert("Sandali lang", "Nagpoproseso pa ang AI ng isang article. Isa-isa lang muna.");
-      return;
-    }
+    const loadMoreItems = (): void => {
+        if (visibleCount >= filteredData.length) {
+            return;
+        }
 
-    setActiveAiIndex(index);
+        setVisibleCount((current) =>
+            Math.min(current + ITEMS_PER_PAGE, filteredData.length)
+        );
+    };
 
-    if (aiExplanations[index]) {
-      return;
-    }
+    const toggleExpanded = (itemKey: string): void => {
+        setExpandedKeys((current) =>
+            current.includes(itemKey)
+                ? current.filter((key) => key !== itemKey)
+                : [...current, itemKey]
+        );
+    };
 
-    setLoadingAi(prev => ({ ...prev, [index]: true }));
-    setIsFetchingAi(true);
+    const handleExplainAI = async (
+        itemKey: string,
+        term: string,
+        rawText: string
+    ): Promise<void> => {
+        if (activeAiKey === itemKey) {
+            setActiveAiKey(null);
+            return;
+        }
 
-    try {
-      const data = await postEndpoint('/explain', { title: term, raw_text: rawText });
+        if (loadingAiKey && loadingAiKey !== itemKey) {
+            showAlert(
+                'Sandali lang',
+                'May isang paliwanag pang ginagawa. Hintayin muna itong matapos.',
+                'info'
+            );
+            return;
+        }
 
-      if (data && data.status === 'success') {
-        const explanationText = data.data?.definition || data.definition || "No explanation available.";
-        setAiExplanations(prev => ({ ...prev, [index]: { definition: explanationText } }));
-      } else {
-        showAlert("AI Busy", "Medyo marami lang iniisip si Lex-Simple. Pakisubukan ulit mamaya.");
-        setActiveAiIndex(null);
-      }
-    } catch (error) {
-      console.error(error);
-      showAlert("Connection Error", "Hindi maka-connect sa server. Check mo kung naka-run ang backend mo.");
-      setActiveAiIndex(null);
-    } finally {
-      setLoadingAi(prev => ({ ...prev, [index]: false }));
-      setIsFetchingAi(false);
-    }
-  };
+        setActiveAiKey(itemKey);
 
-  const renderDictionaryCard = ({ item, index }: any) => {
-    const isExpanded = expandedItems.includes(index);
-    const defText = String(item.definition || '');
-    const shouldTruncate = defText.length > 250;
-    const displayText = (!isExpanded && shouldTruncate) ? defText.substring(0, 250) + '...' : defText;
+        if (aiExplanations[itemKey]) {
+            return;
+        }
 
-    const isLoading = loadingAi[index];
-    const isAiOpen = activeAiIndex === index;
-    const aiData = aiExplanations[index];
+        setLoadingAiKey(itemKey);
+
+        try {
+            const data = await postEndpoint('/explain', {
+                title: term,
+                raw_text: rawText,
+            });
+
+            if (data?.status !== 'success') {
+                throw new Error(
+                    data?.message || 'AI explanation failed.'
+                );
+            }
+
+            const explanation =
+                data.data?.definition ||
+                data.definition ||
+                'Walang paliwanag na available.';
+
+            setAiExplanations((current) => ({
+                ...current,
+                [itemKey]: String(explanation),
+            }));
+        } catch (error) {
+            console.error('[Dictionary] AI explanation failed:', error);
+            setActiveAiKey(null);
+            showAlert(
+                'Hindi makakuha ng paliwanag',
+                'Suriin ang internet at backend, pagkatapos ay subukan ulit.',
+                'error'
+            );
+        } finally {
+            setLoadingAiKey(null);
+        }
+    };
+
+    const renderDictionaryCard = ({
+        item,
+        index,
+    }: {
+        item: DictionaryItem;
+        index: number;
+    }) => {
+        const itemKey = getItemKey(item, index);
+        const isExpanded = expandedKeys.includes(itemKey);
+        const isLoading = loadingAiKey === itemKey;
+        const isAiOpen = activeAiKey === itemKey;
+        const explanation = aiExplanations[itemKey];
+        const definition = String(
+            item.definition || 'Walang legal text na available.'
+        );
+        const shouldTruncate = definition.length > 350;
+        const displayText =
+            !isExpanded && shouldTruncate
+                ? `${definition.slice(0, 350).trim()}...`
+                : definition;
+
+        return (
+            <View
+                style={[
+                    styles.card,
+                    {
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                    },
+                ]}
+            >
+                <Text
+                    style={[styles.termTitle, { color: T.text }]}
+                    selectable
+                >
+                    {item.term || 'Legal Term'}
+                </Text>
+
+                <Text
+                    style={[styles.basisText, { color: PRIMARY_SOFT }]}
+                    numberOfLines={2}
+                >
+                    {item.legal_basis ||
+                        'Philippine legal reference'}
+                </Text>
+
+                <View
+                    style={[
+                        styles.legalTextBox,
+                        {
+                            backgroundColor: T.bg,
+                            borderColor: T.border,
+                        },
+                    ]}
+                >
+                    <Text
+                        style={[
+                            styles.legalTextLabel,
+                            { color: T.subText },
+                        ]}
+                    >
+                        Legal text
+                    </Text>
+                    <Text
+                        style={[styles.legalText, { color: T.text }]}
+                        selectable
+                    >
+                        {displayText}
+                    </Text>
+
+                    <View style={styles.actionRow}>
+                        {shouldTruncate ? (
+                            <TouchableOpacity
+                                style={styles.textButton}
+                                onPress={() => toggleExpanded(itemKey)}
+                                accessibilityRole="button"
+                            >
+                                <Text style={styles.textButtonLabel}>
+                                    {isExpanded
+                                        ? 'Paikliin'
+                                        : 'Basahin lahat'}
+                                </Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <View />
+                        )}
+
+                        <TouchableOpacity
+                            style={[
+                                styles.aiButton,
+                                isAiOpen && styles.aiButtonOpen,
+                                loadingAiKey &&
+                                    loadingAiKey !== itemKey &&
+                                    styles.disabledButton,
+                            ]}
+                            onPress={() =>
+                                void handleExplainAI(
+                                    itemKey,
+                                    String(item.term || 'Legal Term'),
+                                    definition
+                                )
+                            }
+                            disabled={
+                                Boolean(loadingAiKey) &&
+                                loadingAiKey !== itemKey
+                            }
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                                isAiOpen
+                                    ? 'Isara ang paliwanag'
+                                    : 'Ipaliwanag gamit ang AI'
+                            }
+                        >
+                            {isLoading ? (
+                                <ActivityIndicator
+                                    size="small"
+                                    color="#FFFFFF"
+                                />
+                            ) : (
+                                <>
+                                    <Ionicons
+                                        name={
+                                            isAiOpen
+                                                ? 'close-outline'
+                                                : 'chatbubble-ellipses-outline'
+                                        }
+                                        size={16}
+                                        color="#FFFFFF"
+                                    />
+                                    <Text style={styles.aiButtonText}>
+                                        {isAiOpen
+                                            ? 'Isara'
+                                            : 'Ipaliwanag'}
+                                    </Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {isAiOpen && explanation && (
+                    <View
+                        style={[
+                            styles.aiResultBox,
+                            {
+                                backgroundColor: T.bg,
+                                borderColor: T.border,
+                            },
+                        ]}
+                    >
+                        <View style={styles.aiResultHeader}>
+                            <Ionicons
+                                name="sparkles-outline"
+                                size={16}
+                                color={WARNING}
+                            />
+                            <Text
+                                style={[
+                                    styles.aiResultTitle,
+                                    { color: T.text },
+                                ]}
+                            >
+                                Simpleng paliwanag
+                            </Text>
+                        </View>
+                        <Text
+                            style={[
+                                styles.aiResultText,
+                                { color: T.text },
+                            ]}
+                            selectable
+                        >
+                            {explanation}
+                        </Text>
+                    </View>
+                )}
+            </View>
+        );
+    };
 
     return (
-      <View style={[uiStyles.card, { backgroundColor: T.card, borderColor: T.border }]}>
-        <View>
-          <Text style={[uiStyles.termTitle, { color: T.text }]}>{item.term || 'Unknown Term'}</Text>
-          <Text style={[uiStyles.basisText, { color: COLORS.primaryLight }]} numberOfLines={2}>
-            {item.legal_basis || 'RA 386: Civil Code of the Philippines'}
-          </Text>
-        </View>
+        <ScreenLayout title="Offline Dictionary" noPadding>
+            <View style={[styles.screen, { backgroundColor: T.bg }]}> 
+                <View style={styles.summaryRow}>
+                    <View style={styles.summaryCopy}>
+                        <Text
+                            style={[
+                                styles.summaryTitle,
+                                { color: T.text },
+                            ]}
+                        >
+                            Pumili ng paksa
+                        </Text>
+                        <Text
+                            style={[
+                                styles.summaryText,
+                                { color: T.subText },
+                            ]}
+                        >
+                            {filteredData.length} legal terms
+                        </Text>
+                    </View>
+                </View>
 
-        <View style={[uiStyles.divider, { backgroundColor: T.border }]} />
+                <View style={styles.categorySection}>
+                    <FlatList
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        data={CATEGORIES}
+                        keyExtractor={(item) => item.id}
+                        contentContainerStyle={styles.categoryContent}
+                        renderItem={({ item }) => {
+                            const selected = activeCategory === item.id;
 
-        <View>
-          <Text style={[uiStyles.contentTitle, { color: T.subText }]}>RAW LEGAL PROVISION</Text>
-          <View style={[uiStyles.innerBox, { backgroundColor: T.bg, borderColor: T.border }]}>
-            <Text style={[uiStyles.chunkText, { color: T.text }]}>"{displayText}"</Text>
-
-            <View style={uiStyles.actionButtonsContainer}>
-              {shouldTruncate && (
-                <TouchableOpacity onPress={() => toggleExpand(index)} style={uiStyles.expandBtn}>
-                  <Text style={uiStyles.expandBtnText}>{isExpanded ? 'Show Less' : 'Read Full Text'}</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity
-                onPress={() => handleExplainAI(index, item.term, defText)}
-                style={[
-                  uiStyles.aiButton,
-                  isAiOpen ? { backgroundColor: '#3B0764' } : null,
-                  (isFetchingAi && !isLoading) ? { opacity: 0.5 } : null
-                ]}
-                disabled={isFetchingAi && !isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    {/* 🚀 CUSTOM CHAT AI ICON (Applied white tintColor) */}
-                    <Image
-                      source={require('../../../../assets/icons/chat_ai.png')}
-                      style={{ width: 14, height: 14, marginRight: 5, tintColor: '#FFFFFF' }}
-                      resizeMode="contain"
+                            return (
+                                <TouchableOpacity
+                                    style={[
+                                        styles.categoryButton,
+                                        {
+                                            backgroundColor: selected
+                                                ? PRIMARY
+                                                : T.card,
+                                            borderColor: selected
+                                                ? PRIMARY
+                                                : T.border,
+                                        },
+                                    ]}
+                                    onPress={() =>
+                                        setActiveCategory(item.id)
+                                    }
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected }}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.categoryButtonText,
+                                            {
+                                                color: selected
+                                                    ? '#FFFFFF'
+                                                    : T.subText,
+                                            },
+                                        ]}
+                                    >
+                                        {item.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        }}
                     />
-                    <Text style={uiStyles.aiButtonText}>{isAiOpen ? 'Close AI' : 'Explain via AI'}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+                </View>
 
-        {isAiOpen && aiData && (
-          <View style={[uiStyles.aiResultBox, { backgroundColor: T.bg, borderColor: COLORS.primaryLight }]}>
-            <View style={uiStyles.aiHeaderRow}>
-              {/* 🚀 REVERTED TO BULB ICON */}
-              <Ionicons name="bulb" size={16} color={COLORS.warning} />
-              <Text style={uiStyles.aiResultTitle}>Explanation</Text>
+                <FlatList
+                    data={visibleData}
+                    keyExtractor={(item, index) =>
+                        getItemKey(item, index)
+                    }
+                    renderItem={renderDictionaryCard}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.listContent}
+                    onEndReached={loadMoreItems}
+                    onEndReachedThreshold={0.4}
+                    ListEmptyComponent={
+                        <View style={styles.emptyState}>
+                            <View
+                                style={[
+                                    styles.emptyIcon,
+                                    {
+                                        backgroundColor: T.card,
+                                        borderColor: T.border,
+                                    },
+                                ]}
+                            >
+                                <Ionicons
+                                    name="book-outline"
+                                    size={29}
+                                    color={T.subText}
+                                />
+                            </View>
+                            <Text
+                                style={[
+                                    styles.emptyTitle,
+                                    { color: T.text },
+                                ]}
+                            >
+                                Walang term sa category na ito
+                            </Text>
+                        </View>
+                    }
+                    ListFooterComponent={
+                        visibleData.length > 0 ? (
+                            <Text
+                                style={[
+                                    styles.footerText,
+                                    { color: T.subText },
+                                ]}
+                            >
+                                {visibleData.length} sa{' '}
+                                {filteredData.length} terms
+                            </Text>
+                        ) : null
+                    }
+                />
             </View>
-            <Text style={[uiStyles.aiDefinitionText, { color: T.text }]}>{aiData.definition}</Text>
-          </View>
-        )}
-      </View>
+
+            <AlertRender />
+        </ScreenLayout>
     );
-  };
-
-  return (
-    <ScreenLayout title="Offline Dictionary" noPadding={true}>
-      <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: 10 }}>
-
-        {/* CATEGORIES */}
-        <View style={{ marginBottom: 16 }}>
-          <FlatList
-            horizontal={true}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 16 }}
-            data={CATEGORIES}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  uiStyles.categoryBtn,
-                  { backgroundColor: T.card, borderColor: activeCategory === item.id ? COLORS.primary : T.border },
-                  activeCategory === item.id && { backgroundColor: COLORS.primary }
-                ]}
-                onPress={() => setActiveCategory(item.id)}
-              >
-                <Text style={[uiStyles.categoryBtnText, { color: activeCategory === item.id ? '#fff' : T.subText }]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
-        </View>
-
-        {/* LIST */}
-        <FlatList
-          data={visibleData}
-          keyExtractor={(item, index) => String(index)}
-          renderItem={renderDictionaryCard}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
-          showsVerticalScrollIndicator={false}
-          onEndReached={loadMoreItems}
-          onEndReachedThreshold={0.5}
-          ListEmptyComponent={
-            <View style={uiStyles.emptyContainer}>
-              <Ionicons name="folder-open-outline" size={40} color={T.subText} />
-              <Text style={[uiStyles.emptyText, { color: T.subText }]}>Walang nahanap.</Text>
-            </View>
-          }
-          ListFooterComponent={
-            visibleData.length > 0 ? (
-              <View style={uiStyles.footerContainer}>
-                {visibleData.length < filteredData.length ? (
-                  <ActivityIndicator size="small" color={COLORS.primaryLight} />
-                ) : (
-                  <Text style={[uiStyles.endOfListText, { color: T.subText }]}>Nasa pinakadulo ka na.</Text>
-                )}
-              </View>
-            ) : null
-          }
-        />
-      </View>
-      <AlertRender />
-    </ScreenLayout>
-  );
 }
 
-const uiStyles = StyleSheet.create({
-  card: {
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-  },
-  termTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  basisText: {
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  divider: {
-    height: 1,
-    marginVertical: 12,
-  },
-  contentTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 6,
-  },
-  innerBox: {
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 12,
-  },
-  chunkText: {
-    fontSize: 14,
-    fontStyle: 'italic',
-    lineHeight: 20,
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    marginTop: 12,
-    gap: 8,
-  },
-  expandBtn: {
-    paddingVertical: 4,
-  },
-  expandBtnText: {
-    color: COLORS.primaryLight,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  aiButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  aiButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12
-  },
-  aiResultBox: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 14,
-  },
-  aiHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    gap: 6
-  },
-  aiResultTitle: {
-    fontWeight: 'bold',
-    color: COLORS.warning,
-    fontSize: 12,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase'
-  },
-  aiDefinitionText: {
-    fontSize: 13,
-    lineHeight: 22
-  },
-  categoryBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginRight: 10,
-  },
-  categoryBtnText: {
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    marginTop: 50,
-  },
-  emptyText: {
-    marginTop: 15,
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  footerContainer: {
-    paddingVertical: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
-  },
-  endOfListText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    fontWeight: '500'
-  }
+const styles = StyleSheet.create({
+    screen: {
+        flex: 1,
+    },
+    summaryRow: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 9,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    summaryCopy: {
+        flex: 1,
+    },
+    summaryTitle: {
+        fontSize: 14,
+        fontWeight: '900',
+    },
+    summaryText: {
+        marginTop: 2,
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    categorySection: {
+        paddingBottom: 12,
+    },
+    categoryContent: {
+        paddingHorizontal: 16,
+        gap: 7,
+    },
+    categoryButton: {
+        minHeight: 36,
+        borderRadius: 6,
+        borderWidth: 1,
+        paddingHorizontal: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    categoryButtonText: {
+        fontSize: 11,
+        fontWeight: '800',
+    },
+    listContent: {
+        paddingHorizontal: 16,
+        paddingBottom: 40,
+        flexGrow: 1,
+    },
+    card: {
+        borderRadius: 7,
+        borderWidth: 1,
+        padding: 14,
+        marginBottom: 10,
+    },
+    termTitle: {
+        fontSize: 18,
+        lineHeight: 23,
+        fontWeight: '900',
+    },
+    basisText: {
+        marginTop: 3,
+        fontSize: 11,
+        lineHeight: 15,
+        fontWeight: '700',
+    },
+    legalTextBox: {
+        marginTop: 12,
+        borderRadius: 7,
+        borderWidth: 1,
+        padding: 12,
+    },
+    legalTextLabel: {
+        marginBottom: 6,
+        fontSize: 10,
+        fontWeight: '900',
+    },
+    legalText: {
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    actionRow: {
+        minHeight: 36,
+        marginTop: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+    },
+    textButton: {
+        minHeight: 34,
+        paddingRight: 8,
+        justifyContent: 'center',
+    },
+    textButtonLabel: {
+        color: PRIMARY_SOFT,
+        fontSize: 11,
+        fontWeight: '900',
+    },
+    aiButton: {
+        minWidth: 105,
+        minHeight: 36,
+        borderRadius: 6,
+        paddingHorizontal: 11,
+        backgroundColor: PRIMARY,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    aiButtonOpen: {
+        backgroundColor: '#475569',
+    },
+    aiButtonText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '900',
+    },
+    disabledButton: {
+        opacity: 0.45,
+    },
+    aiResultBox: {
+        marginTop: 10,
+        borderRadius: 7,
+        borderWidth: 1,
+        padding: 12,
+    },
+    aiResultHeader: {
+        marginBottom: 7,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    aiResultTitle: {
+        fontSize: 12,
+        fontWeight: '900',
+    },
+    aiResultText: {
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    emptyState: {
+        flex: 1,
+        minHeight: 260,
+        paddingHorizontal: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyIcon: {
+        width: 58,
+        height: 58,
+        borderRadius: 8,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 12,
+    },
+    emptyTitle: {
+        fontSize: 14,
+        fontWeight: '900',
+        textAlign: 'center',
+    },
+    footerText: {
+        paddingVertical: 18,
+        textAlign: 'center',
+        fontSize: 10,
+        fontWeight: '700',
+    },
 });
