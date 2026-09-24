@@ -35,7 +35,7 @@ type Finding = {
 };
 
 type AnalysisResult = {
-    score: number;
+    score: number | null;
     riskLevel: string;
     documentTitle?: string;
     findings: Finding[];
@@ -56,17 +56,28 @@ type BreakdownFindingProps = {
     theme: any;
 };
 
-const clampScore = (value: unknown): number => {
+const clampScore = (value: unknown): number | null => {
+    if (value === null || value === undefined) {
+        return null;
+    }
     const parsed = Number(value);
 
     if (!Number.isFinite(parsed)) {
-        return 100;
+        return null;
     }
 
     return Math.max(0, Math.min(100, Math.round(parsed)));
 };
 
-const getRiskConfig = (score: number): RiskConfig => {
+const getRiskConfig = (score: number | null): RiskConfig => {
+    if (score === null) {
+        return {
+            mainColor: PRIMARY_SOFT,
+            icon: 'information-circle-outline',
+            label: 'NO FINDINGS DETECTED',
+            shortLabel: 'Kailangang suriin',
+        };
+    }
     if (score >= 90) {
         return {
             mainColor: SUCCESS,
@@ -150,15 +161,19 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
         : Array.isArray(payload.clauses)
           ? payload.clauses
           : [];
-    const score = clampScore(payload.score ?? payload.safety_score);
+    const score = rawFindings.length > 0
+        ? clampScore(payload.score ?? payload.safety_score)
+        : null;
 
     return {
         score,
-        riskLevel: String(
-            payload.riskLevel ??
-                payload.risk_level ??
-                getRiskConfig(score).label
-        ),
+        riskLevel: score === null
+            ? 'No findings detected'
+            : String(
+                  payload.riskLevel ??
+                      payload.risk_level ??
+                      getRiskConfig(score).label
+              ),
         documentTitle: payload.documentTitle
             ? String(payload.documentTitle)
             : payload.document_title
@@ -251,7 +266,9 @@ export default function ResultScreen({ route, navigation }: any) {
     );
     const hasAnalysisResult = Boolean(route?.params?.analysisResult);
     const riskConfig = getRiskConfig(result.score);
-    const totalDeduction = Math.max(0, 100 - result.score);
+    const totalDeduction = result.score === null
+        ? 0
+        : Math.max(0, 100 - result.score);
     const hasExplicitDeductions = result.findings.some(
         (finding) => typeof finding.scoreDeduction === 'number'
     );
@@ -400,7 +417,7 @@ export default function ResultScreen({ route, navigation }: any) {
                           `${index + 1}. ${finding.title}\nPaliwanag: ${finding.description}\nPayo: ${finding.advice}\nNakitang text: ${finding.foundText}`
                   )
                   .join('\n\n')
-            : 'Walang high-risk finding na nakita sa available document text.';
+            : 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.';
         const safeDocumentText = result.sanitizedText
             ? result.sanitizedText.slice(0, 6000)
             : 'Hindi available ang sanitized document text.';
@@ -412,7 +429,9 @@ export default function ResultScreen({ route, navigation }: any) {
                     'Document analysis',
                 data: [
                     'DOCUMENT ANALYSIS',
-                    `Score: ${result.score}/100`,
+                    result.score === null
+                        ? 'Score: Hindi ibinigay (walang na-flag)'
+                        : `Score: ${result.score}/100`,
                     `Risk: ${riskConfig.shortLabel}`,
                     '',
                     'FINDINGS',
@@ -548,7 +567,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.subText },
                             ]}
                         >
-                            DOCUMENT SCORE
+                            FINDING CHECK
                         </Text>
                         <View
                             style={[
@@ -577,16 +596,18 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: riskConfig.mainColor },
                             ]}
                         >
-                            {result.score}
+                            {result.score === null ? '—' : result.score}
                         </Text>
-                        <Text
-                            style={[
-                                styles.scoreMaximum,
-                                { color: T.subText },
-                            ]}
-                        >
-                            /100
-                        </Text>
+                        {result.score !== null && (
+                            <Text
+                                style={[
+                                    styles.scoreMaximum,
+                                    { color: T.subText },
+                                ]}
+                            >
+                                /100
+                            </Text>
+                        )}
                     </View>
 
                     <Text
@@ -596,12 +617,14 @@ export default function ResultScreen({ route, navigation }: any) {
                         ]}
                     >
                         {result.findings.length === 0
-                            ? 'Walang high-risk finding na nakita sa nabasang text.'
+                            ? 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.'
                             : `${result.findings.length} bahagi ang kailangan mong suriin.`}
                     </Text>
 
                     <Text style={styles.scoreActionText}>
-                        Tingnan kung paano nakuha ang score
+                        {result.score === null
+                            ? 'Bakit walang score?'
+                            : 'Tingnan kung paano nakuha ang score'}
                     </Text>
                 </TouchableOpacity>
 
@@ -687,7 +710,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.text },
                             ]}
                         >
-                            Walang high-risk finding
+                            Walang na-flag na clause
                         </Text>
                         <Text
                             style={[
@@ -695,8 +718,8 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.subText },
                             ]}
                         >
-                            Walang na-detect sa available OCR text. Basahin
-                            pa rin ang buong document bago magdesisyon.
+                            May mga clause na maaaring hindi nabasa o na-flag.
+                            I-check ang OCR at buong dokumento bago magdesisyon.
                         </Text>
                     </View>
                 ) : (
@@ -764,7 +787,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.text },
                                     ]}
                                 >
-                                    Paano nakuha ang score?
+                                    {result.score === null
+                                        ? 'Bakit walang score?'
+                                        : 'Paano nakuha ang score?'}
                                 </Text>
                                 <Text
                                     style={[
@@ -772,7 +797,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Buod ng mga nakitang bahagi
+                                    {result.score === null
+                                        ? 'Walang na-flag sa nabasang text'
+                                        : 'Buod ng mga nakitang bahagi'}
                                 </Text>
                             </View>
                             <TouchableOpacity
@@ -794,6 +821,19 @@ export default function ResultScreen({ route, navigation }: any) {
                             contentContainerStyle={styles.modalBody}
                             showsVerticalScrollIndicator={false}
                         >
+                            {result.score === null ? (
+                                <Text
+                                    style={[
+                                        styles.noDeductionText,
+                                        { color: T.subText },
+                                    ]}
+                                >
+                                    Walang ibinigay na score dahil walang na-flag
+                                    sa available OCR text. Hindi nito
+                                    kinukumpirma na ligtas ang dokumento.
+                                    Suriin ang scan at orihinal na clauses.
+                                </Text>
+                            ) : (
                             <View
                                 style={[
                                     styles.scoreEquation,
@@ -877,6 +917,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     </Text>
                                 </View>
                             </View>
+                            )}
 
                             {result.findings.length > 0 ? (
                                 <View style={styles.breakdownList}>
@@ -897,7 +938,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Walang finding na nagbawas sa score.
+                                    Walang na-flag na clause sa available OCR text.
                                 </Text>
                             )}
 
