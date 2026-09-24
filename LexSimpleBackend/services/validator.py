@@ -282,12 +282,13 @@ def validate_llm_response(llm_data: dict) -> dict:
         finding_keys.add(finding_key)
         clean_findings.append(clean_finding)
 
+    raw_score = data.get("safety_score", data.get("score"))
     explicit_score = _parse_integer(
-        data.get("safety_score", data.get("score")),
+        raw_score,
         minimum=0,
         maximum=100,
     )
-    if explicit_score is None:
+    if clean_findings and explicit_score is None:
         return _validation_error(
             "missing_or_invalid_score",
             "The AI response does not contain a valid score from 0 to 100.",
@@ -302,18 +303,18 @@ def validate_llm_response(llm_data: dict) -> dict:
         ),
     )
 
-    if not clean_findings and explicit_score != 100:
+    if not clean_findings and raw_score is not None and explicit_score != 100:
         return _validation_error(
             "score_without_findings",
             (
-                "The AI reduced the score but did not provide any grounded "
-                "finding."
+                "An unscored analysis cannot contain a numeric score other "
+                "than the legacy empty-findings value."
             ),
         )
 
     # The deductions are the deterministic source of truth.
-    final_score = calculated_score
-    score_adjusted = final_score != explicit_score
+    final_score = calculated_score if clean_findings else None
+    score_adjusted = bool(clean_findings and final_score != explicit_score)
 
     document_title = data.get("documentTitle", "Legal Document")
     if not isinstance(document_title, str) or not document_title.strip():
@@ -338,7 +339,10 @@ def validate_llm_response(llm_data: dict) -> dict:
 
     validated_data = {
         "score": final_score,
-        "riskLevel": _risk_level_from_score(final_score),
+        "riskLevel": (
+            _risk_level_from_score(final_score)
+            if final_score is not None else "No findings detected"
+        ),
         "documentTitle": document_title,
         "documentStatus": document_status,
         "findings": clean_findings,
