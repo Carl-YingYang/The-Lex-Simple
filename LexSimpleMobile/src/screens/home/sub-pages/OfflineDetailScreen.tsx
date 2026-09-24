@@ -40,7 +40,7 @@ type Finding = {
 };
 
 interface AnalysisResult {
-    score: number;
+    score: number | null;
     riskLevel: string;
     documentTitle?: string;
     findings: Finding[];
@@ -98,7 +98,14 @@ const getImagePages = (item?: ScanItem): string[] => {
     );
 };
 
-const getRiskConfig = (score: number): RiskConfig => {
+const getRiskConfig = (score: number | null): RiskConfig => {
+    if (score === null) {
+        return {
+            color: PRIMARY_SOFT,
+            icon: 'information-circle-outline',
+            label: 'REVIEW NEEDED',
+        };
+    }
     if (score >= 90) {
         return {
             color: SUCCESS,
@@ -137,23 +144,25 @@ const normalizeAnalysisResult = (
 ): AnalysisResult => {
     const payload =
         response?.data?.data ?? response?.data ?? response ?? {};
-    const rawScore = Number(
-        payload.score ?? payload.safety_score ?? 100
-    );
-    const score = Number.isFinite(rawScore)
-        ? Math.max(0, Math.min(100, Math.round(rawScore)))
-        : 100;
     const findings = Array.isArray(payload.findings)
         ? payload.findings
         : Array.isArray(payload.clauses)
           ? payload.clauses
           : [];
+    const scoreCandidate = payload.score ?? payload.safety_score;
+    const rawScore = Number(scoreCandidate);
+    const score = Number.isFinite(rawScore)
+        && scoreCandidate !== null && scoreCandidate !== undefined
+        && findings.length > 0
+        ? Math.max(0, Math.min(100, Math.round(rawScore)))
+        : null;
 
     return {
         ...payload,
         score,
-        riskLevel:
-            payload.riskLevel || getRiskConfig(score).label,
+        riskLevel: score === null
+            ? 'No findings detected'
+            : payload.riskLevel || getRiskConfig(score).label,
         findings,
         rag_context_used:
             payload.rag_context_used ??
@@ -247,19 +256,23 @@ export default function OfflineDetailScreen({
 
     const isScanned = scanItem?.status === 'scanned';
     const rawResult = scanItem?.analysisResult;
-    const scoreValue = Number(rawResult?.score ?? 100);
-    const safeScore = Number.isFinite(scoreValue)
+    const savedFindings = Array.isArray(rawResult?.findings)
+        ? rawResult.findings : [];
+    const scoreValue = Number(rawResult?.score);
+    const safeScore = savedFindings.length > 0
+        && rawResult?.score !== null
+        && rawResult?.score !== undefined
+        && Number.isFinite(scoreValue)
         ? Math.max(0, Math.min(100, Math.round(scoreValue)))
-        : 100;
+        : null;
     const result: AnalysisResult = {
         score: safeScore,
-        riskLevel:
-            String(rawResult?.riskLevel || '') ||
-            getRiskConfig(safeScore).label,
+        riskLevel: safeScore === null
+            ? 'No findings detected'
+            : String(rawResult?.riskLevel || '') ||
+              getRiskConfig(safeScore).label,
         documentTitle: rawResult?.documentTitle,
-        findings: Array.isArray(rawResult?.findings)
-            ? rawResult.findings
-            : [],
+        findings: savedFindings,
         rag_context_used: rawResult?.rag_context_used,
         sanitizedText:
             rawResult?.sanitizedText || scanItem?.sanitizedText,
@@ -631,7 +644,7 @@ export default function OfflineDetailScreen({
         navigation.navigate('AskAiScreen', {
             attachedFile: {
                 name: getDisplayTitle(),
-                data: `DOCUMENT ANALYSIS\nScore: ${result.score}/100\nRisk: ${result.riskLevel}\n\n${findingsText}`,
+                data: `DOCUMENT ANALYSIS\nScore: ${result.score === null ? 'Hindi ibinigay (walang na-flag)' : `${result.score}/100`}\nRisk: ${result.riskLevel}\n\n${findingsText}`,
             },
             suggestedPrompts: [
                 'I-summarize ang document.',
@@ -734,7 +747,8 @@ export default function OfflineDetailScreen({
         );
     }
 
-    const totalLostPoints = Math.max(0, 100 - result.score);
+    const totalLostPoints = result.score === null
+        ? 0 : Math.max(0, 100 - result.score);
     const baseDeduction = result.findings.length
         ? Math.floor(totalLostPoints / result.findings.length)
         : 0;
@@ -798,7 +812,7 @@ export default function OfflineDetailScreen({
                                     { color: T.subText },
                                 ]}
                             >
-                                Complexity score
+                                Finding check
                             </Text>
                             <View
                                 style={[
@@ -823,16 +837,18 @@ export default function OfflineDetailScreen({
                                     { color: riskConfig.color },
                                 ]}
                             >
-                                {result.score}
+                                {result.score === null ? '—' : result.score}
                             </Text>
-                            <Text
-                                style={[
-                                    styles.scoreMaximum,
-                                    { color: T.subText },
-                                ]}
-                            >
-                                /100
-                            </Text>
+                            {result.score !== null && (
+                                <Text
+                                    style={[
+                                        styles.scoreMaximum,
+                                        { color: T.subText },
+                                    ]}
+                                >
+                                    /100
+                                </Text>
+                            )}
                         </View>
                         <Text
                             style={[
@@ -840,8 +856,9 @@ export default function OfflineDetailScreen({
                                 { color: T.subText },
                             ]}
                         >
-                            {result.findings.length} finding(s) ang nakita sa
-                            available document text.
+                            {result.score === null
+                                ? 'Walang na-flag sa OCR text. Hindi ito patunay na ligtas ang dokumento.'
+                                : `${result.findings.length} finding(s) ang nakita sa available document text.`}
                         </Text>
                     </TouchableOpacity>
 
@@ -907,8 +924,8 @@ export default function OfflineDetailScreen({
                                     { color: T.subText },
                                 ]}
                             >
-                                Walang high-risk clause na nakita sa
-                                available text.
+                                Walang na-flag sa available OCR text.
+                                I-check pa rin ang scan at buong dokumento.
                             </Text>
                         </View>
                     ) : (
@@ -975,7 +992,9 @@ export default function OfflineDetailScreen({
                                         { color: T.text },
                                     ]}
                                 >
-                                    Score breakdown
+                                    {result.score === null
+                                        ? 'Bakit walang score?'
+                                        : 'Score breakdown'}
                                 </Text>
                                 <TouchableOpacity
                                     style={styles.modalCloseButton}
@@ -993,6 +1012,20 @@ export default function OfflineDetailScreen({
                             <ScrollView
                                 showsVerticalScrollIndicator={false}
                             >
+                                {result.score === null ? (
+                                    <Text
+                                        style={[
+                                            styles.emptyFindingText,
+                                            { color: T.subText },
+                                        ]}
+                                    >
+                                        Walang na-flag sa available OCR text,
+                                        kaya walang safety score. Hindi nito
+                                        kinukumpirma na ligtas ang dokumento.
+                                        Suriin ang scan at orihinal na clauses.
+                                    </Text>
+                                ) : (
+                                    <>
                                 <View style={styles.totalScoreRow}>
                                     <Text
                                         style={[
@@ -1042,6 +1075,8 @@ export default function OfflineDetailScreen({
                                         {result.score}
                                     </Text>
                                 </View>
+                                    </>
+                                )}
                             </ScrollView>
                         </View>
                     </View>
