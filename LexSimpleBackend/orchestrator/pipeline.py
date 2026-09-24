@@ -10,7 +10,7 @@ from services.sanitizer import sanitize_legal_text
 from services.validator import validate_llm_response
 
 
-CACHE_SCHEMA_VERSION = "document-analysis-v3"
+CACHE_SCHEMA_VERSION = "document-analysis-v4"
 MIN_READABLE_CHARACTERS = 40
 MIN_READABLE_WORDS = 8
 
@@ -448,9 +448,14 @@ class Orchestrator:
             seen_finding_keys.add(key)
             merged_findings.append(normalized_finding)
 
-        llm_score = self._safe_score(analysis.get("score"))
+        llm_score = (
+            self._safe_score(analysis.get("score"))
+            if analysis.get("score") is not None else 100
+        )
 
-        if rule_matches:
+        if not merged_findings:
+            final_score = None
+        elif rule_matches:
             rule_deduction = sum(
                 self._safe_deduction(match.score_deduction)
                 for match in rule_matches
@@ -462,9 +467,14 @@ class Orchestrator:
             final_score = llm_score
 
         analysis["score"] = final_score
-        analysis["riskLevel"] = _risk_level_from_score(final_score)
+        analysis["riskLevel"] = (
+            _risk_level_from_score(final_score)
+            if final_score is not None else "No findings detected"
+        )
         analysis["findings"] = merged_findings
-        analysis["documentStatus"] = "analyzed"
+        analysis["documentStatus"] = (
+            "analyzed" if merged_findings else "analyzed_no_flags"
+        )
         analysis["analysisMode"] = (
             "hybrid" if rule_matches else "llm"
         )
