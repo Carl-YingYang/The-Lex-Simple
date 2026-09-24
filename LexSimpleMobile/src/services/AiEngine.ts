@@ -87,7 +87,7 @@ export type AnalysisProcessingMeta = {
 };
 
 export type AnalysisData = {
-    score: number;
+    score: number | null;
     riskLevel: string;
     documentTitle: string;
     documentStatus:
