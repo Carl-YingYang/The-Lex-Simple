@@ -720,7 +720,8 @@ def _combine_chunk_results(
 
     return {
         "documentTitle": document_title,
-        "safety_score": max(0, 100 - total_deduction),
+        # No findings is an absence of detected flags, not a perfect safety score.
+        "safety_score": max(0, 100 - total_deduction) if unique_clauses else None,
         "clauses": unique_clauses,
         "processingMeta": {
             "chunkCount": len(chunk_results),
