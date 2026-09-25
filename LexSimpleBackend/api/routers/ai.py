@@ -320,6 +320,21 @@ def _analyze_and_attach_input_meta(text: str, input_meta: dict) -> dict:
             },
         )
 
+    if response.get("status") == "error":
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": str(response.get("code") or "analysis_failed"),
+                "message": str(
+                    response.get("message")
+                    or "The document analysis did not complete."
+                ),
+                "documentStatus": str(
+                    response.get("documentStatus") or "processing_error"
+                ),
+            },
+        )
+
     response["inputMeta"] = input_meta
     return response
 

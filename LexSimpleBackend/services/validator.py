@@ -345,6 +345,13 @@ def validate_llm_response(llm_data: dict) -> dict:
         ),
         "documentTitle": document_title,
         "documentStatus": document_status,
+        "analysisOutcome": (
+            "inconclusive_analysis"
+            if data.get("analysisIncomplete") is True
+            else "findings_detected"
+            if clean_findings
+            else "no_findings_detected"
+        ),
         "findings": clean_findings,
         "processingMeta": processing_meta,
         "scoreAdjusted": score_adjusted,

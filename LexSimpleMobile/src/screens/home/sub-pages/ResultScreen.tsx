@@ -42,6 +42,13 @@ type AnalysisResult = {
     rag_context_used?: string;
     sanitizedText?: string;
     ocrText?: string;
+    analysisOutcome:
+        | 'findings_detected'
+        | 'no_findings_detected'
+        | 'inconclusive_ocr'
+        | 'inconclusive_analysis'
+        | 'mixed_documents';
+    ocrIssues: string[];
 };
 
 type RiskConfig = {
@@ -164,11 +171,29 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
     const score = rawFindings.length > 0
         ? clampScore(payload.score ?? payload.safety_score)
         : null;
+    const explicitOutcome = String(payload.analysisOutcome ?? '');
+    const allowedOutcomes: AnalysisResult['analysisOutcome'][] = [
+        'findings_detected',
+        'no_findings_detected',
+        'inconclusive_ocr',
+        'inconclusive_analysis',
+        'mixed_documents',
+    ];
+    const analysisOutcome = allowedOutcomes.includes(
+        explicitOutcome as AnalysisResult['analysisOutcome']
+    )
+        ? explicitOutcome as AnalysisResult['analysisOutcome']
+        : payload.documentStatus === 'analyzed_no_flags'
+          ? 'no_findings_detected'
+          : rawFindings.length > 0
+            ? 'findings_detected'
+            : 'inconclusive_analysis';
+    const rawIssues = payload.ocrQuality?.issues;
 
     return {
         score,
         riskLevel: score === null
-            ? 'No findings detected'
+            ? 'Analysis unavailable'
             : String(
                   payload.riskLevel ??
                       payload.risk_level ??
@@ -201,6 +226,12 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
                 raw?.ocrText ??
                 ''
         ).trim(),
+        analysisOutcome,
+        ocrIssues: Array.isArray(rawIssues)
+            ? rawIssues
+                .map((issue: any) => String(issue?.message ?? '').trim())
+                .filter(Boolean)
+            : [],
     };
 };
 
@@ -265,6 +296,21 @@ export default function ResultScreen({ route, navigation }: any) {
         [route?.params?.analysisResult]
     );
     const hasAnalysisResult = Boolean(route?.params?.analysisResult);
+    const needsReview = [
+        'inconclusive_ocr',
+        'inconclusive_analysis',
+        'mixed_documents',
+    ].includes(result.analysisOutcome);
+    const noFindings = result.analysisOutcome === 'no_findings_detected';
+    const resultMessage = result.analysisOutcome === 'mixed_documents'
+        ? 'Magkakaibang dokumento ang nasa batch. Hatiin at ipa-check ang bawat isa nang hiwalay.'
+        : result.analysisOutcome === 'inconclusive_ocr'
+          ? 'Hindi maaasahan ang ilang nabasang bahagi, lalo na ang amounts o table. I-review at kunan ulit bago umasa sa analysis.'
+          : result.analysisOutcome === 'inconclusive_analysis'
+            ? 'Hindi nakumpleto o hindi sapat ang analysis. Subukan ulit; wala pang maaasahang finding.'
+            : noFindings
+              ? 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.'
+              : `${result.findings.length} bahagi ang kailangan mong suriin.`;
     const riskConfig = getRiskConfig(result.score);
     const totalDeduction = result.score === null
         ? 0
@@ -616,9 +662,7 @@ export default function ResultScreen({ route, navigation }: any) {
                             { color: T.subText },
                         ]}
                     >
-                        {result.findings.length === 0
-                            ? 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.'
-                            : `${result.findings.length} bahagi ang kailangan mong suriin.`}
+                        {resultMessage}
                     </Text>
 
                     <Text style={styles.scoreActionText}>
@@ -654,7 +698,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.text },
                             ]}
                         >
-                            Privacy-protected text
+                            Sanitized OCR text
                         </Text>
                         <Text
                             style={[
@@ -662,8 +706,8 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.subText },
                             ]}
                         >
-                            Tingnan ang sanitized OCR na ginamit sa
-                            analysis.
+                            Tingnan ang text na ginamit sa analysis at
+                            i-review kung may hindi na-redact.
                         </Text>
                     </View>
                 </TouchableOpacity>
@@ -699,9 +743,9 @@ export default function ResultScreen({ route, navigation }: any) {
                     >
                         <View style={styles.emptyIconBox}>
                             <Ionicons
-                                name="checkmark"
+                                name={needsReview ? 'alert-outline' : 'information-outline'}
                                 size={24}
-                                color={SUCCESS}
+                                color={PRIMARY_SOFT}
                             />
                         </View>
                         <Text
@@ -710,7 +754,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.text },
                             ]}
                         >
-                            Walang na-flag na clause
+                            {needsReview
+                                ? 'Hindi pa sapat ang pagsusuri'
+                                : 'Walang na-flag na clause'}
                         </Text>
                         <Text
                             style={[
@@ -718,8 +764,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.subText },
                             ]}
                         >
-                            May mga clause na maaaring hindi nabasa o na-flag.
-                            I-check ang OCR at buong dokumento bago magdesisyon.
+                            {needsReview
+                                ? [resultMessage, ...result.ocrIssues.slice(0, 2)].join('\n')
+                                : 'May mga clause na maaaring hindi nabasa o na-flag. I-check ang OCR at buong dokumento bago magdesisyon.'}
                         </Text>
                     </View>
                 ) : (
@@ -741,7 +788,7 @@ export default function ResultScreen({ route, navigation }: any) {
 
             </ScrollView>
 
-            <TouchableOpacity
+            {!needsReview && <TouchableOpacity
                 style={styles.lexieButton}
                 onPress={askLexieAboutDocument}
                 activeOpacity={0.88}
@@ -756,7 +803,7 @@ export default function ResultScreen({ route, navigation }: any) {
                     />
                 </View>
                 <Text style={styles.lexieTitle}>Lexie Insight</Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
 
             <Modal
                 visible={scoreModalVisible}
@@ -798,7 +845,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                     ]}
                                 >
                                     {result.score === null
-                                        ? 'Walang na-flag sa nabasang text'
+                                        ? needsReview
+                                            ? 'Kailangan munang i-review ang scan'
+                                            : 'Walang na-flag sa nabasang text'
                                         : 'Buod ng mga nakitang bahagi'}
                                 </Text>
                             </View>
@@ -828,10 +877,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Walang ibinigay na score dahil walang na-flag
-                                    sa available OCR text. Hindi nito
-                                    kinukumpirma na ligtas ang dokumento.
-                                    Suriin ang scan at orihinal na clauses.
+                                    {needsReview
+                                        ? [resultMessage, ...result.ocrIssues.slice(0, 3)].join('\n')
+                                        : 'Walang ibinigay na score dahil walang na-flag sa available OCR text. Hindi nito kinukumpirma na ligtas ang dokumento. Suriin ang scan at orihinal na clauses.'}
                                 </Text>
                             ) : (
                             <View
@@ -938,7 +986,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Walang na-flag na clause sa available OCR text.
+                                    {needsReview
+                                        ? 'Hindi maaasahan ang empty findings hangga’t hindi narereview ang OCR.'
+                                        : 'Walang na-flag na clause sa available OCR text.'}
                                 </Text>
                             )}
 

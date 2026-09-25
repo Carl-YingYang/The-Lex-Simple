@@ -473,10 +473,21 @@ into original_text.
             f"Chunk {chunk_number} returned malformed analysis data."
         )
 
+    if not any(
+        key in payload
+        for key in ("clauses", "findings", "results")
+    ):
+        raise ValueError(
+            f"Chunk {chunk_number} did not return a clauses array."
+        )
     raw_clauses = payload.get(
         "clauses",
         payload.get("findings", payload.get("results", [])),
     )
+    if not isinstance(raw_clauses, list):
+        raise ValueError(
+            f"Chunk {chunk_number} returned a malformed clauses array."
+        )
     normalized_clauses = normalize_ai_keys(
         raw_clauses,
         source_chunk=source_chunk,
@@ -488,6 +499,7 @@ into original_text.
             payload.get("documentTitle", "")
         ).strip(),
         "clauses": normalized_clauses,
+        "droppedUngroundedCount": len(raw_clauses) - len(normalized_clauses),
         "ragContext": retrieved_context,
     }
 
@@ -703,6 +715,10 @@ def _combine_chunk_results(
         for clause in result.get("clauses", [])
     ]
     unique_clauses = _deduplicate_clauses(all_clauses)
+    dropped_ungrounded_count = sum(
+        result.get("droppedUngroundedCount", 0)
+        for result in chunk_results
+    )
     total_deduction = min(
         100,
         sum(
@@ -723,6 +739,7 @@ def _combine_chunk_results(
         # No findings is an absence of detected flags, not a perfect safety score.
         "safety_score": max(0, 100 - total_deduction) if unique_clauses else None,
         "clauses": unique_clauses,
+        "analysisIncomplete": dropped_ungrounded_count > 0,
         "processingMeta": {
             "chunkCount": len(chunk_results),
             "pageCount": len(page_numbers) or 1,

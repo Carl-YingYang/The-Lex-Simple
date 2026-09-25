@@ -21,6 +21,27 @@ export type OcrQualityMetrics = {
     wordCount: number;
     letterRatio: number;
     browserUiDetected: boolean;
+    ambiguousAmounts: string[];
+    tableLike: boolean;
+    tableColumnsDetached: boolean;
+};
+
+export type BatchOcrQualityStatus =
+    | 'good'
+    | 'review_recommended'
+    | 'analysis_blocked';
+
+export type BatchOcrQualityIssue = {
+    code: 'ambiguous_amount' | 'table_layout_requires_review' | 'table_columns_detached' | 'mixed_documents';
+    severity: 'warning' | 'blocking';
+    message: string;
+    pageNumber?: number;
+    sample?: string;
+};
+
+export type BatchOcrQuality = {
+    status: BatchOcrQualityStatus;
+    issues: BatchOcrQualityIssue[];
 };
 
 export type OcrPageResult = {
@@ -75,6 +96,36 @@ const BROWSER_UI_MARKERS = [
     'search results',
     'images videos more',
 ] as const;
+
+const MONEY_CANDIDATE_PATTERN = /(?:PHP|₱)[ \t]*[0-9OoIlCc.,]{2,20}(?:[ \t]+(?=[0-9OoIlCc.,]*[0-9])[0-9OoIlCc.,]+)*/gi;
+const VALID_MONEY_PATTERN = /^(?:PHP|₱)\s*(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}$/i;
+
+const getAmbiguousAmounts = (text: string): string[] => {
+    return (text.match(MONEY_CANDIDATE_PATTERN) ?? [])
+        .map((value) => value.trim().replace(/[ ,.;]+$/, ''))
+        .filter((value) => !VALID_MONEY_PATTERN.test(value));
+};
+
+const detectDocumentKind = (text: string): string | null => {
+    const header = text.slice(0, 700);
+    const signatures: Array<[string, RegExp[]]> = [
+        ['loan', [/\bloan agreement\b/i, /\bprincipal amount\b/i, /\bcreditor\b[\s\S]{0,180}\bdebtor\b/i]],
+        ['service', [/\bservice agreement\b/i, /\bprovider\b[\s\S]{0,180}\bclient\b/i]],
+        ['purchase', [/\bpurchase price\b/i, /\bbuyer\b[\s\S]{0,180}\boffice equipment\b/i]],
+        ['lease', [/\blease (?:agreement|excerpt)\b/i, /\blessor\b[\s\S]{0,180}\blessee\b/i, /\bmonthly rent\b/i]],
+        ['supply', [/\bsupply agreement\b/i, /\bdelivery schedule\b/i, /\bbatch\s+[A-Z]-?\d+\b/i]],
+        ['court', [/\brepublic of the philippines\b/i, /\bcomplainant\b[\s\S]{0,180}\brespondent\b/i]],
+    ];
+
+    let best: { kind: string; score: number } | null = null;
+    for (const [kind, patterns] of signatures) {
+        const score = patterns.filter((pattern) => pattern.test(header)).length;
+        if (score >= 2 && (!best || score > best.score)) {
+            best = { kind, score };
+        }
+    }
+    return best ? best.kind : null;
+};
 
 
 const normalizeRecognizedText = (
@@ -203,6 +254,14 @@ const calculateQualityMetrics = (
                 browserMarkerCount >= 1 &&
                 queryFragmentCount >= 2
             ),
+        ambiguousAmounts: getAmbiguousAmounts(text),
+        tableLike:
+            /\b(?:TOTAL|Amount due|Reference)\b/i.test(text) &&
+            (text.match(/(?:PHP|₱)/gi) ?? []).length >= 2,
+        tableColumnsDetached:
+            (text.match(/^\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d{2}\s*$/gim) ?? []).length >= 2 &&
+            (text.match(/^\s*[A-Z]{2,6}-\d{2,}\s*$/gim) ?? []).length >= 2 &&
+            (text.match(/^\s*(?:PHP|₱)[^\n]{0,24}$/gim) ?? []).length >= 2,
     };
 };
 
@@ -218,6 +277,14 @@ const getQualityWarning = (
 
     if (quality.letterRatio < 0.45) {
         return 'Maraming hindi malinaw na character ang nabasa. I-review muna ang page.';
+    }
+
+    if (quality.ambiguousAmounts.length > 0) {
+        return 'May amount na posibleng maling nabasa. I-review muna ang digits at punctuation.';
+    }
+
+    if (quality.tableLike) {
+        return 'May table-like data. I-review ang pagkakatapat ng rows at columns.';
     }
 
     return undefined;
@@ -402,6 +469,62 @@ export const recognizePagesOffline = async (
         successfulPages,
         failedPages,
         combinedText,
+    };
+};
+
+export const assessBatchOcrQuality = (
+    result: BatchOcrResult
+): BatchOcrQuality => {
+    const issues: BatchOcrQualityIssue[] = [];
+    const kinds: Array<{ pageNumber: number; kind: string }> = [];
+
+    result.successfulPages.forEach((page) => {
+        page.quality.ambiguousAmounts.forEach((amount) => {
+            issues.push({
+                code: 'ambiguous_amount',
+                severity: 'blocking',
+                pageNumber: page.pageNumber,
+                sample: amount,
+                message: `Hindi malinaw ang amount sa Page ${page.pageNumber}: ${amount}`,
+            });
+        });
+
+        if (page.quality.tableLike) {
+            issues.push({
+                code: page.quality.tableColumnsDetached
+                    ? 'table_columns_detached'
+                    : 'table_layout_requires_review',
+                severity: page.quality.tableColumnsDetached
+                    ? 'blocking'
+                    : 'warning',
+                pageNumber: page.pageNumber,
+                message: page.quality.tableColumnsDetached
+                    ? `Nahiwalay ang rows at columns ng table sa Page ${page.pageNumber}. Kunan ulit o itama ang OCR bago analysis.`
+                    : `I-review ang rows at columns ng table sa Page ${page.pageNumber}.`,
+            });
+        }
+
+        const kind = detectDocumentKind(page.text);
+        if (kind) {
+            kinds.push({ pageNumber: page.pageNumber, kind });
+        }
+    });
+
+    if (new Set(kinds.map((item) => item.kind)).size >= 2) {
+        issues.unshift({
+            code: 'mixed_documents',
+            severity: 'blocking',
+            message: `Mukhang magkakaibang dokumento ang batch (${kinds.map((item) => `Page ${item.pageNumber}: ${item.kind}`).join(', ')}). Hatiin muna ang mga ito.`,
+        });
+    }
+
+    return {
+        status: issues.some((issue) => issue.severity === 'blocking')
+            ? 'analysis_blocked'
+            : issues.length > 0
+              ? 'review_recommended'
+              : 'good',
+        issues,
     };
 };
 

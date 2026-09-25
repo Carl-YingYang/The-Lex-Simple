@@ -93,10 +93,29 @@ export type AnalysisData = {
     documentStatus:
         | 'analyzed'
         | 'analyzed_no_flags'
+        | 'inconclusive_ocr'
+        | 'inconclusive_analysis'
+        | 'mixed_documents'
         | 'unreadable'
         | 'not_legal_document'
         | 'processing_error'
         | string;
+    analysisOutcome?:
+        | 'findings_detected'
+        | 'no_findings_detected'
+        | 'inconclusive_ocr'
+        | 'inconclusive_analysis'
+        | 'mixed_documents';
+    ocrQuality?: {
+        status: 'good' | 'review_recommended' | 'analysis_blocked';
+        issues: Array<{
+            code: string;
+            severity: string;
+            message: string;
+            page_number?: number | null;
+            sample?: string | null;
+        }>;
+    };
     analysisMode?: 'llm' | 'hybrid' | string;
     findings: AnalysisFinding[];
     processingMeta: AnalysisProcessingMeta;

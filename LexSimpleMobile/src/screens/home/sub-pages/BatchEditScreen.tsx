@@ -22,6 +22,7 @@ import { useCustomAlert } from '../../../components/CustomAlert';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
 import {
+    assessBatchOcrQuality,
     isOcrCancelledError,
     recognizePagesOffline,
 } from '../../../services/localOcrService';
@@ -623,6 +624,27 @@ export default function BatchEditScreen({
                             style: 'cancel',
                         },
                     ]
+                );
+                return;
+            }
+            const quality = assessBatchOcrQuality(result);
+            if (quality.status === 'analysis_blocked') {
+                const mixed = quality.issues.some(
+                    (issue) => issue.code === 'mixed_documents'
+                );
+                const firstPageWithIssue = quality.issues.find(
+                    (issue) => issue.pageNumber
+                )?.pageNumber;
+                if (firstPageWithIssue) {
+                    scrollToPage(firstPageWithIssue - 1, false);
+                }
+                showAlert(
+                    mixed ? 'Magkakaibang document' : 'Hindi maaasahan ang OCR',
+                    mixed
+                        ? 'May pahinang mukhang mula sa ibang dokumento. Alisin sa batch ang hindi kasama at i-analyze ang bawat dokumento nang hiwalay.'
+                        : `${quality.issues.filter((issue) => issue.severity === 'blocking').slice(0, 2).map((issue) => issue.message).join(' ')} I-check ang original at kuhanan o i-upload ulit ang apektadong page. Hindi ito ipapadala sa AI.`,
+                    'warning',
+                    [{ text: 'Sige' }]
                 );
                 return;
             }
