@@ -6,11 +6,12 @@ from typing import Dict, List, Optional
 
 from rules.engine import RuleEngine
 from services.llm_service import analyze_legal_text
+from services.ocr_quality import assess_ocr_quality
 from services.sanitizer import sanitize_legal_text
 from services.validator import validate_llm_response
 
 
-CACHE_SCHEMA_VERSION = "document-analysis-v4"
+CACHE_SCHEMA_VERSION = "document-analysis-v5-quality-outcomes"
 MIN_READABLE_CHARACTERS = 40
 MIN_READABLE_WORDS = 8
 
@@ -119,6 +120,46 @@ def _error_payload(
     return payload
 
 
+def _processing_meta(text: str) -> dict:
+    return {
+        "chunkCount": 0,
+        "pageCount": max(
+            1,
+            len(re.findall(r"(?m)^--- Page \d+ ---$", text)),
+        ),
+        "processedCharacters": len(text),
+        "documentHash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+
+
+def _inconclusive_payload(text: str, quality: dict) -> dict:
+    mixed = any(
+        issue.get("code") == "mixed_documents"
+        for issue in quality.get("issues", [])
+    )
+    return {
+        "status": "success",
+        "data": {
+            "score": None,
+            "riskLevel": "Analysis unavailable",
+            "documentTitle": (
+                "Multiple Documents" if mixed else "Document Review Needed"
+            ),
+            "documentStatus": (
+                "mixed_documents" if mixed else "inconclusive_ocr"
+            ),
+            "analysisOutcome": (
+                "mixed_documents" if mixed else "inconclusive_ocr"
+            ),
+            "analysisMode": "quality_gate",
+            "findings": [],
+            "processingMeta": _processing_meta(text),
+            "ocrQuality": quality,
+        },
+        "sanitizedText": text,
+    }
+
+
 class Orchestrator:
     """
     Coordinates the privacy-safe legal-document analysis pipeline.
@@ -163,6 +204,18 @@ class Orchestrator:
                 status="error",
                 data=quality_error,
                 source_layer="input_validation",
+                llm_calls_made=0,
+            )
+
+        ocr_quality = assess_ocr_quality(sanitized_text)
+        if ocr_quality["status"] == "analysis_blocked":
+            return ProcessResult(
+                status="quality_gate",
+                data=_inconclusive_payload(
+                    sanitized_text,
+                    ocr_quality,
+                ),
+                source_layer="quality_gate",
                 llm_calls_made=0,
             )
 
@@ -243,6 +296,7 @@ class Orchestrator:
             validated_response=validated_response,
             rule_matches=rule_matches,
             sanitized_text=sanitized_text,
+            ocr_quality=ocr_quality,
         )
 
         # Cache only a complete, validated analysis.
@@ -413,6 +467,7 @@ class Orchestrator:
         validated_response: dict,
         rule_matches: list,
         sanitized_text: str,
+        ocr_quality: dict,
     ) -> dict:
         response = copy.deepcopy(validated_response)
         analysis = response["data"]
@@ -475,6 +530,23 @@ class Orchestrator:
         analysis["documentStatus"] = (
             "analyzed" if merged_findings else "analyzed_no_flags"
         )
+        analysis["analysisOutcome"] = (
+            "inconclusive_analysis"
+            if analysis.get("analysisOutcome") == "inconclusive_analysis"
+            else "findings_detected"
+            if merged_findings
+            else "inconclusive_ocr"
+            if ocr_quality.get("status") == "review_recommended"
+            else "no_findings_detected"
+        )
+        if analysis["analysisOutcome"] in (
+            "inconclusive_ocr",
+            "inconclusive_analysis",
+        ):
+            analysis["documentStatus"] = analysis["analysisOutcome"]
+            analysis["riskLevel"] = "Review required"
+            analysis["score"] = None
+        analysis["ocrQuality"] = ocr_quality
         analysis["analysisMode"] = (
             "hybrid" if rule_matches else "llm"
         )

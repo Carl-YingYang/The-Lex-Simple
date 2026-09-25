@@ -208,11 +208,18 @@ export const sanitizeLocalText = (rawText: string): string => {
      */
 
     const accountPatterns = [
-        /\b(?:account\s*(?:no|number|#)?|acct\.?\s*(?:no|number|#)?|account\s*id)\s*[:#.-]?\s*[A-Z0-9][A-Z0-9 .-]{5,30}\b/giu,
+        /*
+         * Require an explicit identifier label. Never match a bare
+         * "account" prefix because that also matches legitimate words and
+         * clauses such as "accounting" and "account for the funds".
+         */
+        /\b(?:bank\s+)?(?:account|acct\.?)\s*(?:no\.?|number|#|id)\s*(?:is\s*)?[:#.-]?\s*(?:\d[\s-]?){6,24}\b/giu,
 
-        /\b(?:bank\s*account|deposit\s*account|savings\s*account|checking\s*account)\s*[:#.-]?\s*[A-Z0-9][A-Z0-9 .-]{5,30}\b/giu,
-
-        /\b(?:account\s*number|acct\s*number)\s*[:#.-]?\s*[0-9OoIlL -]{6,24}\b/giu,
+        /*
+         * A bank/deposit/savings/checking account may omit "number", but
+         * only when a delimiter clearly introduces a digit-heavy value.
+         */
+        /\b(?:bank|deposit|savings|checking)\s+account\s*[:#.-]\s*(?:\d[\s-]?){6,24}\b/giu,
     ];
 
     for (const pattern of accountPatterns) {
@@ -323,22 +330,39 @@ export const sanitizeLocalText = (rawText: string): string => {
      * English + Filipino legal labels.
      */
 
-    const addressPatterns: RegExp[] = [
+    const labeledAddressPatterns: RegExp[] = [
+        /*
+         * Stop before the next legal clause instead of consuming the rest
+         * of the paragraph. The label is preserved for readability.
+         */
+        /\b((?:home\s+|residential\s+|current\s+|present\s+|permanent\s+|mailing\s+)?address)\s*[:#-]\s*([^\n;]{5,160}?)(?=,\s*(?:after|before|hereinafter|who|which|and\s+(?:a|the)\b)|[.;](?:\s|$)|\n|$)/giu,
 
-        /(?:address|home\s*address|residential\s*address|current\s*address|present\s*address|permanent\s*address|mailing\s*address)\s*[:#-]?\s*([^\n;]{5,160})/giu,
+        /\b((?:a\s+)?resident\s+of|residing\s+(?:at|in)|located\s+(?:at|in)|living\s+(?:at|in)|domiciled\s+(?:at|in))\s+([^\n;]{5,160}?)(?=,\s*(?:after|before|hereinafter|who|which|and\s+(?:a|the)\b)|[.;](?:\s|$)|\n|$)/giu,
 
-        /(?:residing\s*(?:at|in)|located\s*(?:at|in)|living\s*(?:at|in))\s+([^\n;]{5,160})/giu,
-
-        /(?:naninirahan\s*(?:sa|ng)|tahanan\s*sa|tirahan\s*sa|address\s*ay)\s+([^\n;]{5,160})/giu,
-
-        /(?:street|st\.|barangay|brgy\.|sitio|purok|subdivision|village|phase|block|lot|building|unit|floor|apartment|apt\.)\s+[^,\n;]{2,80}(?:,|\n|;|$)/giu,
+        /\b(naninirahan\s+(?:sa|ng)|tahanan\s+sa|tirahan\s+sa|address\s+ay)\s+([^\n;]{5,160}?)(?=,\s*(?:matapos|bago|na\s+siya|at\s+(?:ang|isang)\b)|[.;](?:\s|$)|\n|$)/giu,
     ];
 
-    for (const pattern of addressPatterns) {
+    for (const pattern of labeledAddressPatterns) {
         sanitized = sanitized.replace(
             pattern,
-            (match) => REDACTION.ADDRESS
+            (_match, label: string) =>
+                `${label} ${REDACTION.ADDRESS}`
         );
+    }
+
+    const standaloneAddressPatterns: RegExp[] = [
+        /*
+         * Standalone street-style addresses still require an address token.
+         * City/province names alone are intentionally not redacted because
+         * they may identify the court or jurisdiction rather than a person.
+         */
+        /\b\d{1,6}\s+[A-Z0-9][A-Za-z0-9.'-]*(?:\s+[A-Z0-9][A-Za-z0-9.'-]*){0,6}\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|highway|drive|dr\.?|lane|ln\.?|extension|ext\.?)\b[^\n;]{0,100}/giu,
+
+        /\b(?:street|st\.|barangay|brgy\.|sitio|purok|subdivision|village|phase|block|lot|building|unit|floor|apartment|apt\.)\s+[^,\n;]{2,80}(?:,|\n|;|$)/giu,
+    ];
+
+    for (const pattern of standaloneAddressPatterns) {
+        sanitized = sanitized.replace(pattern, REDACTION.ADDRESS);
     }
 
 
@@ -442,11 +466,17 @@ export const sanitizeLocalText = (rawText: string): string => {
      */
 
     const legalPartyPattern =
-        /\b([A-Z][A-Za-z.'-]{1,40}(?:\s+[A-Z][A-Za-z.'-]{1,40}){1,5}),\s*(?=(?:Filipino|Filipina|Filipino citizen|single|married|widowed|widower|divorced|of legal age|of lawful age|a resident|an entity)\b)/giu;
+        /\b([A-Z][A-Za-z.'-]{1,40}(?:\s+[A-Z][A-Za-z.'-]{1,40}){1,5}),\s*(?=(?:[Ff]ilipino|[Ff]ilipina|[Ff]ilipino\s+citizen|[Ss]ingle|[Mm]arried|[Ww]idowed|[Ww]idower|[Dd]ivorced|[Oo]f\s+legal\s+age|[Oo]f\s+lawful\s+age|[Aa]\s+resident|[Aa]n\s+entity)\b)/gu;
+
+    const legalDescriptorOnly =
+        /^(?:of\s+(?:legal|lawful)\s+age|a\s+resident|an\s+entity|filipin[oa]|single|married|widowed|widower|divorced)$/i;
 
     sanitized = sanitized.replace(
         legalPartyPattern,
-        REDACTION.NAME + ', '
+        (match, candidate: string) =>
+            legalDescriptorOnly.test(candidate.trim())
+                ? match
+                : REDACTION.NAME + ', '
     );
 
 
@@ -1282,5 +1312,4 @@ export const buildSanitizedDocumentForAI = (
         ),
     };
 };
-
 
