@@ -1,3 +1,4 @@
+# VALIDATOR VERSION: 2.0.0
 import logging
 import re
 from typing import List, Optional, Tuple
@@ -282,6 +283,34 @@ def validate_llm_response(llm_data: dict) -> dict:
         finding_keys.add(finding_key)
         clean_findings.append(clean_finding)
 
+    raw_key_clauses = data.get("keyClauses", [])
+    if not isinstance(raw_key_clauses, list):
+        return _validation_error(
+            "invalid_key_clauses", "keyClauses must be an array."
+        )
+    clean_key_clauses: List[dict] = []
+    seen_key_sources = set()
+    for item in raw_key_clauses:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        explanation = item.get("explanation")
+        found_text = item.get("foundText")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (title, explanation, found_text)
+        ):
+            continue
+        source_key = _normalize_finding_key(found_text)
+        if source_key in seen_key_sources:
+            continue
+        seen_key_sources.add(source_key)
+        clean_key_clauses.append({
+            "title": title.strip()[:120],
+            "explanation": explanation.strip()[:1200],
+            "foundText": found_text.strip()[:1000],
+        })
+
     raw_score = data.get("safety_score", data.get("score"))
     explicit_score = _parse_integer(
         raw_score,
@@ -353,6 +382,7 @@ def validate_llm_response(llm_data: dict) -> dict:
             else "no_findings_detected"
         ),
         "findings": clean_findings,
+        "keyClauses": clean_key_clauses,
         "processingMeta": processing_meta,
         "scoreAdjusted": score_adjusted,
     }

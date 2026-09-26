@@ -1,3 +1,4 @@
+# LLM SERVICE VERSION: 6.0.0
 import hashlib
 import json
 import logging
@@ -62,8 +63,21 @@ LEGAL_CHUNK_JSON_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "keyClauses": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "explanation": {"type": "string"},
+                    "original_text": {"type": "string"},
+                },
+                "required": ["title", "explanation", "original_text"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["documentTitle", "clauses"],
+    "required": ["documentTitle", "clauses", "keyClauses"],
     "additionalProperties": False,
 }
 
@@ -229,6 +243,36 @@ def normalize_ai_keys(
             }
         )
 
+    return normalized
+
+
+def normalize_key_clauses(
+    clauses_list: list,
+    source_chunk: str,
+) -> List[dict]:
+    normalized: List[dict] = []
+    for item in clauses_list:
+        if not isinstance(item, dict):
+            continue
+        exact_text = _recover_exact_source_text(
+            str(item.get("original_text") or ""),
+            source_chunk,
+        )
+        title = str(item.get("title") or "").strip()
+        explanation = str(item.get("explanation") or "").strip()
+        if (
+            not exact_text
+            or len(exact_text) < 20
+            or len(exact_text.split()) < 4
+            or not title
+            or not explanation
+        ):
+            continue
+        normalized.append({
+            "title": title,
+            "explanation": explanation,
+            "foundText": exact_text,
+        })
     return normalized
 
 
@@ -449,12 +493,21 @@ Return ONLY one valid JSON object with this exact shape:
       "original_text": "Exact verbatim text copied from this OCR chunk",
       "confidence": "0-100%"
     }
+  ],
+  "keyClauses": [
+    {
+      "title": "Short title for an important term",
+      "explanation": "Neutral Taglish explanation of what it says, without a risk claim",
+      "original_text": "Exact verbatim sentence or clause copied from this OCR chunk"
+    }
   ]
 }
 
-If there is no supportable finding in this chunk, return an empty clauses
-array. Never invent original_text and never copy text from the RAG context
-into original_text.
+"clauses" is ONLY for possible risks. Do not invent a risk just to fill it.
+For an ordinary readable agreement, return 1-5 important terms in
+"keyClauses" even when "clauses" is empty. Explain payment, dates,
+obligations, or notice without claiming they are unfair. Keep the two arrays
+separate. Never invent original_text or copy RAG context into it.
 """
     parsed_response = _request_chunk_json(
         client=client,
@@ -493,13 +546,23 @@ into original_text.
         source_chunk=source_chunk,
         chunk_number=chunk_number,
     )
+    raw_key_clauses = payload.get("keyClauses")
+    if not isinstance(raw_key_clauses, list):
+        raise ValueError(
+            f"Chunk {chunk_number} did not return a keyClauses array."
+        )
+    key_clauses = normalize_key_clauses(raw_key_clauses, source_chunk)
 
     return {
         "documentTitle": str(
             payload.get("documentTitle", "")
         ).strip(),
         "clauses": normalized_clauses,
-        "droppedUngroundedCount": len(raw_clauses) - len(normalized_clauses),
+        "keyClauses": key_clauses,
+        "droppedUngroundedCount": (
+            len(raw_clauses) - len(normalized_clauses)
+            + len(raw_key_clauses) - len(key_clauses)
+        ),
         "ragContext": retrieved_context,
     }
 
@@ -715,6 +778,21 @@ def _combine_chunk_results(
         for clause in result.get("clauses", [])
     ]
     unique_clauses = _deduplicate_clauses(all_clauses)
+    all_key_clauses = [
+        clause
+        for result in chunk_results
+        for clause in result.get("keyClauses", [])
+    ]
+    key_clauses: List[dict] = []
+    seen_key_sources = set()
+    for clause in all_key_clauses:
+        source_key = _normalize_comparison_text(clause["foundText"])
+        if source_key in seen_key_sources:
+            continue
+        seen_key_sources.add(source_key)
+        key_clauses.append(clause)
+        if len(key_clauses) >= 10:
+            break
     dropped_ungrounded_count = sum(
         result.get("droppedUngroundedCount", 0)
         for result in chunk_results
@@ -739,7 +817,11 @@ def _combine_chunk_results(
         # No findings is an absence of detected flags, not a perfect safety score.
         "safety_score": max(0, 100 - total_deduction) if unique_clauses else None,
         "clauses": unique_clauses,
-        "analysisIncomplete": dropped_ungrounded_count > 0,
+        "keyClauses": key_clauses,
+        "analysisIncomplete": (
+            dropped_ungrounded_count > 0
+            or (not unique_clauses and not key_clauses)
+        ),
         "processingMeta": {
             "chunkCount": len(chunk_results),
             "pageCount": len(page_numbers) or 1,

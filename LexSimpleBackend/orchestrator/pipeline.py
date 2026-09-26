@@ -1,3 +1,4 @@
+# PIPELINE VERSION: 7.0.0
 import copy
 import hashlib
 import re
@@ -11,7 +12,7 @@ from services.sanitizer import sanitize_legal_text
 from services.validator import validate_llm_response
 
 
-CACHE_SCHEMA_VERSION = "document-analysis-v5-quality-outcomes"
+CACHE_SCHEMA_VERSION = "document-analysis-v7-ocr-advisory"
 MIN_READABLE_CHARACTERS = 40
 MIN_READABLE_WORDS = 8
 
@@ -153,6 +154,7 @@ def _inconclusive_payload(text: str, quality: dict) -> dict:
             ),
             "analysisMode": "quality_gate",
             "findings": [],
+            "keyClauses": [],
             "processingMeta": _processing_meta(text),
             "ocrQuality": quality,
         },
@@ -535,14 +537,11 @@ class Orchestrator:
             if analysis.get("analysisOutcome") == "inconclusive_analysis"
             else "findings_detected"
             if merged_findings
-            else "inconclusive_ocr"
-            if ocr_quality.get("status") == "review_recommended"
             else "no_findings_detected"
         )
-        if analysis["analysisOutcome"] in (
-            "inconclusive_ocr",
-            "inconclusive_analysis",
-        ):
+        # OCR warnings are advisory. An ordinary typo or unclear amount does
+        # not erase independently grounded findings or their score.
+        if analysis["analysisOutcome"] == "inconclusive_analysis":
             analysis["documentStatus"] = analysis["analysisOutcome"]
             analysis["riskLevel"] = "Review required"
             analysis["score"] = None

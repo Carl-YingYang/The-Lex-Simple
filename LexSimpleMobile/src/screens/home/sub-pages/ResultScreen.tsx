@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     BackHandler,
     Modal,
     Pressable,
@@ -11,13 +12,16 @@ import {
     View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import ScreenLayout from '../../../components/ScreenLayout';
 import ClauseCard from '../../../components/ClauseCard';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { analyzeSanitizedDocument } from '../../../services/AiEngine';
+import type { SanitizedDocumentApiPayload } from '../../../utils/sanitizer';
 
-// RESULT SCREEN VERSION: 3.0.0
+// RESULT SCREEN VERSION: 6.2.3
 // Floating Lexie Insight chat bubble build.
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -39,6 +43,11 @@ type AnalysisResult = {
     riskLevel: string;
     documentTitle?: string;
     findings: Finding[];
+    keyClauses: Array<{
+        title: string;
+        explanation: string;
+        foundText: string;
+    }>;
     rag_context_used?: string;
     sanitizedText?: string;
     ocrText?: string;
@@ -168,9 +177,6 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
         : Array.isArray(payload.clauses)
           ? payload.clauses
           : [];
-    const score = rawFindings.length > 0
-        ? clampScore(payload.score ?? payload.safety_score)
-        : null;
     const explicitOutcome = String(payload.analysisOutcome ?? '');
     const allowedOutcomes: AnalysisResult['analysisOutcome'][] = [
         'findings_detected',
@@ -188,6 +194,13 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
           : rawFindings.length > 0
             ? 'findings_detected'
             : 'inconclusive_analysis';
+    // An uncertain OCR result must never fall back to safety_score.
+    const score = analysisOutcome === 'findings_detected' &&
+        rawFindings.length > 0
+        ? clampScore(payload.score !== undefined
+            ? payload.score
+            : payload.safety_score)
+        : null;
     const rawIssues = payload.ocrQuality?.issues;
 
     return {
@@ -207,6 +220,21 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
         findings: rawFindings
             .map(normalizeFinding)
             .filter((item): item is Finding => item !== null),
+        keyClauses: Array.isArray(payload.keyClauses)
+            ? payload.keyClauses
+                .filter((item: any) =>
+                    item && typeof item.title === 'string' &&
+                    typeof item.explanation === 'string' &&
+                    typeof item.foundText === 'string' &&
+                    item.title.trim() && item.explanation.trim() &&
+                    item.foundText.trim()
+                )
+                .map((item: any) => ({
+                    title: item.title.trim(),
+                    explanation: item.explanation.trim(),
+                    foundText: item.foundText.trim(),
+                }))
+            : [],
         rag_context_used: String(
             payload.rag_context_used ??
                 raw?.rag_context_used ??
@@ -290,22 +318,49 @@ export default function ResultScreen({ route, navigation }: any) {
     const [legalModalVisible, setLegalModalVisible] = useState(false);
     const [selectedLegalTitle, setSelectedLegalTitle] = useState('');
     const [selectedLegalText, setSelectedLegalText] = useState('');
+    const [selectedCondition, setSelectedCondition] = useState<AnalysisResult['keyClauses'][number] | null>(null);
+    const [showAllConditions, setShowAllConditions] = useState(false);
+    const [selectedDocumentIndex, setSelectedDocumentIndex] = useState(0);
+    const [retryingIndex, setRetryingIndex] = useState<number | null>(null);
+    const [retriedDocuments, setRetriedDocuments] = useState<Record<number, any>>({});
+    const retryAbortRef = useRef<AbortController | null>(null);
+
+    const routeAnalysis = route?.params?.analysisResult;
+    const batchDocuments: Array<{
+        pageNumbers: number[];
+        analysisResult: any;
+        historyId?: string;
+        retryPayload?: SanitizedDocumentApiPayload;
+    }> =
+        Array.isArray(routeAnalysis?.batchDocuments)
+            ? routeAnalysis.batchDocuments.filter((item: any) =>
+                item && Array.isArray(item.pageNumbers) && item.analysisResult
+            )
+            : [];
+    const selectedDocument = batchDocuments[selectedDocumentIndex];
+    const activeAnalysis = retriedDocuments[selectedDocumentIndex] ??
+        selectedDocument?.analysisResult ?? routeAnalysis;
 
     const result = useMemo(
-        () => normalizeAnalysisResult(route?.params?.analysisResult),
-        [route?.params?.analysisResult]
+        () => normalizeAnalysisResult(activeAnalysis),
+        [activeAnalysis]
     );
-    const hasAnalysisResult = Boolean(route?.params?.analysisResult);
+    const hasAnalysisResult = Boolean(activeAnalysis);
     const needsReview = [
         'inconclusive_ocr',
         'inconclusive_analysis',
         'mixed_documents',
     ].includes(result.analysisOutcome);
+    const canAskLexie = !activeAnalysis?.failureMessage &&
+        result.analysisOutcome !== 'mixed_documents' &&
+        Boolean(result.sanitizedText || result.findings.length || result.keyClauses.length);
     const noFindings = result.analysisOutcome === 'no_findings_detected';
-    const resultMessage = result.analysisOutcome === 'mixed_documents'
-        ? 'Magkakaibang dokumento ang nasa batch. Hatiin at ipa-check ang bawat isa nang hiwalay.'
+    const resultMessage = activeAnalysis?.failureMessage
+        ? String(activeAnalysis.failureMessage)
+        : result.analysisOutcome === 'mixed_documents'
+        ? 'May magkakaibang dokumento sa scan na hindi sigurado ang awtomatikong paghihiwalay. Kunan silang magkahiwalay para maging tama ang resulta.'
         : result.analysisOutcome === 'inconclusive_ocr'
-          ? 'Hindi maaasahan ang ilang nabasang bahagi, lalo na ang amounts o table. I-review at kunan ulit bago umasa sa analysis.'
+          ? 'May posibleng maling nabasang halaga o talaan. Tingnan ang orihinal na larawan bago umasa sa mga numero.'
           : result.analysisOutcome === 'inconclusive_analysis'
             ? 'Hindi nakumpleto o hindi sapat ang analysis. Subukan ulit; wala pang maaasahang finding.'
             : noFindings
@@ -325,6 +380,58 @@ export default function ResultScreen({ route, navigation }: any) {
             routes: [{ name: 'Main' }],
         });
     };
+
+    const retrySelectedDocument = async (): Promise<void> => {
+        if (!selectedDocument?.retryPayload || retryingIndex !== null) return;
+        const index = selectedDocumentIndex;
+        const controller = new AbortController();
+        retryAbortRef.current = controller;
+        setRetryingIndex(index);
+        try {
+            const response = await analyzeSanitizedDocument(
+                selectedDocument.retryPayload, controller.signal
+            );
+            if (response.status !== 'success' ||
+                response.data.ocrQuality?.status === 'analysis_blocked') {
+                throw new Error('Kunan nang magkahiwalay ang magkakaibang dokumento at subukan ulit.');
+            }
+            if (controller.signal.aborted) return;
+            const updated = {
+                ...response.data,
+                sanitizedText: selectedDocument.analysisResult.sanitizedText,
+                inputMeta: response.inputMeta,
+            };
+            setRetriedDocuments((existing) => ({ ...existing, [index]: updated }));
+            if (selectedDocument.historyId) {
+                try {
+                    const stored = await AsyncStorage.getItem('@lex_scan_history');
+                    const history = stored ? JSON.parse(stored) : [];
+                    if (Array.isArray(history)) {
+                        await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(
+                            history.map((item: any) => item.id === selectedDocument.historyId
+                                ? { ...item, status: 'scanned', analysisResult: updated }
+                                : item)
+                        ));
+                    }
+                } catch (error) {
+                    console.error('[ResultScreen] History update failed:', error);
+                }
+            }
+        } catch (error) {
+            if (!controller.signal.aborted) {
+                showAlert(
+                    'Hindi pa nasuri ang dokumentong ito',
+                    error instanceof Error ? error.message : 'Subukan ulit.',
+                    'warning', [{ text: 'Sige' }]
+                );
+            }
+        } finally {
+            if (retryAbortRef.current === controller) retryAbortRef.current = null;
+            setRetryingIndex(null);
+        }
+    };
+
+    useEffect(() => () => retryAbortRef.current?.abort(), []);
 
     useEffect(() => {
         const subscription = BackHandler.addEventListener(
@@ -467,6 +574,11 @@ export default function ResultScreen({ route, navigation }: any) {
         const safeDocumentText = result.sanitizedText
             ? result.sanitizedText.slice(0, 6000)
             : 'Hindi available ang sanitized document text.';
+        const conditionsText = result.keyClauses.length
+            ? result.keyClauses.map((clause, index) =>
+                `${index + 1}. ${clause.title}\nPaliwanag: ${clause.explanation}\nNakitang text: ${clause.foundText}`
+            ).join('\n\n')
+            : 'Walang naitalang pangunahing kondisyon.';
 
         navigation.navigate('AskAiScreen', {
             attachedFile: {
@@ -476,14 +588,20 @@ export default function ResultScreen({ route, navigation }: any) {
                 data: [
                     'DOCUMENT ANALYSIS',
                     result.score === null
-                        ? 'Score: Hindi ibinigay (walang na-flag)'
+                        ? 'Score: Hindi ibinigay; hindi ibig sabihin na ligtas ang dokumento.'
                         : `Score: ${result.score}/100`,
+                    needsReview
+                        ? 'Status: May bahagi ng analysis na hindi kumpleto. Gamitin lamang ang mga nakitang text bilang gabay.'
+                        : 'Status: Nasuri ang nabasang text.',
                     `Risk: ${riskConfig.shortLabel}`,
                     '',
                     'FINDINGS',
                     findingsText,
                     '',
-                    'SANITIZED DOCUMENT TEXT',
+                    `MGA PANGUNAHING KONDISYON (${result.keyClauses.length} SA RESULTA)`,
+                    conditionsText,
+                    '',
+                    'BAHAGI NG SANITIZED DOCUMENT TEXT',
                     safeDocumentText,
                 ].join('\n'),
             },
@@ -496,20 +614,31 @@ export default function ResultScreen({ route, navigation }: any) {
         });
     };
 
+    const askLexieAboutCondition = (clause: AnalysisResult['keyClauses'][number]): void => {
+        setSelectedCondition(null);
+        navigation.navigate('AskAiScreen', {
+            attachedFile: {
+                name: `Kondisyon: ${clause.title}`,
+                data: `Pamagat: ${clause.title}\nPaliwanag sa Resulta: ${clause.explanation}\nEksaktong nabasang text: ${clause.foundText}`,
+            },
+            suggestedPrompts: [
+                'Ano ang ibig sabihin nito sa simpleng Taglish?',
+                'Ano ang dapat kong linawin tungkol dito?',
+                'Anong tanong ang maaari kong itanong sa kabilang partido?',
+            ],
+        });
+    };
+
     const askLexieAboutClause = (
         finding: Finding,
         initialPrompt?: string,
-        dynamicPrompts?: string[],
-        legalBasis?: string
+        dynamicPrompts?: string[]
     ): void => {
-        const savedLegalBasis =
-            legalBasis || findBestLegalContext(finding);
         const context = [
             `CLAUSE: ${finding.title}`,
             `Paliwanag: ${finding.description}`,
             `Practical guidance: ${finding.advice}`,
             `Original text: ${finding.foundText}`,
-            `Legal reference: ${savedLegalBasis}`,
         ].join('\n\n');
 
         navigation.navigate('AskAiScreen', {
@@ -541,11 +670,60 @@ export default function ResultScreen({ route, navigation }: any) {
             />
 
             <ScrollView
-                testID="result-screen-v3"
+                testID="result-screen-v5"
                 style={{ backgroundColor: T.bg }}
                 contentContainerStyle={styles.content}
                 showsVerticalScrollIndicator={false}
             >
+                {batchDocuments.length > 1 && (
+                    <View style={[styles.documentTabs, { borderColor: T.border }]}>
+                        <Text style={[styles.documentTabsHeading, { color: T.subText }]}>
+                            {batchDocuments.length} dokumento mula sa isang scan · pumili ng resulta
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {batchDocuments.map((item, index) => (
+                                <TouchableOpacity
+                                    key={`${item.pageNumbers.join('-')}-${index}`}
+                                    style={[
+                                        styles.documentTab,
+                                        { borderColor: index === selectedDocumentIndex ? PRIMARY : T.border,
+                                          backgroundColor: index === selectedDocumentIndex ? PRIMARY : T.card },
+                                    ]}
+                                    onPress={() => {
+                                        setSelectedDocumentIndex(index);
+                                        setScoreModalVisible(false);
+                                        setLegalModalVisible(false);
+                                        setSelectedCondition(null);
+                                        setShowAllConditions(false);
+                                    }}
+                                    accessibilityRole="tab"
+                                    accessibilityState={{ selected: index === selectedDocumentIndex }}
+                                >
+                                    <Text style={{ color: index === selectedDocumentIndex ? '#FFFFFF' : T.text, fontWeight: '800' }}>
+                                        Dokumento {index + 1}
+                                    </Text>
+                                    <Text style={{ color: index === selectedDocumentIndex ? '#E6EEFF' : T.subText, fontSize: 11, marginTop: 3 }}>
+                                        Pahina {item.pageNumbers.join(', ')}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+                {selectedDocument?.retryPayload && activeAnalysis?.failureMessage && (
+                    <TouchableOpacity
+                        style={styles.retryDocumentButton}
+                        onPress={() => void retrySelectedDocument()}
+                        disabled={retryingIndex !== null}
+                        accessibilityRole="button"
+                    >
+                        {retryingIndex === selectedDocumentIndex &&
+                            <ActivityIndicator size="small" color="#FFFFFF" />}
+                        <Text style={styles.retryDocumentText}>
+                            Subukan muli ang Dokumento {selectedDocumentIndex + 1}
+                        </Text>
+                    </TouchableOpacity>
+                )}
                 <View
                     style={[
                         styles.noticeCard,
@@ -755,7 +933,7 @@ export default function ResultScreen({ route, navigation }: any) {
                             ]}
                         >
                             {needsReview
-                                ? 'Hindi pa sapat ang pagsusuri'
+                                ? 'May bahaging hindi tiyak'
                                 : 'Walang na-flag na clause'}
                         </Text>
                         <Text
@@ -766,7 +944,7 @@ export default function ResultScreen({ route, navigation }: any) {
                         >
                             {needsReview
                                 ? [resultMessage, ...result.ocrIssues.slice(0, 2)].join('\n')
-                                : 'May mga clause na maaaring hindi nabasa o na-flag. I-check ang OCR at buong dokumento bago magdesisyon.'}
+                                : 'May bahaging maaaring hindi nabasa. Tingnan din ang orihinal na dokumento bago magdesisyon.'}
                         </Text>
                     </View>
                 ) : (
@@ -786,9 +964,59 @@ export default function ResultScreen({ route, navigation }: any) {
                     ))
                 )}
 
+                {result.keyClauses.length > 0 && (
+                    <>
+                        <View style={styles.sectionHeader}>
+                            <Text style={[styles.sectionTitle, { color: T.text }]}>
+                                Mga pangunahing kondisyon
+                            </Text>
+                            <Text style={[styles.sectionCount, { color: T.subText }]}>
+                                {result.keyClauses.length}
+                            </Text>
+                        </View>
+                        <Text style={[styles.keyClauseIntro, { color: T.subText }]}>
+                            Mga nabasang kondisyon sa dokumento. Tap para makita ang buong text.
+                        </Text>
+                        {(showAllConditions ? result.keyClauses : result.keyClauses.slice(0, 3)).map((clause, index) => (
+                            <TouchableOpacity
+                                key={`${clause.foundText}-${index}`}
+                                style={[styles.keyClauseCard, {
+                                    backgroundColor: T.card,
+                                    borderColor: T.border,
+                                }]}
+                                onPress={() => setSelectedCondition(clause)}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Basahin ang kondisyon: ${clause.title}`}
+                                activeOpacity={0.78}
+                            >
+                                <View style={styles.keyClauseHeading}>
+                                    <Text style={[styles.keyClauseTitle, { color: T.text }]}>
+                                        {clause.title}
+                                    </Text>
+                                    <Ionicons name="chevron-forward" size={17} color={T.subText} />
+                                </View>
+                                <Text style={[styles.keyClauseExplanation, { color: T.subText }]} numberOfLines={2}>
+                                    {clause.explanation}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                        {result.keyClauses.length > 3 && (
+                            <TouchableOpacity
+                                style={[styles.showConditionsButton, { borderColor: T.border }]}
+                                onPress={() => setShowAllConditions((current) => !current)}
+                                accessibilityRole="button"
+                            >
+                                <Text style={styles.showConditionsText}>
+                                    {showAllConditions ? 'Ipakita ang unang 3' : `Tingnan lahat (${result.keyClauses.length})`}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+                    </>
+                )}
+
             </ScrollView>
 
-            {!needsReview && <TouchableOpacity
+            {canAskLexie && <TouchableOpacity
                 style={styles.lexieButton}
                 onPress={askLexieAboutDocument}
                 activeOpacity={0.88}
@@ -846,7 +1074,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 >
                                     {result.score === null
                                         ? needsReview
-                                            ? 'Kailangan munang i-review ang scan'
+                                            ? 'May hindi tiyak na nabasang text'
                                             : 'Walang na-flag sa nabasang text'
                                         : 'Buod ng mga nakitang bahagi'}
                                 </Text>
@@ -987,7 +1215,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     ]}
                                 >
                                     {needsReview
-                                        ? 'Hindi maaasahan ang empty findings hangga’t hindi narereview ang OCR.'
+                                        ? 'Maaaring may bahaging hindi nabasa nang tama. Ihambing sa orihinal na larawan.'
                                         : 'Walang na-flag na clause sa available OCR text.'}
                                 </Text>
                             )}
@@ -1006,6 +1234,61 @@ export default function ResultScreen({ route, navigation }: any) {
                                         finding.
                                     </Text>
                                 )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={selectedCondition !== null}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={() => setSelectedCondition(null)}
+            >
+                <View style={styles.modalBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedCondition(null)} />
+                    <View style={[styles.modalCard, { backgroundColor: T.card, borderColor: T.border }]}>
+                        <View style={styles.modalHeader}>
+                            <View style={styles.modalHeadingCopy}>
+                                <Text style={[styles.modalTitle, { color: T.text }]} numberOfLines={2}>
+                                    {selectedCondition?.title}
+                                </Text>
+                                <Text style={[styles.modalSubtitle, { color: T.subText }]}>
+                                    Pangunahing kondisyon
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setSelectedCondition(null)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Isara ang kondisyon"
+                            >
+                                <Ionicons name="close" size={21} color={T.text} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
+                            <Text style={[styles.conditionModalLabel, { color: T.subText }]}>PALIWANAG</Text>
+                            <Text style={[styles.conditionModalExplanation, { color: T.text }]}>
+                                {selectedCondition?.explanation}
+                            </Text>
+                            <Text style={[styles.conditionModalLabel, { color: T.subText }]}>NABASANG TEXT SA DOKUMENTO</Text>
+                            <Text style={[styles.conditionModalQuote, { color: T.text, borderColor: T.border, backgroundColor: T.bg }]} selectable>
+                                {selectedCondition?.foundText}
+                            </Text>
+                            <Text style={[styles.conditionModalNote, { color: T.subText }]}>
+                                Ihambing ang nabasang text sa orihinal na pahina kung may malabong salita o numero.
+                            </Text>
+                            {selectedCondition && (
+                                <TouchableOpacity
+                                    style={styles.conditionAskButton}
+                                    onPress={() => askLexieAboutCondition(selectedCondition)}
+                                    accessibilityRole="button"
+                                >
+                                    <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
+                                    <Text style={styles.conditionAskText}>Tanungin si Lexie</Text>
+                                </TouchableOpacity>
+                            )}
                         </ScrollView>
                     </View>
                 </View>
@@ -1049,7 +1332,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Legal reference
+                                    Posibleng kaugnay na sanggunian
                                 </Text>
                             </View>
                             <TouchableOpacity
@@ -1070,6 +1353,9 @@ export default function ResultScreen({ route, navigation }: any) {
                             contentContainerStyle={styles.modalBody}
                             showsVerticalScrollIndicator={false}
                         >
+                            <Text style={[styles.conditionModalNote, { color: T.subText }]}>
+                                Awtomatikong napiling kaugnay na teksto. Hindi pa napatutunayang direktang legal basis ito ng clause.
+                            </Text>
                             <Text
                                 style={[
                                     styles.legalText,
@@ -1090,6 +1376,18 @@ export default function ResultScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    retryDocumentButton: {
+        minHeight: 46, borderRadius: 7, backgroundColor: PRIMARY,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        gap: 9, marginBottom: 14, paddingHorizontal: 12,
+    },
+    retryDocumentText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+    documentTabs: { borderWidth: 1, borderRadius: 9, padding: 12, marginBottom: 15 },
+    documentTabsHeading: { fontSize: 12, lineHeight: 18, marginBottom: 10 },
+    documentTab: {
+        minWidth: 126, borderWidth: 1, borderRadius: 7,
+        paddingHorizontal: 12, paddingVertical: 9, marginRight: 8,
+    },
     missingState: {
         flex: 1,
         paddingHorizontal: 24,
@@ -1289,6 +1587,86 @@ const styles = StyleSheet.create({
     },
     clauseWrapper: {
         marginBottom: 12,
+    },
+    keyClauseIntro: {
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 12,
+    },
+    keyClauseCard: {
+        borderWidth: 1,
+        borderRadius: 7,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        marginBottom: 9,
+    },
+    keyClauseHeading: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    keyClauseTitle: {
+        fontSize: 15,
+        fontWeight: '800',
+        flex: 1,
+        marginRight: 10,
+    },
+    keyClauseExplanation: {
+        fontSize: 13,
+        lineHeight: 20,
+        marginTop: 6,
+    },
+    showConditionsButton: {
+        minHeight: 44,
+        borderWidth: 1,
+        borderRadius: 7,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 3,
+    },
+    showConditionsText: {
+        color: PRIMARY_SOFT,
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    conditionModalLabel: {
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        marginBottom: 7,
+    },
+    conditionModalExplanation: {
+        fontSize: 14,
+        lineHeight: 22,
+        marginBottom: 20,
+    },
+    conditionModalQuote: {
+        borderWidth: 1,
+        borderRadius: 7,
+        padding: 13,
+        fontSize: 12,
+        lineHeight: 19,
+    },
+    conditionModalNote: {
+        fontSize: 11,
+        lineHeight: 17,
+        marginTop: 12,
+    },
+    conditionAskButton: {
+        minHeight: 46,
+        marginTop: 20,
+        marginBottom: 3,
+        borderRadius: 7,
+        backgroundColor: '#5B21B6',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    conditionAskText: {
+        marginLeft: 8,
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#FFFFFF',
     },
     emptyCard: {
         borderWidth: 1,

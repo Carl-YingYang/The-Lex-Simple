@@ -36,6 +36,7 @@ const SCANS_ROOT = new Directory(
 
 export type LocalScanImage = {
     uri: string;
+    ocrText?: string;
     source?: ScanPageSource;
     width?: number;
     height?: number;
@@ -186,9 +187,10 @@ const copyInputsToSession = (
             height: normalizedInput.height,
 
             rotation: 0,
-            status: 'ready',
-
             source: normalizedInput.source,
+            ocrText: normalizedInput.ocrText,
+            ocrSourceUri: normalizedInput.ocrText ? destinationFile.uri : undefined,
+            status: normalizedInput.ocrText ? 'ocr-complete' : 'ready',
             createdAt,
         };
     });

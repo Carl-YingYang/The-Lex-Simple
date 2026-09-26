@@ -1,3 +1,4 @@
+# AI ROUTER VERSION: 2.0.0
 import copy
 import hashlib
 import hmac
@@ -11,7 +12,7 @@ import docx
 import fitz
 import pdfplumber
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from db.chroma_store import query_vector_db
 from orchestrator.pipeline import Orchestrator, ProcessRequest
@@ -29,15 +30,15 @@ MIN_DOCUMENT_CHARACTERS = 20
 
 
 class SanitizedPageRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     page_number: int = Field(..., alias="pageNumber", ge=1)
     sanitized_text: str = Field(..., alias="sanitizedText")
     text_hash: Optional[str] = Field(default=None, alias="textHash")
 
-    class Config:
-        allow_population_by_field_name = True
-
-
 class LegalRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     # Temporary backward compatibility for the existing mobile payload:
     # {"text": "..."}
     text: Optional[str] = None
@@ -46,10 +47,6 @@ class LegalRequest(BaseModel):
     document_id: Optional[str] = Field(default=None, alias="documentId")
     page_count: Optional[int] = Field(default=None, alias="pageCount", ge=1)
     pages: Optional[List[SanitizedPageRequest]] = None
-
-    class Config:
-        allow_population_by_field_name = True
-
 
 class ChatRequest(BaseModel):
     message: str

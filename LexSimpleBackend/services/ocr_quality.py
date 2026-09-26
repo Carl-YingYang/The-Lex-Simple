@@ -2,6 +2,10 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple
 
+# OCR QUALITY VERSION: 2.0.0
+# Questionable numbers and detached tables remain visible as warnings;
+# they cannot be silently corrected by the model. Mixed documents still
+# require separate requests to avoid combining unrelated contracts.
 
 PAGE_MARKER_PATTERN = re.compile(r"(?m)^--- Page (\d+) ---\s*$")
 
@@ -88,12 +92,12 @@ def _money_issues(page_number: int, page_text: str) -> List[OcrQualityIssue]:
         issues.append(
             OcrQualityIssue(
                 code="ambiguous_amount",
-                severity="blocking",
+                severity="warning",
                 page_number=page_number,
                 sample=candidate[:40],
                 message=(
-                    f"Hindi mapagkakatiwalaan ang amount sa Page {page_number}: "
-                    f"{candidate}. I-review o i-scan ulit ang page."
+                    f"Posibleng mali ang nabasang halaga sa pahina {page_number}: "
+                    f"{candidate}. Ihambing sa larawan bago umasa sa numero."
                 ),
             )
         )
@@ -134,11 +138,11 @@ def assess_ocr_quality(text: str) -> dict:
                             "table_columns_detached"
                             if broken_columns else "table_layout_requires_review"
                         ),
-                        severity="blocking" if broken_columns else "warning",
+                severity="warning",
                         page_number=page_number,
                         message=(
-                            f"{('Nahiwalay ang table columns' if broken_columns else 'May table-like financial data')} "
-                            f"sa Page {page_number}. Ihambing ang rows at columns sa original image."
+                            f"{('Magkakahiwalay ang mga hanay ng talaan' if broken_columns else 'May talaan ng halaga')} "
+                            f"sa pahina {page_number}. Ihambing sa larawan bago umasa sa numero."
                         ),
                     )
                 )

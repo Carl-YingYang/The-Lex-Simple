@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
 
-// 🚀 IMPORT ANG MGA CUSTOM ICONS
+// CLAUSE CARD VERSION: 6.2.3
 const ConfidenceIcon = require('../../assets/icons/confidence_chart.png');
 const LibraryIcon = require('../../assets/icons/library.png');
 const MessageAiIcon = require('../../assets/icons/message_ai.png');
@@ -28,6 +28,10 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
   const { colors: T } = useTheme();
 
   const shouldTruncate = item.foundText.length > 120;
+  const hasRelatedContext = Boolean(ragContext?.trim() && !ragContext.includes('NO VERIFIED LEGAL CONTEXT FOUND'));
+  const confidence = typeof item.confidence === 'string' && /^(?:100|[1-9]?\d)%$/.test(item.confidence.trim())
+    ? item.confidence.trim()
+    : null;
   const displaySnippet = (!isExpanded && shouldTruncate)
     ? item.foundText.substring(0, 120) + '...'
     : item.foundText;
@@ -39,23 +43,8 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
     if (t.match(/liability|damage|risk|sira|indemnify|responsibility/)) return ["Sino ang magbabayad kapag may nasira?", "Ano ang worst-case scenario rito?", "Paano ko lilimitahan ang risk ko?"];
     if (t.match(/confidential|data|privacy|secret/)) return ["Ligtas ba ang personal info ko rito?", "Kanino nila pwedeng i-share ang data ko?", "Pwede ko ba itong ipabura?"];
     if (t.match(/default|breach|violation|labag|entry|access/)) return ["Ano ang mangyayari kung lumabag ako rito?", "Legal ba ang ginagawa nilang ito?", "Paano ko ito maiiwasan?"];
-    return [`Bakit risky ang ${item.title}?`, "Pwede ko ba itong ipatanggal?", "Paki-explain nang mas simple."];
+    return [`Ano ang ibig sabihin ng ${item.title}?`, "Ano ang dapat kong linawin?", "Paki-explain nang mas simple."];
   }, [item.title]);
-
-  const extractLegalBasis = () => {
-    if (!ragContext || ragContext.trim() === "") return null;
-    const chunks = ragContext.split('\n---\n').map(c => c.trim()).filter(c => c.length > 0);
-    const extractKeywords = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
-    const findingKeywords = extractKeywords(`${item.title} ${item.description} ${item.foundText}`);
-
-    let bestChunk = null; let highestScore = 0;
-    chunks.forEach((chunk: string) => {
-      const chunkLower = chunk.toLowerCase(); let score = 0;
-      findingKeywords.forEach(word => { if (chunkLower.includes(word)) score++; });
-      if (score > highestScore) { highestScore = score; bestChunk = chunk; }
-    });
-    return highestScore > 0 ? bestChunk : null;
-  };
 
   return (
     <View style={[styles.card, { backgroundColor: T.card, borderColor: T.border }]}>
@@ -65,11 +54,12 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         <Text style={[styles.title, { color: T.text }]}>{item.title}</Text>
       </View>
 
-      {/* 🚀 CUSTOM ICON: AI CONFIDENCE (Orig Icon Color, Solid Theme Text Color) */}
-      <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.border }]}>
-        <Image source={ConfidenceIcon} style={styles.tagIcon} resizeMode="contain" />
-        <Text style={[styles.tagText, { color: T.text }]}>AI Confidence: {item.confidence || '90%'}</Text>
-      </View>
+      {confidence && (
+        <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.border }]}>
+          <Image source={ConfidenceIcon} style={styles.tagIcon} resizeMode="contain" />
+          <Text style={[styles.tagText, { color: T.text }]}>AI estimate: {confidence}</Text>
+        </View>
+      )}
 
       <Text style={[styles.label, { color: T.subText }]}>Explanation</Text>
       <Text style={[styles.description, { color: T.text }]}>{item.description}</Text>
@@ -90,15 +80,17 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         )}
       </View>
 
-      {/* 🚀 CUSTOM ICON: VIEW LEGAL BASIS (Orig Icon Color, Solid Theme Text Color) */}
-      <TouchableOpacity
-        style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.border }]}
-        onPress={() => onShowLegalBasis(item)}
-      >
-        <Image source={LibraryIcon} style={styles.btnIcon} resizeMode="contain" />
-        <Text style={[styles.basisBtnText, { color: T.text }]}>View Legal Basis</Text>
-        <Ionicons name="chevron-forward" size={16} color={T.text} style={{ marginLeft: 'auto' }} />
-      </TouchableOpacity>
+      {hasRelatedContext && (
+        <TouchableOpacity
+          style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.border }]}
+          onPress={() => onShowLegalBasis(item)}
+          accessibilityRole="button"
+        >
+          <Image source={LibraryIcon} style={styles.btnIcon} resizeMode="contain" />
+          <Text style={[styles.basisBtnText, { color: T.text }]}>Kaugnay na sanggunian</Text>
+          <Ionicons name="chevron-forward" size={16} color={T.text} style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+      )}
 
       {/* ASK AI SECTION */}
       <View style={[styles.askAiSection, { borderTopColor: T.border }]}>
@@ -108,7 +100,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
           {dynamicPrompts.map((prompt, i) => (
             <TouchableOpacity
               key={i}
-              onPress={() => onAskAiDeepDive(item, prompt, dynamicPrompts, extractLegalBasis() || undefined)}
+              onPress={() => onAskAiDeepDive(item, prompt, dynamicPrompts)}
               style={[styles.promptChip, { backgroundColor: T.bg, borderColor: T.border }]}
             >
               <Text style={[styles.promptText, { color: T.text }]}>{prompt}</Text>
@@ -119,7 +111,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         {/* 🚀 CUSTOM ICON: DISCUSS IN ASK AI (TINT COLOR WHITE) */}
         <TouchableOpacity
           style={[styles.discussBtn, { borderColor: COLORS.primaryLight }]}
-          onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts, extractLegalBasis() || undefined)}
+          onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts)}
         >
           <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
           <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Discuss in Lexie Insight</Text>

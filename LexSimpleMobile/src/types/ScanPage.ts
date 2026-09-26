@@ -71,6 +71,9 @@ export interface ScanPage {
     /** Locally recognized text. Never use this field for raw images. */
     ocrText?: string;
 
+    /** URI that produced ocrText; edited images require fresh OCR. */
+    ocrSourceUri?: string;
+
     /** Non-fatal OCR quality warning for this page. */
     ocrWarning?: string;
 
