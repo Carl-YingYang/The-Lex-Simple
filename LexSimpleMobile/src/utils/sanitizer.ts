@@ -42,6 +42,7 @@ export const REDACTION = {
     PHONE: '[REDACTED_PHONE]',
     ADDRESS: '[REDACTED_ADDRESS]',
     NAME: '[REDACTED_NAME]',
+    ENTITY: '[REDACTED_ENTITY]',
     ID: '[REDACTED_ID]',
     ACCOUNT: '[REDACTED_ACCOUNT]',
     CARD: '[REDACTED_CARD]',
@@ -53,6 +54,8 @@ export const REDACTION = {
     SIGNATURE: '[REDACTED_SIGNATURE]',
     UNKNOWN_SENSITIVE: '[REDACTED_SENSITIVE_DATA]',
 } as const;
+
+export const SANITIZER_VERSION = '2.6.0';
 
 
 /* ============================================================
@@ -116,6 +119,250 @@ const normalizeOcrDigits = (value: string): string => {
 };
 
 
+/**
+ * Collect person names only from strong legal-document contexts.
+ *
+ * This intentionally avoids redacting every capitalized phrase because
+ * court names, agencies, corporations, and case titles are legally useful.
+ */
+const collectContextualPersonNames = (text: string): string[] => {
+    const discovered = new Set<string>();
+
+    const addName = (value: string | undefined): void => {
+        const normalized = String(value || '')
+            .replace(/^[,\s]+|[,\s]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (
+            normalized.length >= 3 &&
+            normalized.length <= 160 &&
+            /[A-Za-z]/.test(normalized) &&
+            // The final privacy scan runs over already-redacted text.
+            // A caption containing "[REDACTED_NAME], Complainant" is safe;
+            // treating that marker as a new person blocks valid scans.
+            !/\[REDACTED_[A-Z_]+\]/i.test(normalized) &&
+            !/\b(?:corporation|corp\.?|inc\.?|opc|company|office|department|chief|executive|officer|treasurer|president|manager|director|secretary|prosecutor|judge|court)\b/i.test(
+                normalized
+            )
+        ) {
+            discovered.add(normalized);
+        }
+    };
+
+    /*
+     * Affidavit declaration:
+     * "I, JUAN DELA CRUZ, Filipino..."
+     * OCR variants such as "of legal, Filipino citizen" are accepted.
+     */
+    const declarationPattern =
+        /\bI,\s*([A-Z][A-Za-z.'-]{1,40}(?:[ \t]+(?:y[ \t]+)?[A-Z][A-Za-z.'-]{1,40}){1,7}),\s*(?=(?:of[ \t]+(?:legal|lawful)(?:[ \t]+age)?|Filipin[oa](?:[ \t]+citizen)?|single|married|widowed|divorced)\b)/gu;
+
+    for (const match of text.matchAll(declarationPattern)) {
+        addName(match[1]);
+    }
+
+    /*
+     * Named people introduced with a short alias:
+     * "Janine Mae Olindo ("Janine")"
+     *
+     * Requiring at least two normal name words prevents company aliases
+     * such as Four R Customs Brokerage OPC ("Four R") from being treated
+     * as a person.
+     */
+    const aliasIntroductionPattern =
+        /\b([A-Z][A-Za-z.'-]{1,40}(?:[ \t]+[A-Z][A-Za-z.'-]{1,40}){1,5})[ \t]*,?\s*\(\s*["']?([A-Z][A-Za-z.'-]{2,30})["']?\s*\)/gu;
+
+    for (const match of text.matchAll(aliasIntroductionPattern)) {
+        const alias = match[2];
+
+        if (
+            !/^(?:CEO|CFO|COO|CTO|OPC|INC|CORP|LLC)$/i.test(alias)
+        ) {
+            addName(match[1]);
+            addName(alias);
+        }
+    }
+
+    /*
+     * Personal relationship context:
+     * "friend of Renelyn's husband, Randy Santiago"
+     */
+    const relationshipPattern =
+        /\b(?:husband|wife|spouse|father|mother|son|daughter|brother|sister),?\s+([A-Z][A-Za-z.'-]{1,40}(?:\s+[A-Z][A-Za-z.'-]{1,40}){1,4})\b/gu;
+
+    for (const match of text.matchAll(relationshipPattern)) {
+        addName(match[1]);
+    }
+
+    /*
+     * Case-caption parties immediately followed by a procedural role.
+     * Supports a one-line caption such as:
+     * "JANINE MAE SALIPOT OLINDO,\nComplainant,"
+     */
+    const captionPattern =
+        /^([A-Z][A-Z.'-]{0,40}(?:[ \t]+(?:y[ \t]+)?[A-Z][A-Z.'-]{0,40}){1,8}),?[ \t]*\n(?=(?:Complainant|Respondent|Petitioner|Plaintiff|Defendant|Accused|Affiant|Applicant|Oppositor|Admin[A-Za-z]*[ \t]*Officer|City[ \t]+Prosecutor)\b)/gmu;
+
+    for (const match of text.matchAll(captionPattern)) {
+        addName(match[1]);
+    }
+
+    /*
+     * OCR may wrap a long caption name and its a.k.a. alias across several
+     * lines. When an a.k.a. marker exists immediately before a party role,
+     * the complete block is treated as one identity. This avoids retaining
+     * fragments such as "KIMBERLY JOYCE CADAVOS y DALIMOT".
+     */
+    const lines = text.split('\n');
+    const partyRolePattern =
+        /^(?:Complainant|Respondent|Petitioner|Plaintiff|Defendant|Accused|Affiant|Applicant|Oppositor|Admin[A-Za-z]*\s*Officer|City\s+Prosecutor)\b/i;
+
+    lines.forEach((line, roleIndex) => {
+        if (!partyRolePattern.test(line.trim())) {
+            return;
+        }
+
+        const precedingLines: string[] = [];
+
+        for (
+            let index = roleIndex - 1;
+            index >= 0 && index >= roleIndex - 4;
+            index -= 1
+        ) {
+            const candidateLine = lines[index].trim();
+
+            if (
+                !candidateLine ||
+                /^(?:versus|vs\.?|v\.?)$/i.test(candidateLine)
+            ) {
+                break;
+            }
+
+            precedingLines.unshift(candidateLine);
+        }
+
+        if (
+            precedingLines.some((candidateLine) =>
+                /\ba\.?k\.?a\.?\b/i.test(candidateLine)
+            )
+        ) {
+            addName(precedingLines.join(' '));
+        } else {
+            /*
+             * For an ordinary one-line caption/signature, only the line
+             * immediately before the role is the person's name. This keeps
+             * nearby jurisdiction headings such as "CALOOCAN CITY".
+             */
+            addName(precedingLines[precedingLines.length - 1]);
+        }
+    });
+
+    return [...discovered].sort(
+        (left, right) => right.length - left.length
+    );
+};
+
+
+const replaceContextualPersonName = (
+    text: string,
+    personName: string
+): string => {
+    const flexibleName = personName
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(escapeRegex)
+        .join('\\s+');
+
+    if (!flexibleName) {
+        return text;
+    }
+
+    const pattern = new RegExp(
+        `(^|[^\\p{L}])${flexibleName}(?=$|[^\\p{L}])`,
+        'gimu'
+    );
+
+    let replaced = text.replace(
+        pattern,
+        (_match, prefix: string) =>
+            `${prefix}${REDACTION.NAME}`
+    );
+
+    /*
+     * OCR commonly changes one or two letters in a known short alias:
+     * Allan -> Alan, Renelyn -> Renclyn, Rodelon -> Rodelio.
+     *
+     * Only compare already-discovered single-word aliases against
+     * capitalized words. This avoids fuzzy-redacting ordinary lowercase
+     * legal language.
+     */
+    if (
+        !personName.includes(' ') &&
+        personName.length >= 5
+    ) {
+        const distance = (left: string, right: string): number => {
+            const previous = Array.from(
+                { length: right.length + 1 },
+                (_, index) => index
+            );
+
+            for (
+                let leftIndex = 1;
+                leftIndex <= left.length;
+                leftIndex += 1
+            ) {
+                const current = [leftIndex];
+
+                for (
+                    let rightIndex = 1;
+                    rightIndex <= right.length;
+                    rightIndex += 1
+                ) {
+                    const substitutionCost =
+                        left[leftIndex - 1] ===
+                        right[rightIndex - 1]
+                            ? 0
+                            : 1;
+
+                    current[rightIndex] = Math.min(
+                        current[rightIndex - 1] + 1,
+                        previous[rightIndex] + 1,
+                        previous[rightIndex - 1] +
+                            substitutionCost
+                    );
+                }
+
+                previous.splice(0, previous.length, ...current);
+            }
+
+            return previous[right.length];
+        };
+
+        const normalizedKnownName =
+            personName.toLocaleLowerCase();
+        const maximumDistance =
+            normalizedKnownName.length >= 7 ? 2 : 1;
+
+        replaced = replaced.replace(
+            /\b[A-Z][A-Za-z.'-]{3,30}\b/g,
+            (candidate) => {
+                const normalizedCandidate =
+                    candidate.toLocaleLowerCase();
+
+                return distance(
+                    normalizedKnownName,
+                    normalizedCandidate
+                ) <= maximumDistance
+                    ? REDACTION.NAME
+                    : candidate;
+            }
+        );
+    }
+
+    return replaced;
+};
+
+
 /* ============================================================
  * CORE SANITIZER
  * ============================================================ */
@@ -126,6 +373,38 @@ export const sanitizeLocalText = (rawText: string): string => {
     }
 
     let sanitized = normalizeForDetection(rawText);
+
+    // In OCR a party role may wrap onto the next line, or a comma can
+    // appear as a period. Preserve the role and agreement terms.
+    const partyWithRole =
+        /\b([A-Z][A-Za-z.'-]{1,40}(?:[ \t]+[A-Z][A-Za-z.'-]{1,40}){1,4})[ \t]*[,.]\s*(?=the\s+(?:Creditor|Debtor|Lender|Borrower|Provider|Client|Lessor|Lessee|Buyer|Seller)\b)/gu;
+    const partyIdentifiers = [...sanitized.matchAll(partyWithRole)]
+        .map((match) => match[1])
+        .filter((name) =>
+            !/\b(?:Agreement|Amount|Payment|Section|Article|Clause|Contract)\b/i.test(name)
+        );
+
+    for (const name of partyIdentifiers) {
+        const replacement =
+            /\b(?:Trading|Studio|Cooperative|Corporation|Company|Corp|Inc|OPC|LLC)\b/i.test(name)
+                ? REDACTION.ENTITY
+                : REDACTION.NAME;
+        sanitized = replaceAllInsensitive(sanitized, name, replacement);
+    }
+
+    /*
+     * Discover names before other passes alter their surrounding context,
+     * then replace every later occurrence of those same names/aliases.
+     */
+    const contextualPersonNames =
+        collectContextualPersonNames(sanitized);
+
+    for (const personName of contextualPersonNames) {
+        sanitized = replaceContextualPersonName(
+            sanitized,
+            personName
+        );
+    }
 
     /*
      * ==========================================================
@@ -176,6 +455,22 @@ export const sanitizeLocalText = (rawText: string): string => {
     sanitized = sanitized.replace(
         /(?:\+?63[\s.-]*)?(?:\(?0[2-9][0-9]{1,2}\)?[\s.-]*)[0-9]{3,4}[\s.-]*[0-9]{4}/giu,
         REDACTION.PHONE
+    );
+
+
+    /*
+     * ==========================================================
+     * PASS 3B — PRIVATE CASE / COMPLAINT REFERENCES
+     * ==========================================================
+     *
+     * NPS, I.S., complaint, and docket numbers can identify a private
+     * proceeding. Public jurisprudence citations such as "G.R. No." are
+     * intentionally preserved because they are legal authorities.
+     */
+
+    sanitized = sanitized.replace(
+        /\b(?:NPS|I\.?S\.?|INV|COMPLAINT|DOCKET|CASE)\s*(?:NO\.?|NUMBER|#)\s*[:#.-]?\s*[A-Z0-9][A-Z0-9./-]*(?:[ \t]*\n[ \t]*[A-Z0-9][A-Z0-9./-]*)?/giu,
+        REDACTION.ID
     );
 
 
@@ -337,7 +632,7 @@ export const sanitizeLocalText = (rawText: string): string => {
          */
         /\b((?:home\s+|residential\s+|current\s+|present\s+|permanent\s+|mailing\s+)?address)\s*[:#-]\s*([^\n;]{5,160}?)(?=,\s*(?:after|before|hereinafter|who|which|and\s+(?:a|the)\b)|[.;](?:\s|$)|\n|$)/giu,
 
-        /\b((?:a\s+)?resident\s+of|residing\s+(?:at|in)|located\s+(?:at|in)|living\s+(?:at|in)|domiciled\s+(?:at|in))\s+([^\n;]{5,160}?)(?=,\s*(?:after|before|hereinafter|who|which|and\s+(?:a|the)\b)|[.;](?:\s|$)|\n|$)/giu,
+        /\b((?:a\s+)?resident\s+of|residing\s+(?:at|in)|located\s+(?:at|in)|living\s+(?:at|in)|domiciled\s+(?:at|in))\s+((?:[^\n;]|\n(?=(?:of\s+|City\b|Municipality\b|Province\b|Barangay\b))){5,180}?)(?=,\s*(?:after|before|hereinafter|who|which|and\s+(?:a|the)\b)|[.;](?:\s|$)|\n(?!\s*(?:of\s+|City\b|Municipality\b|Province\b|Barangay\b))|$)/giu,
 
         /\b(naninirahan\s+(?:sa|ng)|tahanan\s+sa|tirahan\s+sa|address\s+ay)\s+([^\n;]{5,160}?)(?=,\s*(?:matapos|bago|na\s+siya|at\s+(?:ang|isang)\b)|[.;](?:\s|$)|\n|$)/giu,
     ];
@@ -733,6 +1028,21 @@ export const containsPotentialSensitiveData = (
     const normalized = normalizeForDetection(text);
     const ocrNormalized = normalizeOcrDigits(normalized);
 
+    if (
+        /\b[A-Z][A-Za-z.'-]{1,40}(?:[ \t]+[A-Z][A-Za-z.'-]{1,40}){1,4}[ \t]*[,.]\s*(?=the\s+(?:Creditor|Debtor|Lender|Borrower|Provider|Client|Lessor|Lessee|Buyer|Seller)\b)/u.test(normalized)
+    ) {
+        return true;
+    }
+
+    /*
+     * Fail closed when a high-confidence contextual person name remains.
+     * The same conservative collector is used by the redaction pass, so
+     * this does not classify every capitalized legal term as a person.
+     */
+    if (collectContextualPersonNames(normalized).length > 0) {
+        return true;
+    }
+
 
     /*
      * Email
@@ -1083,7 +1393,7 @@ export const sha256Text = (value: string): string => {
         lowBits & 0xff
     );
 
-    const hashes = [...SHA_256_INITIAL_HASHES];
+    const hashes: number[] = [...SHA_256_INITIAL_HASHES];
     const schedule = new Array<number>(64).fill(0);
 
     for (
@@ -1312,4 +1622,3 @@ export const buildSanitizedDocumentForAI = (
         ),
     };
 };
-

@@ -1,6 +1,9 @@
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 
 import type { ScanPage } from '../types/ScanPage';
+import { detectDocumentKind } from './documentGrouping';
+
+// LOCAL OCR SERVICE VERSION: 2.0.0
 
 
 export type OcrProgressStatus =
@@ -78,6 +81,7 @@ type PageSnapshot = {
     id: string;
     sessionId: string;
     editedUri: string;
+    ocrText?: string;
 };
 
 const OCR_CANCELLED_MESSAGE = 'OCR_CANCELLED';
@@ -105,28 +109,6 @@ const getAmbiguousAmounts = (text: string): string[] => {
         .map((value) => value.trim().replace(/[ ,.;]+$/, ''))
         .filter((value) => !VALID_MONEY_PATTERN.test(value));
 };
-
-const detectDocumentKind = (text: string): string | null => {
-    const header = text.slice(0, 700);
-    const signatures: Array<[string, RegExp[]]> = [
-        ['loan', [/\bloan agreement\b/i, /\bprincipal amount\b/i, /\bcreditor\b[\s\S]{0,180}\bdebtor\b/i]],
-        ['service', [/\bservice agreement\b/i, /\bprovider\b[\s\S]{0,180}\bclient\b/i]],
-        ['purchase', [/\bpurchase price\b/i, /\bbuyer\b[\s\S]{0,180}\boffice equipment\b/i]],
-        ['lease', [/\blease (?:agreement|excerpt)\b/i, /\blessor\b[\s\S]{0,180}\blessee\b/i, /\bmonthly rent\b/i]],
-        ['supply', [/\bsupply agreement\b/i, /\bdelivery schedule\b/i, /\bbatch\s+[A-Z]-?\d+\b/i]],
-        ['court', [/\brepublic of the philippines\b/i, /\bcomplainant\b[\s\S]{0,180}\brespondent\b/i]],
-    ];
-
-    let best: { kind: string; score: number } | null = null;
-    for (const [kind, patterns] of signatures) {
-        const score = patterns.filter((pattern) => pattern.test(header)).length;
-        if (score >= 2 && (!best || score > best.score)) {
-            best = { kind, score };
-        }
-    }
-    return best ? best.kind : null;
-};
-
 
 const normalizeRecognizedText = (
     value: string
@@ -213,6 +195,7 @@ const createPageSnapshots = (
             id: pageId,
             sessionId,
             editedUri,
+            ocrText: page.ocrSourceUri === editedUri ? page.ocrText : undefined,
         });
     });
 };
@@ -290,6 +273,21 @@ const getQualityWarning = (
     return undefined;
 };
 
+export const updateReviewedOcrText = (
+    page: OcrPageResult,
+    text: string
+): OcrPageResult => {
+    const cleaned = normalizeRecognizedText(text);
+    if (cleaned.length < MIN_REQUIRED_TEXT_LENGTH) {
+        throw new Error('Masyadong maikli ang itinamang OCR text.');
+    }
+    const quality = calculateQualityMetrics(cleaned);
+    if (quality.browserUiDetected) {
+        throw new Error('Mukhang app o browser screen ang text, hindi dokumento.');
+    }
+    return { ...page, text: cleaned, quality, warning: getQualityWarning(quality) };
+};
+
 /**
  * Runs Google ML Kit text recognition completely on-device for one
  * immutable page snapshot.
@@ -297,6 +295,30 @@ const getQualityWarning = (
  * No network request is made here. The source image and raw OCR text remain
  * on the device.
  */
+const resultFromText = (
+    page: PageSnapshot,
+    pageNumber: number,
+    rawText: string
+): OcrPageResult => {
+    const text = normalizeRecognizedText(rawText);
+    if (text.length < MIN_REQUIRED_TEXT_LENGTH) {
+        throw new Error(`Hindi sapat ang text na nakita sa Page ${pageNumber}.`);
+    }
+    const quality = calculateQualityMetrics(text);
+    if (quality.browserUiDetected) {
+        throw new Error(`Browser o app screen ang mukhang nabasa sa Page ${pageNumber}, hindi ang document. Kunan ulit ang page.`);
+    }
+    return {
+        pageId: page.id,
+        sessionId: page.sessionId,
+        pageNumber,
+        sourceUri: page.editedUri,
+        text,
+        quality,
+        warning: getQualityWarning(quality),
+    };
+};
+
 const recognizePageSnapshotOffline = async (
     page: PageSnapshot,
     pageNumber: number,
@@ -311,33 +333,7 @@ const recognizePageSnapshotOffline = async (
 
     throwIfCancelled(signal);
 
-    const text = normalizeRecognizedText(
-        recognitionResult?.text ?? ''
-    );
-
-    if (!text || text.length < MIN_REQUIRED_TEXT_LENGTH) {
-        throw new Error(
-            `Hindi sapat ang text na nakita sa Page ${pageNumber}.`
-        );
-    }
-
-    const quality = calculateQualityMetrics(text);
-
-    if (quality.browserUiDetected) {
-        throw new Error(
-            `Browser o app screen ang mukhang nabasa sa Page ${pageNumber}, hindi ang document. Kunan ulit ang page.`
-        );
-    }
-
-    return {
-        pageId: page.id,
-        sessionId: page.sessionId,
-        pageNumber,
-        sourceUri: page.editedUri,
-        text,
-        quality,
-        warning: getQualityWarning(quality),
-    };
+    return resultFromText(page, pageNumber, recognitionResult?.text ?? '');
 };
 
 /**
@@ -371,7 +367,8 @@ export const recognizePageOffline = async (
 export const recognizePagesOffline = async (
     pages: ScanPage[],
     onProgress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    previousResult?: BatchOcrResult
 ): Promise<BatchOcrResult> => {
     if (
         !Array.isArray(pages) ||
@@ -407,12 +404,16 @@ export const recognizePagesOffline = async (
         });
 
         try {
-            const result =
-                await recognizePageSnapshotOffline(
-                    page,
-                    pageNumber,
-                    signal
-                );
+            const cached = previousResult?.successfulPages.find((item) =>
+                item.pageId === page.id &&
+                item.sessionId === page.sessionId &&
+                item.sourceUri === page.editedUri
+            );
+            const result = cached
+                ? { ...cached, pageNumber }
+                : page.ocrText
+                  ? resultFromText(page, pageNumber, page.ocrText)
+                  : await recognizePageSnapshotOffline(page, pageNumber, signal);
 
             successfulPages.push(result);
 

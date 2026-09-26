@@ -4,8 +4,10 @@ import React, {
     useState,
 } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Image,
+    Modal,
     StatusBar,
     StyleSheet,
     Text,
@@ -22,16 +24,19 @@ import { useCustomAlert } from '../../../components/CustomAlert';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
 import {
-    assessBatchOcrQuality,
     isOcrCancelledError,
     recognizePagesOffline,
 } from '../../../services/localOcrService';
-import type { BatchOcrResult } from '../../../services/localOcrService';
+import type { BatchOcrResult, OcrPageResult } from '../../../services/localOcrService';
+import {
+    partitionDocumentPages,
+    suggestDocumentStarts,
+} from '../../../services/documentGrouping';
 import { buildSanitizedDocumentForAI } from '../../../utils/sanitizer';
 import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
 
-// BATCH EDIT SCREEN VERSION: 3.0.0
+// BATCH EDIT SCREEN VERSION: 6.2.2
 const COLORS = {
     black: '#000000',
     background: '#090B10',
@@ -48,6 +53,23 @@ const COLORS = {
     danger: '#EF4444',
 };
 const HISTORY_STORAGE_KEY = '@lex_scan_history';
+const AI_NOTICE_KEY = '@lex_ai_notice_v1';
+const makeGroupResult = (ocrPages: OcrPageResult[]): BatchOcrResult => {
+    const successfulPages = ocrPages.map((page, index) => ({
+        ...page,
+        pageNumber: index + 1,
+    }));
+    return {
+        expectedPageCount: successfulPages.length,
+        recognizedPageCount: successfulPages.length,
+        isComplete: true,
+        successfulPages,
+        failedPages: [],
+        combinedText: successfulPages.map((page) =>
+            `--- Page ${page.pageNumber} ---\n${page.text}`
+        ).join('\n\n'),
+    };
+};
 const createLegacyPage = (
     uri: string,
     index: number
@@ -111,17 +133,18 @@ const savePendingHistoryItem = async (
     pages: ScanPage[],
     rawOcrText: string,
     sanitizedText: string,
-    source?: string
+    source?: string,
+    title?: string
 ): Promise<void> => {
     const history = await readHistory();
     const newItem = {
         id: historyId,
         uri: pages[0]?.editedUri ?? '',
         pageUris: pages.map((page) => page.editedUri),
-        title:
+        title: title ?? (
             pages.length === 1
                 ? 'Document Scan'
-                : `Document Scan (${pages.length} pages)`,
+                : `Document Scan (${pages.length} pages)`),
         date: new Date().toLocaleString(),
         type: source === 'gallery' ? 'gallery' : 'camera',
         status: 'unscanned',
@@ -172,11 +195,15 @@ export default function BatchEditScreen({
         current: 0,
         total: 0,
     });
+    const [reviewResult, setReviewResult] = useState<BatchOcrResult | null>(null);
+    const [pendingNotice, setPendingNotice] = useState<BatchOcrResult | null>(null);
     const mainListRef = useRef<FlatList<ScanPage>>(null);
     const thumbnailListRef =
         useRef<FlatList<ScanPage>>(null);
     const ocrAbortControllerRef =
         useRef<AbortController | null>(null);
+    const analysisRequestRef = useRef(false);
+    const noticeSubmittingRef = useRef(false);
     const {
         isProcessing: isAiAnalyzing,
         isGlobalProcessing,
@@ -190,6 +217,7 @@ export default function BatchEditScreen({
             ? 'gallery'
             : 'camera';
     const isBusy = isOcrRunning || isAiAnalyzing;
+    const pageSignature = pages.map((page) => `${page.id}:${page.editedUri}`).join('|');
     useEffect(() => {
         const nextRoutePages = route?.params?.pages;
         if (
@@ -201,6 +229,7 @@ export default function BatchEditScreen({
         const normalizedPages =
             normalizeRoutePages(nextRoutePages);
         if (normalizedPages.length > 0) {
+            setReviewResult(null);
             setPages(normalizedPages);
             setCurrentIndex(
                 Math.max(0, normalizedPages.length - 1)
@@ -270,6 +299,7 @@ export default function BatchEditScreen({
             nextPages.length - 1
         );
         setPages(nextPages);
+        setReviewResult(null);
         setCurrentIndex(nextIndex);
         setTimeout(() => {
             mainListRef.current?.scrollToIndex({
@@ -330,16 +360,18 @@ export default function BatchEditScreen({
         });
     };
     const openSanitizedPreview = (
-        sanitizedText: string
+        sanitizedText: string,
+        pageCount: number
     ): void => {
         navigation.navigate('SanitizedOcrScreen', {
             sanitizedText,
             isOfflinePreview: true,
-            pageCount: pages.length,
+            pageCount,
         });
     };
     const beginAiAnalysis = async (
-        ocrResult: BatchOcrResult
+        ocrResult: BatchOcrResult,
+        starts: number[]
     ): Promise<void> => {
         const hasEveryPage =
             ocrResult.isComplete &&
@@ -348,12 +380,7 @@ export default function BatchEditScreen({
             ocrResult.recognizedPageCount === pages.length &&
             ocrResult.successfulPages.length === pages.length;
         if (!hasEveryPage) {
-            showAlert(
-                'Hindi kumpleto ang document',
-                "Hindi ipapadala sa AI hangga't hindi malinaw at kumpleto ang lahat ng pahina.",
-                'warning',
-                [{ text: 'OK' }]
-            );
+            showAlert('May pahinang hindi nabasa', 'Kunan ulit ang pahinang may error.', 'warning', [{ text: 'OK' }]);
             return;
         }
         const hasStalePage = ocrResult.successfulPages.some(
@@ -371,66 +398,51 @@ export default function BatchEditScreen({
         if (hasStalePage) {
             showAlert(
                 'Nagbago ang mga pahina',
-                'May pahinang nabago habang binabasa ang document. Pindutin ulit ang Ipa-check sa AI para siguradong tama ang ipapadala.',
+                'Pindutin ulit ang Ipa-check sa AI para mabasa ang bagong larawan.',
                 'warning',
                 [{ text: 'OK' }]
             );
             return;
         }
-        const historyId = Date.now().toString();
-        let sanitizedResult: ReturnType<
-            typeof buildSanitizedDocumentForAI
-        >;
+        const originals = partitionDocumentPages(ocrResult.successfulPages, starts);
+        const batchId = Date.now().toString();
+        const prepared: Array<{
+            historyId: string;
+            pageNumbers: number[];
+            ocr: BatchOcrResult;
+            safe: ReturnType<typeof buildSanitizedDocumentForAI>;
+            scanPages: ScanPage[];
+        }> = [];
+
         try {
-            sanitizedResult = buildSanitizedDocumentForAI(
-                historyId,
-                ocrResult.successfulPages
-            );
-        } catch (error: unknown) {
-            showAlert(
-                'Hindi maihanda ang document',
-                getErrorMessage(
-                    error,
-                    'May problema sa pagkakasunod o nilalaman ng mga pahina.'
-                ),
-                'error',
-                [{ text: 'OK' }]
-            );
-            return;
-        }
-        if (sanitizedResult.blocked) {
-            const blockedPages =
-                sanitizedResult.blockedPageNumbers.join(', ');
-            showAlert(
-                'Hindi ipinadala sa AI',
-                `Kailangang i-review ang sensitibo o kulang na text sa pahina ${blockedPages}.`,
-                'warning',
-                [
-                    { text: 'Bumalik', style: 'cancel' },
-                    {
-                        text: 'Tingnan ang Text',
-                        onPress: () =>
-                            openSanitizedPreview(
-                                sanitizedResult.combinedText
-                            ),
-                    },
-                ]
-            );
-            return;
-        }
-        try {
-            await savePendingHistoryItem(
-                historyId,
-                pages,
-                ocrResult.combinedText,
-                sanitizedResult.combinedText,
-                route?.params?.source
-            );
+            for (const [index, group] of originals.entries()) {
+                const groupOcr = makeGroupResult(group);
+                const historyId = `${batchId}_${index + 1}`;
+                const safe = buildSanitizedDocumentForAI(
+                    historyId,
+                    groupOcr.successfulPages
+                );
+                if (safe.blocked) {
+                    throw new Error(
+                        `Dokumento ${index + 1}: Kulang o may hindi nalinis na text sa pahina ${safe.blockedPageNumbers.join(', ')}. Kunan ulit ang pahina.`
+                    );
+                }
+                prepared.push({
+                    historyId,
+                    pageNumbers: group.map((page) => page.pageNumber),
+                    ocr: groupOcr,
+                    safe,
+                    scanPages: group.map((page) => pages[page.pageNumber - 1]),
+                });
+            }
         } catch (error) {
-            console.error(
-                '[BatchEditScreen] History save failed:',
-                error
+            showAlert(
+                'Hindi maipagpatuloy',
+                getErrorMessage(error, 'Hindi maihanda ang mga dokumento.'),
+                'warning',
+                [{ text: 'OK' }]
             );
+            return;
         }
         let hasInternet = false;
         try {
@@ -444,16 +456,31 @@ export default function BatchEditScreen({
             hasInternet = false;
         }
         if (!hasInternet) {
+            for (const [index, item] of prepared.entries()) {
+                try {
+                    await savePendingHistoryItem(
+                        item.historyId,
+                        item.scanPages,
+                        item.ocr.combinedText,
+                        item.safe.combinedText,
+                        route?.params?.source,
+                        `Dokumento ${index + 1} · pahina ${item.pageNumbers.join(', ')}`
+                    );
+                } catch (error) {
+                    console.error('[BatchEditScreen] Offline save failed:', error);
+                }
+            }
             showAlert(
                 'Walang Internet',
-                'Na-save ang document at text sa Recent Files. Kailangan ng internet para ma-check ito ng AI.',
+                'Na-save nang hiwalay ang mga dokumento sa Recent Files. Kailangan ng internet para sa AI analysis.',
                 'info',
                 [
                     {
                         text: 'Tingnan ang Text',
                         onPress: () =>
                             openSanitizedPreview(
-                                sanitizedResult.combinedText
+                                prepared[0].safe.combinedText,
+                                prepared[0].scanPages.length
                             ),
                     },
                     {
@@ -467,47 +494,135 @@ export default function BatchEditScreen({
             );
             return;
         }
+        for (const [index, item] of prepared.entries()) {
+            try {
+                await savePendingHistoryItem(
+                    item.historyId,
+                    item.scanPages,
+                    item.ocr.combinedText,
+                    item.safe.combinedText,
+                    route?.params?.source,
+                    `Dokumento ${index + 1} · pahina ${item.pageNumbers.join(', ')}`
+                );
+            } catch (error) {
+                console.error('[BatchEditScreen] History save failed:', error);
+            }
+        }
         triggerBackgroundProcess(
-            async (signal: AbortSignal) => {
-                const response = await analyzeSanitizedDocument(
-                    sanitizedResult.apiPayload,
-                    signal
-                );
-                if (!response || response.status !== 'success') {
-                    throw new Error(
-                        'Hindi natapos ang AI analysis.'
-                    );
+            async (signal: AbortSignal, reportProgress: (value: number) => void) => {
+                const documents = [];
+                let completed = 0;
+                for (const [index, item] of prepared.entries()) {
+                    if (signal.aborted) throw new Error('Analysis cancelled');
+                    try {
+                        const response = await analyzeSanitizedDocument(
+                            item.safe.apiPayload, signal
+                        );
+                        if (!response || response.status !== 'success') {
+                            throw new Error('Hindi natapos ang AI analysis.');
+                        }
+                        if (
+                            response.data.analysisOutcome === 'mixed_documents' ||
+                            response.data.ocrQuality?.status === 'analysis_blocked'
+                        ) {
+                            throw new Error('May OCR o grouping na kailangang ayusin sa dokumentong ito.');
+                        }
+                        const analysisResult = {
+                            ...response.data,
+                            sanitizedText: item.safe.combinedText,
+                            inputMeta: response.inputMeta,
+                        };
+                        await markHistoryAsScanned(
+                            item.historyId, analysisResult,
+                            item.ocr.combinedText, item.safe.combinedText
+                        );
+                        completed += 1;
+                        documents.push({
+                            pageNumbers: item.pageNumbers,
+                            historyId: item.historyId,
+                            analysisResult,
+                        });
+                    } catch (error) {
+                        if (signal.aborted) throw error;
+                        documents.push({
+                            pageNumbers: item.pageNumbers,
+                            historyId: item.historyId,
+                            retryPayload: item.safe.apiPayload,
+                            analysisResult: {
+                                documentTitle: `Dokumento ${index + 1}`,
+                                analysisOutcome: 'inconclusive_analysis',
+                                score: null,
+                                findings: [],
+                                keyClauses: [],
+                                sanitizedText: item.safe.combinedText,
+                                failureMessage: getErrorMessage(error, 'Hindi natapos ang analysis ng dokumentong ito.'),
+                            },
+                        });
+                    }
+                    reportProgress(((index + 1) / prepared.length) * 100);
                 }
-                const analysisResult = {
-                    ...response.data,
-                    rag_context_used:
-                        response.data.rag_context_used,
-                    sanitizedText:
-                        sanitizedResult.combinedText,
-                    inputMeta: response.inputMeta,
-                };
-                await markHistoryAsScanned(
-                    historyId,
-                    analysisResult,
-                    ocrResult.combinedText,
-                    sanitizedResult.combinedText
-                );
-                return analysisResult;
+                if (completed === 0) {
+                    throw new Error('Walang dokumentong natapos ang AI analysis. Nasa Recent Files ang hiwa-hiwalay na OCR.');
+                }
+                return documents.length === 1
+                    ? documents[0].analysisResult
+                    : { batchDocuments: documents };
             },
-            historyId
+            prepared.length === 1 ? prepared[0].historyId : undefined
         );
     };
-    const handleAnalyze = async (): Promise<void> => {
-        if (pages.length === 0 || isBusy) {
+    const requestAiAnalysis = async (result: BatchOcrResult): Promise<void> => {
+        try {
+            if (await AsyncStorage.getItem(AI_NOTICE_KEY)) {
+                await beginAiAnalysis(result, suggestDocumentStarts(result.successfulPages));
+            } else {
+                setPendingNotice(result);
+            }
+        } catch (error) {
+            showAlert('Hindi maipagpatuloy', getErrorMessage(error, 'Hindi ma-save ang AI notice.'), 'error', [{ text: 'OK' }]);
+        }
+    };
+    const acceptAiNotice = async (): Promise<void> => {
+        const result = pendingNotice;
+        if (!result || noticeSubmittingRef.current) return;
+        noticeSubmittingRef.current = true;
+        try {
+            await AsyncStorage.setItem(AI_NOTICE_KEY, 'seen');
+            setPendingNotice(null);
+            await beginAiAnalysis(result, suggestDocumentStarts(result.successfulPages));
+        } catch (error) {
+            showAlert('Hindi maipagpatuloy', getErrorMessage(error, 'Subukan ulit.'), 'error', [{ text: 'OK' }]);
+        } finally {
+            noticeSubmittingRef.current = false;
+        }
+    };
+    const readPages = async (analyzeAfter: boolean): Promise<void> => {
+        if (pages.length === 0 || isBusy || analysisRequestRef.current) {
             return;
         }
-        if (isGlobalProcessing) {
+        if (analyzeAfter && isGlobalProcessing) {
             showAlert(
                 'May document pang sinusuri',
                 'Hintayin munang matapos o i-cancel ang kasalukuyang AI analysis.',
                 'warning',
                 [{ text: 'OK' }]
             );
+            return;
+        }
+        analysisRequestRef.current = true;
+        const reviewStillMatches = reviewResult?.isComplete &&
+            reviewResult.successfulPages.length === pages.length &&
+            reviewResult.successfulPages.every((item, index) =>
+                item.pageId === pages[index].id &&
+                item.sessionId === pages[index].sessionId &&
+                item.sourceUri === pages[index].editedUri
+            );
+        if (reviewStillMatches) {
+            try {
+                if (analyzeAfter) await requestAiAnalysis(reviewResult);
+            } finally {
+                analysisRequestRef.current = false;
+            }
             return;
         }
         const abortController = new AbortController();
@@ -557,7 +672,8 @@ export default function BatchEditScreen({
                         })
                     );
                 },
-                abortController.signal
+                abortController.signal,
+                reviewResult ?? undefined
             );
             const textByPageId = new Map(
                 result.successfulPages.map((page) => [
@@ -602,6 +718,7 @@ export default function BatchEditScreen({
                 result.failedPages.length > 0 ||
                 result.recognizedPageCount !== pages.length
             ) {
+                setReviewResult(result);
                 const failedPageNumbers =
                     result.failedPages
                         .map((page) => page.pageNumber)
@@ -614,70 +731,19 @@ export default function BatchEditScreen({
                         false
                     );
                 }
-                showAlert(
+                if (analyzeAfter) showAlert(
                     'May pahinang hindi nabasa',
-                    `Hindi ipinadala sa AI. Ayusin muna ang pahina ${failedPageNumbers || 'na may error'} para kumpleto ang document.`,
-                    'warning',
-                    [
-                        {
-                            text: 'OK',
-                            style: 'cancel',
-                        },
-                    ]
+                    `Kunan ulit ang pahina ${failedPageNumbers || 'na may error'}, saka pindutin ulit ang Ipa-check sa AI. Hindi na muling babasahin ang maayos na pahina.`,
+                    'warning', [{ text: 'OK' }]
                 );
                 return;
             }
-            const quality = assessBatchOcrQuality(result);
-            if (quality.status === 'analysis_blocked') {
-                const mixed = quality.issues.some(
-                    (issue) => issue.code === 'mixed_documents'
-                );
-                const firstPageWithIssue = quality.issues.find(
-                    (issue) => issue.pageNumber
-                )?.pageNumber;
-                if (firstPageWithIssue) {
-                    scrollToPage(firstPageWithIssue - 1, false);
-                }
-                showAlert(
-                    mixed ? 'Magkakaibang document' : 'Hindi maaasahan ang OCR',
-                    mixed
-                        ? 'May pahinang mukhang mula sa ibang dokumento. Alisin sa batch ang hindi kasama at i-analyze ang bawat dokumento nang hiwalay.'
-                        : `${quality.issues.filter((issue) => issue.severity === 'blocking').slice(0, 2).map((issue) => issue.message).join(' ')} I-check ang original at kuhanan o i-upload ulit ang apektadong page. Hindi ito ipapadala sa AI.`,
-                    'warning',
-                    [{ text: 'Sige' }]
-                );
-                return;
-            }
-            const warningPages = result.successfulPages
-                .filter((page) => Boolean(page.warning))
-                .map((page) => page.pageNumber);
-            if (warningPages.length > 0) {
-                showAlert(
-                    'I-review ang malabong pahina',
-                    `May mababang kalidad na OCR sa pahina ${warningPages.join(', ')}. Maaari itong magpababa sa accuracy ng analysis.`,
-                    'warning',
-                    [
-                        {
-                            text: 'Bumalik',
-                            style: 'cancel',
-                            onPress: () =>
-                                scrollToPage(
-                                    warningPages[0] - 1,
-                                    false
-                                ),
-                        },
-                        {
-                            text: 'Magpatuloy',
-                            onPress: () =>
-                                void beginAiAnalysis(result),
-                        },
-                    ]
-                );
-                return;
-            }
-            await beginAiAnalysis(result);
+            setReviewResult(result);
+            if (analyzeAfter) await requestAiAnalysis(result);
         } catch (error: unknown) {
-            if (isOcrCancelledError(error)) {
+            if (!analyzeAfter) {
+                // The page badge and retry button carry the error in the editor.
+            } else if (isOcrCancelledError(error)) {
                 showAlert(
                     'Itinigil ang Pagbasa',
                     'Walang image o text na ipinadala sa AI.',
@@ -696,11 +762,20 @@ export default function BatchEditScreen({
                 );
             }
         } finally {
+            analysisRequestRef.current = false;
             ocrAbortControllerRef.current = null;
             setIsOcrRunning(false);
             setOcrProgress({ current: 0, total: 0 });
         }
     };
+    const handleAnalyze = (): void => { void readPages(true); };
+    useEffect(() => {
+        if (!pageSignature) return;
+        void readPages(false);
+        return () => { ocrAbortControllerRef.current?.abort(); };
+        // Reread only when a page or its image changes, not for progress/status updates.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pageSignature]);
     const handleCancelOcr = (): void => {
         ocrAbortControllerRef.current?.abort();
     };
@@ -744,7 +819,7 @@ export default function BatchEditScreen({
                         styles.thumbnailButtonSelected,
                 ]}
                 onPress={() => scrollToPage(index)}
-                disabled={isBusy}
+                disabled={isAiAnalyzing}
                 accessibilityRole="button"
                 accessibilityLabel={`Pahina ${index + 1}`}
             >
@@ -895,7 +970,7 @@ export default function BatchEditScreen({
         <SafeAreaView
             style={styles.container}
             edges={['top', 'bottom']}
-            testID="batch-edit-screen-v3"
+            testID="batch-edit-screen-v5"
         >
             <StatusBar
                 barStyle="light-content"
@@ -923,7 +998,7 @@ export default function BatchEditScreen({
                         Suriin ang mga Pahina
                     </Text>
                     <Text style={styles.headerHint}>
-                        I-swipe para makita ang iba
+                        {isOcrRunning ? 'Binabasa ang mga pahina…' : 'I-swipe para makita ang iba'}
                     </Text>
                 </View>
                 <View style={styles.pageCounter}>
@@ -932,13 +1007,26 @@ export default function BatchEditScreen({
                     </Text>
                 </View>
             </View>
+            {isOcrRunning && (
+                <View style={styles.readingBanner} accessibilityLiveRegion="polite">
+                    <ActivityIndicator size="small" color={COLORS.primaryLight} />
+                    <View style={styles.readingCopy}>
+                        <Text style={styles.readingTitle}>
+                            Binabasa ang pahina {ocrProgress.current} sa {ocrProgress.total}
+                        </Text>
+                        <Text style={styles.readingSubtext}>
+                            Sa phone muna ito. Wala pang ipinapadala sa AI.
+                        </Text>
+                    </View>
+                </View>
+            )}
             <View style={styles.viewerSection}>
                 <FlatList
                     ref={mainListRef}
                     data={pages}
                     horizontal
                     pagingEnabled
-                    scrollEnabled={!isBusy}
+                    scrollEnabled={!isAiAnalyzing}
                     showsHorizontalScrollIndicator={false}
                     keyExtractor={(item) => item.id}
                     renderItem={renderPage}
@@ -1053,80 +1141,138 @@ export default function BatchEditScreen({
             </View>
             <View style={styles.bottomActionArea}>
                 <Text style={styles.privacyNote}>
-                    Sa phone muna babasahin at lilinisin ang text.
+                    {isOcrRunning
+                        ? `Binabasa sa phone ang pahina ${ocrProgress.current}/${ocrProgress.total}…`
+                        : reviewResult?.failedPages.length
+                          ? `Hindi nabasa ang pahina ${reviewResult.failedPages.map((item) => item.pageNumber).join(', ')}. Kunan ulit ito.`
+                          : 'Sa phone muna babasahin at lilinisin ang text.'}
                 </Text>
                 <TouchableOpacity
-                    style={styles.analyzeButton}
+                    style={[styles.analyzeButton, isOcrRunning && styles.analyzeButtonReading]}
                     onPress={handleAnalyze}
                     disabled={isBusy}
                     activeOpacity={0.78}
                     accessibilityRole="button"
                     accessibilityLabel={`Ipa-check sa AI ang ${pages.length} pahina`}
                 >
-                    <Ionicons
-                        name="shield-checkmark-outline"
-                        size={21}
-                        color={COLORS.text}
-                    />
+                    {isOcrRunning
+                        ? <ActivityIndicator size="small" color={COLORS.text} />
+                        : <Ionicons name="shield-checkmark-outline" size={21} color={COLORS.text} />}
                     <Text style={styles.analyzeButtonText}>
-                        Ipa-check sa AI ({pages.length})
+                        {isOcrRunning ? 'Binabasa ang mga pahina…' : `Ipa-check sa AI (${pages.length})`}
                     </Text>
                 </TouchableOpacity>
             </View>
-            {isOcrRunning && (
-                <View style={styles.ocrOverlay}>
-                    <View style={styles.ocrPanel}>
-                        <View style={styles.ocrIconBox}>
-                            <Ionicons
-                                name="document-text-outline"
-                                size={29}
-                                color={COLORS.primary}
-                            />
-                        </View>
-                        <Text style={styles.ocrTitle}>
-                            Binabasa ang document
-                        </Text>
-                        <Text style={styles.ocrMessage}>
-                            Pahina {ocrProgress.current} sa{' '}
-                            {ocrProgress.total}
-                        </Text>
-                        <View style={styles.progressTrack}>
-                            <View
-                                style={[
-                                    styles.progressFill,
-                                    {
-                                        width: `${Math.max(
-                                            5,
-                                            (ocrProgress.current /
-                                                Math.max(
-                                                    ocrProgress.total,
-                                                    1
-                                                )) *
-                                                100
-                                        )}%`,
-                                    },
-                                ]}
-                            />
-                        </View>
-                        <Text style={styles.ocrPrivacyText}>
-                            Offline ito. Wala pang ipinapadala sa AI.
+            <Modal
+                visible={pendingNotice !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setPendingNotice(null)}
+            >
+                <View style={styles.noticeBackdrop}>
+                    <View style={styles.noticeCard}>
+                        <TouchableOpacity
+                            style={styles.noticeClose}
+                            onPress={() => setPendingNotice(null)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Isara ang paalala"
+                        >
+                            <Ionicons name="close" size={22} color={COLORS.text} />
+                        </TouchableOpacity>
+                        <Ionicons name="shield-checkmark-outline" size={28} color={COLORS.primaryLight} />
+                        <Text style={styles.noticeTitle}>Bago suriin sa AI</Text>
+                        <Text style={styles.noticeBody}>
+                            Nilinis na text lang ang ipapadala sa AI, hindi ang larawan. Gabay sa pag-unawa ang resulta; hindi ito legal advice. Tingnan pa rin ang orihinal na dokumento bago magdesisyon.
                         </Text>
                         <TouchableOpacity
-                            style={styles.cancelOcrButton}
-                            onPress={handleCancelOcr}
+                            style={styles.noticeProceed}
+                            onPress={() => { void acceptAiNotice(); }}
+                            accessibilityRole="button"
                         >
-                            <Text style={styles.cancelOcrButtonText}>
-                                Itigil
-                            </Text>
+                            <Text style={styles.noticeProceedText}>Naiintindihan ko, suriin sa AI</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
-            )}
+            </Modal>
             <AlertRender />
         </SafeAreaView>
     );
 }
 const styles = StyleSheet.create({
+    readingBanner: {
+        minHeight: 62,
+        paddingHorizontal: 17,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    readingCopy: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    readingTitle: {
+        color: COLORS.text,
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    readingSubtext: {
+        color: COLORS.subText,
+        fontSize: 11,
+        marginTop: 3,
+    },
+    analyzeButtonReading: {
+        backgroundColor: COLORS.elevated,
+    },
+    noticeBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    noticeCard: {
+        backgroundColor: COLORS.surface,
+        borderColor: COLORS.border,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 22,
+    },
+    noticeClose: {
+        position: 'absolute',
+        right: 12,
+        top: 12,
+        padding: 8,
+        zIndex: 1,
+    },
+    noticeTitle: {
+        color: COLORS.text,
+        fontSize: 19,
+        fontWeight: '800',
+        marginTop: 14,
+        marginBottom: 8,
+    },
+    noticeBody: {
+        color: COLORS.subText,
+        fontSize: 14,
+        lineHeight: 21,
+        marginBottom: 22,
+    },
+    noticeProceed: {
+        minHeight: 50,
+        borderRadius: 6,
+        backgroundColor: COLORS.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 12,
+    },
+    noticeProceedText: {
+        color: COLORS.text,
+        fontWeight: '800',
+        textAlign: 'center',
+        fontSize: 14,
+    },
     container: {
         flex: 1,
         backgroundColor: COLORS.background,

@@ -36,7 +36,7 @@ import type { LocalScanImage } from '../../../services/scanFileStorage';
 import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
 
-// SCANNER SCREEN VERSION: 3.0.0
+// SCANNER SCREEN VERSION: 6.2.0
 const COLORS = {
     black: '#000000',
     background: '#090B10',
@@ -153,6 +153,8 @@ export default function ScannerScreen({
     const rootViewRef = useRef<View>(null);
     const scanFrameRef = useRef<View>(null);
     const qualityCheckSequenceRef = useRef(0);
+    const recognizedByUriRef = useRef(new Map<string, string>());
+    const pendingRecognitionRef = useRef(new Set<Promise<void>>());
     const existingRouteData = useMemo(
         () =>
             normalizeExistingPages(
@@ -334,8 +336,10 @@ export default function ScannerScreen({
         try {
             const recognitionResult =
                 await TextRecognition.recognize(imageUri);
+            const rawText = (recognitionResult?.text ?? '').trim();
+            if (rawText) recognizedByUriRef.current.set(imageUri, rawText);
             const recognizedText = (
-                recognitionResult?.text ?? ''
+                rawText
             ).replace(/\s+/g, ' ').trim();
             if (
                 checkSequence !==
@@ -418,11 +422,13 @@ export default function ScannerScreen({
             ]);
             const nextPageNumber = totalPageCount + 1;
             setIsFlashOn(false);
-            void assessCapturedPage(
+            const pending = assessCapturedPage(
                 croppedPhoto.uri,
                 nextPageNumber,
                 flashWasOn
             );
+            pendingRecognitionRef.current.add(pending);
+            void pending.finally(() => pendingRecognitionRef.current.delete(pending));
         } catch (error: unknown) {
             setQualityTone('error');
             setStatusMessage(
@@ -532,6 +538,12 @@ export default function ScannerScreen({
             'Sine-save ang mga pahina sa phone…'
         );
         try {
+            // Finish any recognition already started by camera capture.
+            await Promise.allSettled([...pendingRecognitionRef.current]);
+            const readyImages = newImages.map((image) => ({
+                ...image,
+                ocrText: recognizedByUriRef.current.get(image.uri),
+            }));
             let savedPages: ScanPage[];
             if (
                 existingRouteData.scanPages.length > 0 &&
@@ -539,12 +551,12 @@ export default function ScannerScreen({
             ) {
                 savedPages = appendToScanSession(
                     existingRouteData.scanPages,
-                    newImages
+                    readyImages
                 );
             } else {
                 savedPages = createScanSession([
                     ...existingRouteData.legacyImages,
-                    ...newImages,
+                    ...readyImages,
                 ]);
             }
             if (savedPages.length === 0) {

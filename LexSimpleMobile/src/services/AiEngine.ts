@@ -1,3 +1,4 @@
+// AI ENGINE VERSION: 2.0.0
 import type {
     SanitizedDocumentApiPayload,
 } from '../utils/sanitizer';
@@ -118,6 +119,11 @@ export type AnalysisData = {
     };
     analysisMode?: 'llm' | 'hybrid' | string;
     findings: AnalysisFinding[];
+    keyClauses?: Array<{
+        title: string;
+        explanation: string;
+        foundText: string;
+    }>;
     processingMeta: AnalysisProcessingMeta;
     scoreAdjusted?: boolean;
     rag_context_used?: string;

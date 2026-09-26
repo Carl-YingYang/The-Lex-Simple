@@ -1,5 +1,6 @@
 # services/prompts.py
 
+# PROMPTS VERSION: 2.0.0
 def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
     return f"""
         You are Lex-Simple’s Contract Simplification Engine.
@@ -279,7 +280,8 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
         • trailing commas
         • missing fields
 
-        ALL fields are REQUIRED.
+        ALL fields are REQUIRED. Keep risky findings separate from neutral
+        explanations of readable terms.
 
         Structure:
 
@@ -294,6 +296,13 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
             "original_text": "Exact verbatim snippet copied only from the current OCR chunk",
             "confidence": "0-100%"
             }}
+        ],
+        "keyClauses": [
+            {{
+            "title": "Short term label",
+            "explanation": "Neutral Taglish meaning without claiming this is a risk.",
+            "original_text": "Exact verbatim sentence from the current OCR chunk"
+            }}
         ]
         }}
 
@@ -302,6 +311,10 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
         • The backend combines all chunks and calculates the score deterministically
         • score_deduction must be an integer from 1 to 100 for every returned clause
         • If there is no grounded finding, return "clauses": []
+        • Explain 1–5 important readable terms in "keyClauses" even when
+          there are no risk findings. Payment, deadlines, duties, and notice
+          terms are useful. Never invent a source sentence. If the text is
+          unreadable or has no grounded terms, return "keyClauses": [].
 
         --------------------------------------------------
         RAG CONTEXT (PRIORITY SOURCE)
