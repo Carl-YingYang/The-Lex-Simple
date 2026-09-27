@@ -1,86 +1,53 @@
-import re
+# KNOWLEDGE ROUTER VERSION: 6.2.7
 import os
 import chromadb
 from fastapi import APIRouter, HTTPException
-from services.llm_service import explain_raw_statutory_text, search_legal_dictionary
 
-# 🆕 IMPORT NG CENTRALIZED CONFIG AT DB HELPERS
 from core.config import settings
 from core.database import get_db_connection, get_guides_db_connection
+from services.dictionary_repository import list_dictionary_entries, search_dictionary_entries
 
 router = APIRouter()
+
 
 @router.get("/dictionary/sync")
 def sync_offline_dictionary():
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM documents ORDER BY id ASC")
-        rows = cursor.fetchall()
-        conn.close()
-        
-        offline_data = []
-        for row in rows:
-            row_dict = dict(row)
-            raw_text = row_dict.get("chunk_text", "")
-            actual_source = "Philippine Law Database"
-            for col in ["source_file", "filename", "source", "title", "document_title"]:
-                if col in row_dict and row_dict[col] and str(row_dict[col]).strip() != "":
-                    actual_source = str(row_dict[col]).strip()
-                    break
+        try:
+            entries = list_dictionary_entries(conn)
+        finally:
+            conn.close()
+        return {"status": "success", "data": entries}
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "dictionary_unavailable", "message": "Hindi mabuksan ang legal dictionary ngayon."},
+        )
 
-            title_match = re.match(r'^\[(.*?)\]\s*(.*)', raw_text, re.DOTALL)
-            if title_match:
-                clean_title = title_match.group(1) 
-                clean_def = title_match.group(2)   
-            else:
-                clean_title = "LEGAL PROVISION"
-                clean_def = raw_text
-                
-            offline_data.append({
-                "term": clean_title, 
-                "definition": clean_def.strip(),        
-                "legal_basis": actual_source,
-                "example": "Source: Lex-Simple Offline Knowledge Base"
-            })
-            
-        return {"status": "success", "data": offline_data}
-    except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.get("/dictionary/search")
 def search_dictionary(query: str):
-    if not query or len(query.strip()) < 2: raise HTTPException(status_code=400, detail="Query too short.")
-    match = re.match(r'^(article|art\.?|section|sec\.?)\s+(\d+[a-z]?)$', query.strip(), re.IGNORECASE)
-    if match:
-        prefix = "SECTION" if match.group(1).lower().startswith("sec") else "ARTICLE"
-        number = match.group(2)
-        exact_title = f"{prefix} {number}"
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM documents WHERE chunk_text LIKE ?", (f"[{exact_title}]%",))
-            row = cursor.fetchone()
-            conn.close()
-            if row:
-                row_dict = dict(row)
-                raw_text = row_dict.get("chunk_text", "")
-                actual_source = "Philippine Law Database"
-                for col in ["source_file", "filename", "source", "title", "document_title"]:
-                    if col in row_dict and row_dict[col] and str(row_dict[col]).strip() != "":
-                        actual_source = str(row_dict[col]).strip()
-                        break
-                title_match = re.match(r'^\[(.*?)\]\s*(.*)', raw_text, re.DOTALL)
-                clean_raw_text = title_match.group(2) if title_match else raw_text
-                ai_result = explain_raw_statutory_text(exact_title, clean_raw_text)
-                if isinstance(ai_result, dict) and "data" in ai_result:
-                    ai_result["data"]["legal_basis"] = actual_source
-                return ai_result
-        except Exception: pass
-
+    if not query or len(query.strip()) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "query_too_short", "message": "Mag-type ng kahit dalawang letra."},
+        )
     try:
-        result = search_legal_dictionary(query)
-        return result
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        conn = get_db_connection()
+        try:
+            entries = search_dictionary_entries(conn, query)
+        finally:
+            conn.close()
+        return {"status": "success", "data": {"results": entries}}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "dictionary_unavailable", "message": "Hindi mabuksan ang legal dictionary ngayon."},
+        )
+
 
 @router.get("/guides/sync")
 def sync_legal_guides():

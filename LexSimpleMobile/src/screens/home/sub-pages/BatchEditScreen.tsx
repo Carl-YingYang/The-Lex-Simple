@@ -5,6 +5,7 @@ import React, {
 } from 'react';
 import {
     ActivityIndicator,
+    BackHandler,
     FlatList,
     Image,
     Modal,
@@ -16,6 +17,7 @@ import {
     View,
     ViewToken,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,11 +34,18 @@ import {
     partitionDocumentPages,
     suggestDocumentStarts,
 } from '../../../services/documentGrouping';
-import { buildSanitizedDocumentForAI } from '../../../utils/sanitizer';
+import { buildSanitizedDocumentForAI, sanitizeLocalText } from '../../../utils/sanitizer';
 import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
+import {
+    completeScan,
+    deleteScans,
+    markScanNeedsRetry,
+    savePendingScan,
+    saveScanDraft,
+} from '../../../services/scanHistoryStorage';
 
-// BATCH EDIT SCREEN VERSION: 6.2.2
+// BATCH EDIT SCREEN VERSION: 6.2.7
 const COLORS = {
     black: '#000000',
     background: '#090B10',
@@ -52,7 +61,6 @@ const COLORS = {
     warning: '#F59E0B',
     danger: '#EF4444',
 };
-const HISTORY_STORAGE_KEY = '@lex_scan_history';
 const AI_NOTICE_KEY = '@lex_ai_notice_v1';
 const makeGroupResult = (ocrPages: OcrPageResult[]): BatchOcrResult => {
     const successfulPages = ocrPages.map((page, index) => ({
@@ -112,73 +120,6 @@ const getErrorMessage = (
     }
     return fallback;
 };
-const readHistory = async (): Promise<any[]> => {
-    const storedHistory = await AsyncStorage.getItem(
-        HISTORY_STORAGE_KEY
-    );
-    if (!storedHistory) {
-        return [];
-    }
-    try {
-        const parsedHistory = JSON.parse(storedHistory);
-        return Array.isArray(parsedHistory)
-            ? parsedHistory
-            : [];
-    } catch {
-        return [];
-    }
-};
-const savePendingHistoryItem = async (
-    historyId: string,
-    pages: ScanPage[],
-    rawOcrText: string,
-    sanitizedText: string,
-    source?: string,
-    title?: string
-): Promise<void> => {
-    const history = await readHistory();
-    const newItem = {
-        id: historyId,
-        uri: pages[0]?.editedUri ?? '',
-        pageUris: pages.map((page) => page.editedUri),
-        title: title ?? (
-            pages.length === 1
-                ? 'Document Scan'
-                : `Document Scan (${pages.length} pages)`),
-        date: new Date().toLocaleString(),
-        type: source === 'gallery' ? 'gallery' : 'camera',
-        status: 'unscanned',
-        ocrText: rawOcrText,
-        sanitizedText,
-    };
-    await AsyncStorage.setItem(
-        HISTORY_STORAGE_KEY,
-        JSON.stringify([newItem, ...history])
-    );
-};
-const markHistoryAsScanned = async (
-    historyId: string,
-    analysisResult: any,
-    rawOcrText: string,
-    sanitizedText: string
-): Promise<void> => {
-    const history = await readHistory();
-    const updatedHistory = history.map((item) =>
-        item.id === historyId
-            ? {
-                  ...item,
-                  status: 'scanned',
-                  analysisResult,
-                  ocrText: rawOcrText,
-                  sanitizedText,
-              }
-            : item
-    );
-    await AsyncStorage.setItem(
-        HISTORY_STORAGE_KEY,
-        JSON.stringify(updatedHistory)
-    );
-};
 export default function BatchEditScreen({
     route,
     navigation,
@@ -188,6 +129,11 @@ export default function BatchEditScreen({
     const lastRoutePagesRef = useRef(initialRoutePages);
     const [pages, setPages] = useState<ScanPage[]>(() =>
         normalizeRoutePages(initialRoutePages)
+    );
+    const latestPagesRef = useRef(pages);
+    latestPagesRef.current = pages;
+    const draftIdRef = useRef<string>(
+        route?.params?.draftId || pages[0]?.sessionId || ''
     );
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -219,6 +165,13 @@ export default function BatchEditScreen({
     const isBusy = isOcrRunning || isAiAnalyzing;
     const pageSignature = pages.map((page) => `${page.id}:${page.editedUri}`).join('|');
     useEffect(() => {
+        const id = draftIdRef.current;
+        if (!id || pages.length === 0) return;
+        void saveScanDraft(id, pages, documentSource).catch((error) =>
+            console.error('[BatchEditScreen] Draft save failed:', error)
+        );
+    }, [pages, documentSource]);
+    useEffect(() => {
         const nextRoutePages = route?.params?.pages;
         if (
             nextRoutePages === lastRoutePagesRef.current
@@ -229,6 +182,8 @@ export default function BatchEditScreen({
         const normalizedPages =
             normalizeRoutePages(nextRoutePages);
         if (normalizedPages.length > 0) {
+            draftIdRef.current = route?.params?.draftId ||
+                normalizedPages[0].sessionId;
             setReviewResult(null);
             setPages(normalizedPages);
             setCurrentIndex(
@@ -337,6 +292,7 @@ export default function BatchEditScreen({
         if (documentSource === 'gallery') {
             navigation.navigate('UploadImageScreen', {
                 existingPages: pages,
+                draftId: draftIdRef.current,
                 appendToBatch: true,
             });
             return;
@@ -344,6 +300,8 @@ export default function BatchEditScreen({
 
         navigation.navigate('ScannerScreen', {
             existingPages: pages,
+            draftId: draftIdRef.current,
+            source: documentSource,
         });
     };
     const handleOpenCamera = (): void => {
@@ -355,6 +313,8 @@ export default function BatchEditScreen({
             name: 'ScannerScreen',
             params: {
                 existingPages: pages,
+                draftId: draftIdRef.current,
+                source: documentSource,
             },
             merge: true,
         });
@@ -367,6 +327,25 @@ export default function BatchEditScreen({
             sanitizedText,
             isOfflinePreview: true,
             pageCount,
+        });
+    };
+    const previewReadText = (): void => {
+        const readPages = pages.map((page, index) => ({
+            pageNumber: index + 1,
+            text: page.ocrSourceUri === page.editedUri && typeof page.ocrText === 'string'
+                ? page.ocrText.trim() : '',
+        })).filter((page) => page.text.length > 0);
+        if (!readPages.length) {
+            showAlert('Wala pang text', 'Hintaying mabasa ang mga pahina sa phone.', 'info');
+            return;
+        }
+        const sanitizedText = readPages.map((page) =>
+            `--- Page ${page.pageNumber} ---\n${sanitizeLocalText(page.text)}`
+        ).join('\n\n');
+        navigation.navigate('SanitizedOcrScreen', {
+            sanitizedText,
+            isOfflinePreview: true,
+            unreadPageCount: pages.length - readPages.length,
         });
     };
     const beginAiAnalysis = async (
@@ -405,7 +384,7 @@ export default function BatchEditScreen({
             return;
         }
         const originals = partitionDocumentPages(ocrResult.successfulPages, starts);
-        const batchId = Date.now().toString();
+        const batchId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const prepared: Array<{
             historyId: string;
             pageNumbers: number[];
@@ -417,7 +396,9 @@ export default function BatchEditScreen({
         try {
             for (const [index, group] of originals.entries()) {
                 const groupOcr = makeGroupResult(group);
-                const historyId = `${batchId}_${index + 1}`;
+                const historyId = originals.length === 1
+                    ? draftIdRef.current || batchId
+                    : `${batchId}_${index + 1}`;
                 const safe = buildSanitizedDocumentForAI(
                     historyId,
                     groupOcr.successfulPages
@@ -455,21 +436,38 @@ export default function BatchEditScreen({
         } catch {
             hasInternet = false;
         }
-        if (!hasInternet) {
+        // Save all document records before leaving or starting the network call.
+        // Keep the original draft until every group is safely indexed.
+        try {
             for (const [index, item] of prepared.entries()) {
-                try {
-                    await savePendingHistoryItem(
-                        item.historyId,
-                        item.scanPages,
-                        item.ocr.combinedText,
-                        item.safe.combinedText,
-                        route?.params?.source,
-                        `Dokumento ${index + 1} · pahina ${item.pageNumbers.join(', ')}`
-                    );
-                } catch (error) {
-                    console.error('[BatchEditScreen] Offline save failed:', error);
-                }
+                await savePendingScan(
+                    item.historyId,
+                    item.scanPages,
+                    documentSource,
+                    item.ocr.combinedText,
+                    item.safe.combinedText,
+                    `Dokumento ${index + 1} · pahina ${item.pageNumbers.join(', ')}`
+                );
+                if (!hasInternet) await markScanNeedsRetry(item.historyId);
             }
+            if (
+                originals.length > 1 &&
+                draftIdRef.current &&
+                !prepared.some((item) => item.historyId === draftIdRef.current)
+            ) {
+                await deleteScans([draftIdRef.current]);
+                draftIdRef.current = '';
+            }
+        } catch (error) {
+            showAlert(
+                'Hindi na-save ang document',
+                getErrorMessage(error, 'Subukang muli. Nasa phone pa rin ang iyong mga pahina.'),
+                'error',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        if (!hasInternet) {
             showAlert(
                 'Walang Internet',
                 'Na-save nang hiwalay ang mga dokumento sa Recent Files. Kailangan ng internet para sa AI analysis.',
@@ -494,24 +492,11 @@ export default function BatchEditScreen({
             );
             return;
         }
-        for (const [index, item] of prepared.entries()) {
-            try {
-                await savePendingHistoryItem(
-                    item.historyId,
-                    item.scanPages,
-                    item.ocr.combinedText,
-                    item.safe.combinedText,
-                    route?.params?.source,
-                    `Dokumento ${index + 1} · pahina ${item.pageNumbers.join(', ')}`
-                );
-            } catch (error) {
-                console.error('[BatchEditScreen] History save failed:', error);
-            }
-        }
         triggerBackgroundProcess(
             async (signal: AbortSignal, reportProgress: (value: number) => void) => {
                 const documents = [];
                 let completed = 0;
+                try {
                 for (const [index, item] of prepared.entries()) {
                     if (signal.aborted) throw new Error('Analysis cancelled');
                     try {
@@ -532,7 +517,7 @@ export default function BatchEditScreen({
                             sanitizedText: item.safe.combinedText,
                             inputMeta: response.inputMeta,
                         };
-                        await markHistoryAsScanned(
+                        await completeScan(
                             item.historyId, analysisResult,
                             item.ocr.combinedText, item.safe.combinedText
                         );
@@ -544,6 +529,7 @@ export default function BatchEditScreen({
                         });
                     } catch (error) {
                         if (signal.aborted) throw error;
+                        await markScanNeedsRetry(item.historyId);
                         documents.push({
                             pageNumbers: item.pageNumbers,
                             historyId: item.historyId,
@@ -560,6 +546,13 @@ export default function BatchEditScreen({
                         });
                     }
                     reportProgress(((index + 1) / prepared.length) * 100);
+                }
+                } finally {
+                    if (signal.aborted) {
+                        await Promise.all(prepared.map((item) =>
+                            markScanNeedsRetry(item.historyId)
+                        ));
+                    }
                 }
                 if (completed === 0) {
                     throw new Error('Walang dokumentong natapos ang AI analysis. Nasa Recent Files ang hiwa-hiwalay na OCR.');
@@ -695,6 +688,7 @@ export default function BatchEditScreen({
                         return {
                             ...page,
                             ocrText: successfulPage.text,
+                            ocrSourceUri: successfulPage.sourceUri,
                             ocrWarning:
                                 successfulPage.warning,
                             errorMessage: undefined,
@@ -780,11 +774,54 @@ export default function BatchEditScreen({
         ocrAbortControllerRef.current?.abort();
     };
     const handleBack = (): void => {
-        if (isBusy) {
+        if (isAiAnalyzing) {
+            navigation.navigate('Main', { screen: 'Scan' });
             return;
         }
-        navigation.goBack();
+        ocrAbortControllerRef.current?.abort();
+        const current = latestPagesRef.current;
+        if (!draftIdRef.current || current.length === 0) {
+            navigation.navigate('Main', { screen: 'Scan' });
+            return;
+        }
+        void saveScanDraft(draftIdRef.current, current, documentSource)
+            .then(() => navigation.navigate('Main', { screen: 'Scan' }))
+            .catch((error) => showAlert(
+                'Hindi na-save ang mga pahina',
+                getErrorMessage(error, 'Subukan ulit bago umalis.'),
+                'error',
+                [{ text: 'OK' }]
+            ));
     };
+    useFocusEffect(
+        React.useCallback(() => {
+            const subscription = BackHandler.addEventListener(
+                'hardwareBackPress',
+                () => { handleBack(); return true; }
+            );
+            return () => subscription.remove();
+        }, [documentSource, isAiAnalyzing, navigation, showAlert])
+    );
+    useEffect(() => {
+        let allowRemoval = false;
+        return navigation.addListener('beforeRemove', (event: any) => {
+            if (allowRemoval || !draftIdRef.current || latestPagesRef.current.length === 0) return;
+            event.preventDefault();
+            void saveScanDraft(
+                draftIdRef.current,
+                latestPagesRef.current,
+                documentSource
+            ).then(() => {
+                allowRemoval = true;
+                navigation.dispatch(event.data.action);
+            }).catch((error) => showAlert(
+                'Hindi na-save ang mga pahina',
+                getErrorMessage(error, 'Subukan ulit bago umalis.'),
+                'error',
+                [{ text: 'OK' }]
+            ));
+        });
+    }, [navigation, documentSource, showAlert]);
     const renderPage = ({ item }: { item: ScanPage }) => (
         <View
             style={[
@@ -1140,6 +1177,16 @@ export default function BatchEditScreen({
                 </TouchableOpacity>
             </View>
             <View style={styles.bottomActionArea}>
+                <TouchableOpacity
+                    style={styles.ocrPreviewButton}
+                    onPress={previewReadText}
+                    disabled={isBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="Tingnan ang text na nabasa sa phone"
+                >
+                    <Ionicons name="document-text-outline" size={17} color={COLORS.primaryLight} />
+                    <Text style={styles.ocrPreviewLabel}>Tingnan ang nabasang text</Text>
+                </TouchableOpacity>
                 <Text style={styles.privacyNote}>
                     {isOcrRunning
                         ? `Binabasa sa phone ang pahina ${ocrProgress.current}/${ocrProgress.total}…`
@@ -1553,6 +1600,19 @@ const styles = StyleSheet.create({
         width: 1,
         height: 28,
         backgroundColor: COLORS.border,
+    },
+    ocrPreviewButton: {
+        minHeight: 38,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 6,
+    },
+    ocrPreviewLabel: {
+        color: COLORS.primaryLight,
+        fontWeight: '700',
+        fontSize: 12,
     },
     bottomActionArea: {
         minHeight: 83,

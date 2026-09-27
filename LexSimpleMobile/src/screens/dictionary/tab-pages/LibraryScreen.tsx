@@ -1,3 +1,4 @@
+// LIBRARY SCREEN VERSION: 6.2.7
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,6 +18,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import defaultDictionary from '../../../data/legal_dictionary.json';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { explainLegalEntry, explanationErrorMessage, legalEntryKey, legalText } from '../../../services/legalDictionaryService';
 
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -25,43 +27,54 @@ const WARNING = '#F59E0B';
 const DANGER = '#EF4444';
 
 type DictionaryItem = {
+    id?: number;
     term?: string;
     definition?: string;
+    raw_text?: string;
     legal_basis?: string;
     example?: string;
     [key: string]: unknown;
 };
 
-type ResultTab = 'ai' | 'basis' | 'example';
+type ResultTab = 'basis' | 'ai' | 'example';
 
 type ResultCardProps = {
     item: DictionaryItem;
-    isOfflineMode: boolean;
-    getRawText: (item: DictionaryItem) => string;
     T: any;
 };
 
 const ResultCard = ({
     item,
-    isOfflineMode,
-    getRawText,
     T,
 }: ResultCardProps) => {
-    const [activeTab, setActiveTab] = useState<ResultTab>(
-        isOfflineMode ? 'basis' : 'ai'
-    );
+    const [activeTab, setActiveTab] = useState<ResultTab>('basis');
+    const [explanation, setExplanation] = useState('');
+    const [explanationError, setExplanationError] = useState('');
+    const [explaining, setExplaining] = useState(false);
     const [isTextExpanded, setIsTextExpanded] = useState(false);
+
+    useEffect(() => {
+        setActiveTab('basis');
+        setExplanation('');
+        setExplanationError('');
+    }, [item]);
 
     const changeTab = (tab: ResultTab): void => {
         setActiveTab(tab);
         setIsTextExpanded(false);
+        if (tab === 'ai' && !explanation && !explaining) {
+            setExplaining(true);
+            setExplanationError('');
+            void explainLegalEntry(item)
+                .then(setExplanation)
+                .catch((error) => setExplanationError(explanationErrorMessage(error)))
+                .finally(() => setExplaining(false));
+        }
     };
 
     const getActiveText = (): string => {
-        if (isOfflineMode || activeTab === 'basis') {
-            return isOfflineMode
-                ? String(item.definition || '')
-                : getRawText(item);
+        if (activeTab === 'basis') {
+            return legalText(item) || 'Walang legal text na available.';
         }
 
         if (activeTab === 'example') {
@@ -71,7 +84,7 @@ const ResultCard = ({
         }
 
         return String(
-            item.definition || 'Walang paliwanag na available.'
+            explanation || explanationError || 'Kumukuha ng paliwanag…'
         );
     };
 
@@ -106,8 +119,7 @@ const ResultCard = ({
                 {item.legal_basis || 'Philippine legal reference'}
             </Text>
 
-            {!isOfflineMode && (
-                <View
+            <View
                     style={[
                         styles.tabBar,
                         {
@@ -120,7 +132,7 @@ const ResultCard = ({
                         [
                             ['ai', 'Paliwanag'],
                             ['basis', 'Batayan'],
-                            ['example', 'Halimbawa'],
+                            ...(item.example ? [['example', 'Halimbawa'] as const] : []),
                         ] as const
                     ).map(([value, label]) => {
                         const selected = activeTab === value;
@@ -154,7 +166,6 @@ const ResultCard = ({
                         );
                     })}
                 </View>
-            )}
 
             <View
                 style={[
@@ -165,6 +176,7 @@ const ResultCard = ({
                     },
                 ]}
             >
+                {activeTab === 'ai' && explaining && <ActivityIndicator size="small" color={PRIMARY_SOFT} />}
                 <Text
                     style={[styles.resultText, { color: T.text }]}
                     selectable
@@ -255,45 +267,6 @@ export default function LibraryScreen({ navigation }: any) {
         return normalized;
     };
 
-    const fetchRawTextFromLocal = (
-        item: DictionaryItem
-    ): string => {
-        const termSearch = normalizeQuery(String(item.term || ''));
-        const basisSearch = normalizeQuery(
-            String(item.legal_basis || '')
-        );
-
-        const exactTerm = dictionaryData.find(
-            (entry) =>
-                normalizeQuery(String(entry.term || '')) === termSearch
-        );
-
-        if (exactTerm?.definition) {
-            return String(exactTerm.definition);
-        }
-
-        const exactBasis = dictionaryData.find(
-            (entry) =>
-                normalizeQuery(String(entry.term || '')) === basisSearch
-        );
-
-        if (exactBasis?.definition) {
-            return String(exactBasis.definition);
-        }
-
-        const fuzzyTerm = fuse.search(termSearch)[0]?.item;
-        if (fuzzyTerm?.definition) {
-            return String(fuzzyTerm.definition);
-        }
-
-        const fuzzyBasis = fuse.search(basisSearch)[0]?.item;
-        if (fuzzyBasis?.definition) {
-            return String(fuzzyBasis.definition);
-        }
-
-        return 'Walang eksaktong legal text sa offline dictionary. Tingnan ang opisyal na legal source para makasiguro.';
-    };
-
     const syncDatabase = async (): Promise<void> => {
         if (isSyncing) {
             return;
@@ -376,7 +349,7 @@ export default function LibraryScreen({ navigation }: any) {
     const handleSearch = async (): Promise<void> => {
         const query = searchQuery.trim();
 
-        if (!query || loading) {
+        if (query.length < 2 || loading) {
             return;
         }
 
@@ -558,7 +531,7 @@ export default function LibraryScreen({ navigation }: any) {
                                 styles.disabledButton,
                         ]}
                         onPress={() => void handleSearch()}
-                        disabled={!searchQuery.trim() || loading}
+                        disabled={searchQuery.trim().length < 2 || loading}
                         accessibilityRole="button"
                         accessibilityLabel="Hanapin"
                     >
@@ -745,18 +718,15 @@ export default function LibraryScreen({ navigation }: any) {
                                     { color: T.subText },
                                 ]}
                             >
-                                Offline result ito. Kumonekta para sa AI
-                                explanation.
+                                Offline ang legal text. Kailangan ng internet para sa paliwanag ng AI.
                             </Text>
                         </View>
                     )}
 
                     {results.map((item, index) => (
                         <ResultCard
-                            key={`${String(item.term || 'term')}-${index}`}
+                            key={`${legalEntryKey(item)}-${index}`}
                             item={item}
-                            isOfflineMode={isOfflineMode}
-                            getRawText={fetchRawTextFromLocal}
                             T={T}
                         />
                     ))}

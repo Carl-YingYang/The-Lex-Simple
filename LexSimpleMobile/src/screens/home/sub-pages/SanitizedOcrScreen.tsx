@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useTheme } from '../../../theme/ThemeContext';
 
-// SANITIZED OCR SCREEN VERSION: 2.0.0
+// SANITIZED OCR SCREEN VERSION: 6.2.7
 // UI-only build: no additional native module or Android rebuild required.
 LogBox.ignoreLogs([
     'Clipboard has been extracted from react-native core',
@@ -27,6 +27,7 @@ const WARNING = '#F59E0B';
 type RouteParams = {
     sanitizedText?: unknown;
     isOfflinePreview?: boolean;
+    unreadPageCount?: number;
 };
 
 const normalizeText = (value: unknown): string => {
@@ -141,6 +142,11 @@ export default function SanitizedOcrScreen({ route }: any) {
                 contentContainerStyle={styles.content}
                 showsVerticalScrollIndicator={false}
             >
+                {isOfflinePreview && Number(params.unreadPageCount) > 0 && (
+                    <Text style={{ color: T.subText, marginBottom: 12 }}>
+                        May {Number(params.unreadPageCount)} pahinang hindi pa nababasa. Ang mga nabasa pa lang ang ipinapakita.
+                    </Text>
+                )}
                 <View
                     style={[
                         styles.summaryCard,

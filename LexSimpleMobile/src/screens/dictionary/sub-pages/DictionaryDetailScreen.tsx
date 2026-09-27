@@ -1,3 +1,4 @@
+// DICTIONARY DETAIL SCREEN VERSION: 6.2.7
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -12,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
-import { postEndpoint } from '../../../services/AiEngine';
+import { explainLegalEntry, explanationErrorMessage, legalEntryKey, legalText } from '../../../services/legalDictionaryService';
 
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -20,8 +21,10 @@ const WARNING = '#F59E0B';
 const ITEMS_PER_PAGE = 20;
 
 type DictionaryItem = {
+    id?: number;
     term?: string;
     definition?: string;
+    raw_text?: string;
     legal_basis?: string;
     [key: string]: unknown;
 };
@@ -89,16 +92,7 @@ const CATEGORIES: Category[] = [
     },
 ];
 
-const getItemKey = (
-    item: DictionaryItem,
-    index: number
-): string => {
-    const term = String(item.term || 'legal-term')
-        .trim()
-        .toLocaleLowerCase();
-
-    return `${term}-${index}`;
-};
+const getItemKey = (item: DictionaryItem): string => legalEntryKey(item);
 
 export default function DictionaryDetailScreen({ route }: any) {
     const routeData = route?.params?.dictionaryData;
@@ -176,8 +170,7 @@ export default function DictionaryDetailScreen({ route }: any) {
 
     const handleExplainAI = async (
         itemKey: string,
-        term: string,
-        rawText: string
+        item: DictionaryItem
     ): Promise<void> => {
         if (activeAiKey === itemKey) {
             setActiveAiKey(null);
@@ -202,32 +195,18 @@ export default function DictionaryDetailScreen({ route }: any) {
         setLoadingAiKey(itemKey);
 
         try {
-            const data = await postEndpoint('/explain', {
-                title: term,
-                raw_text: rawText,
-            });
-
-            if (data?.status !== 'success') {
-                throw new Error(
-                    data?.message || 'AI explanation failed.'
-                );
-            }
-
-            const explanation =
-                data.data?.definition ||
-                data.definition ||
-                'Walang paliwanag na available.';
+            const explanation = await explainLegalEntry(item);
 
             setAiExplanations((current) => ({
                 ...current,
-                [itemKey]: String(explanation),
+                [itemKey]: explanation,
             }));
         } catch (error) {
             console.error('[Dictionary] AI explanation failed:', error);
             setActiveAiKey(null);
             showAlert(
                 'Hindi makakuha ng paliwanag',
-                'Suriin ang internet at backend, pagkatapos ay subukan ulit.',
+                explanationErrorMessage(error),
                 'error'
             );
         } finally {
@@ -242,14 +221,12 @@ export default function DictionaryDetailScreen({ route }: any) {
         item: DictionaryItem;
         index: number;
     }) => {
-        const itemKey = getItemKey(item, index);
+        const itemKey = getItemKey(item);
         const isExpanded = expandedKeys.includes(itemKey);
         const isLoading = loadingAiKey === itemKey;
         const isAiOpen = activeAiKey === itemKey;
         const explanation = aiExplanations[itemKey];
-        const definition = String(
-            item.definition || 'Walang legal text na available.'
-        );
+        const definition = legalText(item) || 'Walang legal text na available.';
         const shouldTruncate = definition.length > 350;
         const displayText =
             !isExpanded && shouldTruncate
@@ -333,8 +310,7 @@ export default function DictionaryDetailScreen({ route }: any) {
                             onPress={() =>
                                 void handleExplainAI(
                                     itemKey,
-                                    String(item.term || 'Legal Term'),
-                                    definition
+                                    item
                                 )
                             }
                             disabled={
@@ -489,7 +465,7 @@ export default function DictionaryDetailScreen({ route }: any) {
                 <FlatList
                     data={visibleData}
                     keyExtractor={(item, index) =>
-                        getItemKey(item, index)
+                        `${getItemKey(item)}-${index}`
                     }
                     renderItem={renderDictionaryCard}
                     showsVerticalScrollIndicator={false}

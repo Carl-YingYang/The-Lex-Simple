@@ -55,7 +55,7 @@ export const REDACTION = {
     UNKNOWN_SENSITIVE: '[REDACTED_SENSITIVE_DATA]',
 } as const;
 
-export const SANITIZER_VERSION = '2.6.0';
+export const SANITIZER_VERSION = '2.6.2';
 
 
 /* ============================================================
@@ -177,7 +177,8 @@ const collectContextualPersonNames = (text: string): string[] => {
         const alias = match[2];
 
         if (
-            !/^(?:CEO|CFO|COO|CTO|OPC|INC|CORP|LLC)$/i.test(alias)
+            !/^(?:CEO|CFO|COO|CTO|OPC|INC|CORP|LLC|Provider|Client|Creditor|Debtor|Lender|Borrower|Lessor|Lessee|Buyer|Seller|Employer|Employee|Tenant|Landlord|Contractor)$/i.test(alias) &&
+            !/\b(?:Trading|Studio|Cooperative|Corporation|Company|Corp|Inc|OPC|LLC)\b/i.test(match[1])
         ) {
             addName(match[1]);
             addName(alias);
@@ -378,8 +379,12 @@ export const sanitizeLocalText = (rawText: string): string => {
     // appear as a period. Preserve the role and agreement terms.
     const partyWithRole =
         /\b([A-Z][A-Za-z.'-]{1,40}(?:[ \t]+[A-Z][A-Za-z.'-]{1,40}){1,4})[ \t]*[,.]\s*(?=the\s+(?:Creditor|Debtor|Lender|Borrower|Provider|Client|Lessor|Lessee|Buyer|Seller)\b)/gu;
-    const partyIdentifiers = [...sanitized.matchAll(partyWithRole)]
-        .map((match) => match[1])
+    const partyWithParentheticalRole =
+        /\b([A-Z][A-Za-z.'-]{1,40}(?:[ \t\n]+[A-Za-z][A-Za-z.'-]{1,40}){1,5})[ \t]*(?=\((?:Provider|Client|Creditor|Debtor|Lender|Borrower|Lessor|Lessee|Buyer|Seller|Employer|Employee|Tenant|Landlord|Contractor)\))/gu;
+    const partyIdentifiers = [
+        ...[...sanitized.matchAll(partyWithRole)].map((match) => match[1]),
+        ...[...sanitized.matchAll(partyWithParentheticalRole)].map((match) => match[1]),
+    ]
         .filter((name) =>
             !/\b(?:Agreement|Amount|Payment|Section|Article|Clause|Contract)\b/i.test(name)
         );
@@ -469,8 +474,9 @@ export const sanitizeLocalText = (rawText: string): string => {
      */
 
     sanitized = sanitized.replace(
-        /\b(?:NPS|I\.?S\.?|INV|COMPLAINT|DOCKET|CASE)\s*(?:NO\.?|NUMBER|#)\s*[:#.-]?\s*[A-Z0-9][A-Z0-9./-]*(?:[ \t]*\n[ \t]*[A-Z0-9][A-Z0-9./-]*)?/giu,
-        REDACTION.ID
+        /\b(?:NPS|I\.?S\.?|INV|COMPLAINT|DOCKET|CASE)\s*(?:NO\b\.?|NUMBER\b|#)\s*[:#.-]?\s*([A-Z0-9][A-Z0-9./-]*(?:[ \t]*\n[ \t]*[A-Z0-9][A-Z0-9./-]*)?)/giu,
+        (match, identifier: string) =>
+            /\d/.test(identifier) ? REDACTION.ID : match
     );
 
 
@@ -684,9 +690,16 @@ export const sanitizeLocalText = (rawText: string): string => {
      * ==========================================================
      */
 
+    // A signature field contains private data. Ordinary contract wording
+    // such as "signed by both parties" must remain available to analysis.
     sanitized = sanitized.replace(
-        /(?:signed\s*by|signature\s*of|signature|signatory|pirma|lagda)\s*[:#-]?\s*[^\n]{2,100}/giu,
+        /\b(?:signed\s+by|signature\s+of|signature|signatory|pirma|lagda)\s*[:#-]\s*[^\n]{2,100}/giu,
         REDACTION.SIGNATURE
+    );
+
+    sanitized = sanitized.replace(
+        /\b([Ss]igned\s+by|[Ss]ignature\s+of)\s+([A-Z][A-Za-z.'-]{1,40}(?:[ \t]+[A-Z][A-Za-z.'-]{1,40}){1,5})(?=\s*[,.;\n]|$)/gu,
+        (_match, label: string) => `${label} ${REDACTION.SIGNATURE}`
     );
 
 

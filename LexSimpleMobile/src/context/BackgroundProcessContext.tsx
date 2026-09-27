@@ -9,13 +9,12 @@ import React, {
     useState,
 } from 'react';
 import { Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { markScanNeedsRetry } from '../services/scanHistoryStorage';
 
 import { navigate } from '../navigation/RootNavigation';
 
-// BACKGROUND PROCESS CONTEXT VERSION: 2.0.0
+// BACKGROUND PROCESS CONTEXT VERSION: 6.2.6
 // One cancellable in-app process with honest progress and history recovery.
-const HISTORY_KEY = '@lex_scan_history';
 
 type ProgressReporter = (value: number) => void;
 
@@ -94,50 +93,8 @@ const restoreHistoryItemToUnscanned = async (
     if (!fileId) {
         return;
     }
-
     try {
-        const storedHistory = await AsyncStorage.getItem(HISTORY_KEY);
-
-        if (!storedHistory) {
-            return;
-        }
-
-        const parsedHistory = JSON.parse(storedHistory);
-
-        if (!Array.isArray(parsedHistory)) {
-            console.warn(
-                '[BackgroundProcess] History data is not an array.'
-            );
-            return;
-        }
-
-        let itemWasFound = false;
-        const updatedHistory = parsedHistory.map((item: unknown) => {
-            if (
-                typeof item !== 'object' ||
-                item === null ||
-                !('id' in item) ||
-                item.id !== fileId
-            ) {
-                return item;
-            }
-
-            itemWasFound = true;
-
-            return {
-                ...item,
-                status: 'unscanned',
-            };
-        });
-
-        if (!itemWasFound) {
-            return;
-        }
-
-        await AsyncStorage.setItem(
-            HISTORY_KEY,
-            JSON.stringify(updatedHistory)
-        );
+        await markScanNeedsRetry(fileId);
     } catch (error) {
         console.error(
             '[BackgroundProcess] Failed to restore history status:',

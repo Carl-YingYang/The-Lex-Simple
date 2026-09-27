@@ -1,4 +1,4 @@
-# LLM SERVICE VERSION: 6.0.0
+# LLM SERVICE VERSION: 6.2.8
 import hashlib
 import json
 import logging
@@ -11,11 +11,11 @@ from db.sqlite_store import log_ai_transaction
 from services.llm_config import (
     CHAT_MODEL,
     EXTRACT_MODEL,
+    EXPLAIN_MODEL,
     get_ai_client,
 )
 from services.prompts import (
     get_analyze_legal_text_prompt,
-    get_dictionary_search_prompt,
     get_explain_statutory_text_prompt,
 )
 
@@ -452,7 +452,7 @@ def _log_completion_cost(
             "prompt_tokens=%s | completion_tokens=%s | "
             "total_tokens=%s | timestamp=%s",
             endpoint,
-            CHAT_MODEL if endpoint == "/simplify" else EXTRACT_MODEL,
+            CHAT_MODEL if endpoint == "/simplify" else EXPLAIN_MODEL if endpoint == "/explain" else EXTRACT_MODEL,
             chunk_number if chunk_number is not None else "n/a",
             usage.prompt_tokens,
             usage.completion_tokens,
@@ -905,53 +905,57 @@ def analyze_legal_text(ocr_text: str):
         }
 
 
-def search_legal_dictionary(keyword: str):
-    try:
-        prompt = get_dictionary_search_prompt(keyword, "")
-        client = get_ai_client()
-        completion = client.chat.completions.create(
-            model=EXTRACT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1_000,
-        )
-        _log_completion_cost(completion, endpoint="/dictionary")
-
-        ai_response = json.loads(
-            extract_and_clean_json(
-                completion.choices[0].message.content or ""
-            )
-        )
-        return {"status": "success", "data": ai_response}
-    except Exception:
-        _service_logger.exception("Dictionary lookup failed.")
-        return {
-            "status": "error",
-            "message": "Dictionary error.",
-        }
-
-
 def explain_raw_statutory_text(title: str, raw_text: str):
+    """Explain the selected legal excerpt using the active Groq dictionary model."""
     try:
         prompt = get_explain_statutory_text_prompt(title, raw_text)
         client = get_ai_client()
         completion = client.chat.completions.create(
-            model=EXTRACT_MODEL,
+            model=EXPLAIN_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=1_000,
+            max_tokens=900,
+            extra_body={"reasoning_effort": "low", "include_reasoning": False}
+            if EXPLAIN_MODEL.startswith("openai/gpt-oss-") else {},
         )
         _log_completion_cost(completion, endpoint="/explain")
-
-        ai_data = json.loads(
-            extract_and_clean_json(
-                completion.choices[0].message.content or ""
-            )
+        content = (completion.choices[0].message.content or "").strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        if content.startswith("{"):
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("Invalid explanation object")
+            nested = parsed.get("data")
+            content = str(parsed.get("definition") or (
+                nested.get("definition") if isinstance(nested, dict) else ""
+            ) or "").strip()
+        if len(content) < 15 or len(content) > 2400:
+            raise ValueError("Invalid explanation length")
+        return {"status": "success", "data": {"definition": content, "term": title}}
+    except Exception as error:
+        status_code = getattr(error, "status_code", None)
+        _service_logger.exception(
+            "Statutory explanation failed: model=%s status=%s type=%s",
+            EXPLAIN_MODEL, status_code, type(error).__name__,
         )
-        return {"status": "success", "data": ai_data}
-    except Exception:
-        _service_logger.exception("Statutory explanation failed.")
-        return {
-            "status": "error",
-            "message": "Explanation error.",
-        }
+        name = type(error).__name__.lower()
+        if status_code == 429:
+            code = "rate_limited"
+            message = "Busy ang AI ngayon. Subukan ulit mamaya."
+        elif status_code in (401, 403) or "missing groq_api_key" in str(error).lower():
+            code = "ai_configuration"
+            message = "Hindi nakaayos ang Groq API key sa server."
+        elif status_code == 400:
+            code = "ai_model_rejected"
+            message = "Tinanggihan ng Groq ang AI request. Suriin ang GROQ_EXPLAIN_MODEL sa backend."
+        elif "timeout" in name:
+            code = "ai_timeout"
+            message = "Matagal sumagot ang AI. Subukan ulit."
+        elif isinstance(error, (ValueError, IndexError, KeyError, TypeError, json.JSONDecodeError)):
+            code = "invalid_ai_response"
+            message = "Hindi mabasa ang sagot ng AI. Subukan ulit."
+        else:
+            code = "ai_unavailable"
+            message = "Hindi makakonekta sa AI ngayon. Subukan ulit mamaya."
+        return {"status": "error", "error_code": code, "message": message}
