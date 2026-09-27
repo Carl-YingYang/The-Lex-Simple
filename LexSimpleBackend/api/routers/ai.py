@@ -1,4 +1,4 @@
-# AI ROUTER VERSION: 2.0.0
+# AI ROUTER VERSION: 6.2.7
 import copy
 import hashlib
 import hmac
@@ -18,6 +18,8 @@ from db.chroma_store import query_vector_db
 from orchestrator.pipeline import Orchestrator, ProcessRequest
 from services.chat_service import generate_chat_reply
 from services.llm_service import explain_raw_statutory_text
+from core.database import get_db_connection
+from services.dictionary_repository import get_dictionary_entry
 
 
 router = APIRouter()
@@ -56,6 +58,7 @@ class ChatRequest(BaseModel):
 class ExplainRequest(BaseModel):
     title: str
     raw_text: str
+    source_id: Optional[int] = Field(default=None, ge=1)
 
 
 def _normalize_document_text(value: str) -> str:
@@ -653,31 +656,39 @@ def chat_with_ai(request: ChatRequest):
 
 @router.post("/explain")
 def explain_statutory_text(request: ExplainRequest):
-    if not request.raw_text or len(request.raw_text.strip()) < 5:
-        raise HTTPException(
-            status_code=400,
-            detail="Text is too short to explain.",
-        )
+    # AI sees the exact chosen excerpt. A source ID also prevents stale offline
+    # data from being silently paired with a different legal provision.
+    title = request.title.strip()
+    raw_text = request.raw_text.strip()
+    if not title or len(raw_text) < 5 or len(raw_text) > 12000:
+        raise HTTPException(status_code=400, detail={
+            "code": "invalid_source", "message": "Walang sapat na legal text para ipaliwanag."
+        })
+    legal_basis = None
+    if request.source_id is not None:
+        try:
+            conn = get_db_connection()
+            try:
+                entry = get_dictionary_entry(conn, request.source_id)
+            finally:
+                conn.close()
+        except Exception:
+            raise HTTPException(status_code=503, detail={
+                "code": "dictionary_unavailable", "message": "Hindi mabuksan ang legal dictionary ngayon."
+            })
+        if entry is None or " ".join(entry["raw_text"].split()) != " ".join(raw_text.split()):
+            raise HTTPException(status_code=409, detail={
+                "code": "stale_source", "message": "Nagbago ang legal text. I-update muna ang dictionary."
+            })
+        title, raw_text, legal_basis = entry["term"], entry["raw_text"], entry["legal_basis"]
 
-    try:
-        result = explain_raw_statutory_text(
-            request.title,
-            request.raw_text,
-        )
-
-        if isinstance(result, dict):
-            if "status" not in result:
-                result["status"] = "success"
-            return result
-
-        print(f"Unexpected AI Output: {result}")
-        return {
-            "status": "error",
-            "message": "Failed to parse AI response.",
-        }
-    except Exception as error:
-        print(f"Explain Route Error: {error}")
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        ) from error
+    result = explain_raw_statutory_text(title, raw_text)
+    if result.get("status") != "success":
+        code = result.get("error_code", "ai_unavailable")
+        status = 429 if code == "rate_limited" else 503 if code == "ai_configuration" else 502
+        raise HTTPException(status_code=status, detail={
+            "code": code, "message": result.get("message", "Hindi makakuha ng paliwanag ngayon.")
+        })
+    if legal_basis:
+        result["data"]["legal_basis"] = legal_basis
+    return result

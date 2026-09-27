@@ -17,7 +17,15 @@ CHAT_MODEL = os.getenv(
 
 EXTRACT_MODEL = os.getenv(
     "GROQ_EXTRACT_MODEL",
-    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+).strip()
+
+# DICTIONARY AI VERSION: 6.2.8
+# /explain has its own model so an old GROQ_EXTRACT_MODEL in .env cannot
+# force it to use a retired model. Override only with GROQ_EXPLAIN_MODEL.
+EXPLAIN_MODEL = os.getenv(
+    "GROQ_EXPLAIN_MODEL",
+    "openai/gpt-oss-20b",
 ).strip()
 
 

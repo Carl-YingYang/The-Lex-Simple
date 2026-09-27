@@ -6,6 +6,7 @@ import React, {
 } from 'react';
 import {
     ActivityIndicator,
+    BackHandler,
     FlatList,
     Image,
     Linking,
@@ -17,6 +18,7 @@ import {
     useWindowDimensions,
     View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     CameraView,
     useCameraPermissions,
@@ -35,8 +37,10 @@ import {
 import type { LocalScanImage } from '../../../services/scanFileStorage';
 import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
+import { saveScanDraft } from '../../../services/scanHistoryStorage';
+import { createScanThumbnail } from '../../../services/scanFileStorage';
 
-// SCANNER SCREEN VERSION: 6.2.0
+// SCANNER SCREEN VERSION: 6.2.6
 const COLORS = {
     black: '#000000',
     background: '#090B10',
@@ -165,6 +169,13 @@ export default function ScannerScreen({
     const [newImages, setNewImages] = useState<
         LocalScanImage[]
     >([]);
+    const savedPagesRef = useRef<ScanPage[]>(existingRouteData.scanPages);
+    const savingCaptureRef = useRef(false);
+    const draftIdRef = useRef<string | null>(
+        route?.params?.draftId ||
+        existingRouteData.scanPages[0]?.sessionId ||
+        null
+    );
     const [isCameraReady, setIsCameraReady] =
         useState(false);
     const [isCapturing, setIsCapturing] =
@@ -261,6 +272,39 @@ export default function ScannerScreen({
             'warning',
             [{ text: 'Naiintindihan ko' }]
         );
+    };
+    const storeImages = async (inputs: LocalScanImage[]): Promise<ScanPage[]> => {
+        const previous = savedPagesRef.current;
+        const saved = previous.length > 0
+            ? appendToScanSession(previous, inputs)
+            : createScanSession([
+                ...existingRouteData.legacyImages,
+                ...inputs,
+            ]);
+        if (saved.length === 0) throw new Error('Walang pahinang na-save.');
+        const id = draftIdRef.current || saved[0].sessionId;
+        // The metadata write must finish before the newly captured page is shown.
+        await saveScanDraft(
+            id,
+            saved,
+            route?.params?.source === 'gallery' ? 'gallery' : 'camera'
+        );
+        savedPagesRef.current = saved;
+        draftIdRef.current = id;
+        if (saved.length === inputs.length + existingRouteData.legacyImages.length) {
+            try {
+                const uri = await createScanThumbnail(saved[0]);
+                await saveScanDraft(
+                    id,
+                    saved,
+                    route?.params?.source === 'gallery' ? 'gallery' : 'camera',
+                    uri
+                );
+            } catch {
+                // The permanent original and draft have already been saved.
+            }
+        }
+        return saved.slice(saved.length - inputs.length);
     };
     const cropPhotoToScanFrame = async (
         photoUri: string,
@@ -377,7 +421,8 @@ export default function ScannerScreen({
         if (
             !cameraRef.current ||
             !isCameraReady ||
-            isBusy
+            isBusy ||
+            savingCaptureRef.current
         ) {
             return;
         }
@@ -385,6 +430,7 @@ export default function ScannerScreen({
             showPageLimitAlert();
             return;
         }
+        savingCaptureRef.current = true;
         setIsCapturing(true);
         setQualityTone('checking');
         setStatusMessage('Kinukuha ang larawan…');
@@ -411,10 +457,17 @@ export default function ScannerScreen({
                 photo.width,
                 photo.height
             );
+            const saved = await storeImages([{
+                uri: croppedPhoto.uri,
+                source: 'camera',
+                width: croppedPhoto.width,
+                height: croppedPhoto.height,
+            }]);
+            const savedUri = saved[0].editedUri;
             setNewImages((previousImages) => [
                 ...previousImages,
                 {
-                    uri: croppedPhoto.uri,
+                    uri: savedUri,
                     source: 'camera',
                     width: croppedPhoto.width,
                     height: croppedPhoto.height,
@@ -423,7 +476,7 @@ export default function ScannerScreen({
             const nextPageNumber = totalPageCount + 1;
             setIsFlashOn(false);
             const pending = assessCapturedPage(
-                croppedPhoto.uri,
+                savedUri,
                 nextPageNumber,
                 flashWasOn
             );
@@ -445,6 +498,7 @@ export default function ScannerScreen({
             );
         } finally {
             setIsCapturing(false);
+            savingCaptureRef.current = false;
         }
     };
     const handlePickFromGallery = async (): Promise<void> => {
@@ -478,9 +532,14 @@ export default function ScannerScreen({
                         height: asset.height,
                     })
                 );
+            setIsSaving(true);
+            const saved = await storeImages(selectedImages);
             setNewImages((previousImages) => [
                 ...previousImages,
-                ...selectedImages,
+                ...selectedImages.map((image, index) => ({
+                    ...image,
+                    uri: saved[index].editedUri,
+                })),
             ]);
             qualityCheckSequenceRef.current += 1;
             setQualityTone('good');
@@ -504,13 +563,19 @@ export default function ScannerScreen({
                     },
                 ]
             );
+        } finally {
+            setIsSaving(false);
         }
     };
     const openPageReview = (pages: ScanPage[]): void => {
         if (isAddingPages) {
             navigation.navigate({
                 name: 'BatchEditScreen',
-                params: { pages },
+                params: {
+                    pages,
+                    draftId: draftIdRef.current,
+                    source: route?.params?.source || 'camera',
+                },
                 merge: true,
             });
             return;
@@ -518,11 +583,15 @@ export default function ScannerScreen({
         if (typeof navigation.replace === 'function') {
             navigation.replace('BatchEditScreen', {
                 pages,
+                draftId: draftIdRef.current,
+                source: route?.params?.source || 'camera',
             });
             return;
         }
         navigation.navigate('BatchEditScreen', {
             pages,
+            draftId: draftIdRef.current,
+            source: route?.params?.source || 'camera',
         });
     };
     const handleFinishScanning = async (): Promise<void> => {
@@ -540,30 +609,26 @@ export default function ScannerScreen({
         try {
             // Finish any recognition already started by camera capture.
             await Promise.allSettled([...pendingRecognitionRef.current]);
-            const readyImages = newImages.map((image) => ({
-                ...image,
-                ocrText: recognizedByUriRef.current.get(image.uri),
-            }));
-            let savedPages: ScanPage[];
-            if (
-                existingRouteData.scanPages.length > 0 &&
-                existingRouteData.legacyImages.length === 0
-            ) {
-                savedPages = appendToScanSession(
-                    existingRouteData.scanPages,
-                    readyImages
-                );
-            } else {
-                savedPages = createScanSession([
-                    ...existingRouteData.legacyImages,
-                    ...readyImages,
-                ]);
-            }
+            const savedPages = savedPagesRef.current.map((page) => {
+                const text = recognizedByUriRef.current.get(page.editedUri);
+                return text === undefined ? page : {
+                    ...page,
+                    ocrText: text,
+                    ocrSourceUri: page.editedUri,
+                    status: 'ocr-complete' as const,
+                };
+            });
             if (savedPages.length === 0) {
                 throw new Error(
                     'Walang pahinang na-save.'
                 );
             }
+            savedPagesRef.current = savedPages;
+            await saveScanDraft(
+                draftIdRef.current || savedPages[0].sessionId,
+                savedPages,
+                route?.params?.source === 'gallery' ? 'gallery' : 'camera'
+            );
             openPageReview(savedPages);
         } catch (error: unknown) {
             setStatusMessage(
@@ -590,23 +655,22 @@ export default function ScannerScreen({
             navigation.goBack();
             return;
         }
-        showAlert(
-            'Bumalik at itapon ang bagong larawan?',
-            `${newImages.length} bagong pahina ang hindi pa nase-save.`,
-            'warning',
-            [
-                {
-                    text: 'Ituloy ang pag-scan',
-                    style: 'cancel',
-                },
-                {
-                    text: 'Bumalik',
-                    style: 'destructive',
-                    onPress: () => navigation.goBack(),
-                },
-            ]
-        );
+        // Every captured image has already been copied and indexed as a draft.
+        if (isAddingPages) {
+            void handleFinishScanning();
+        } else {
+            navigation.navigate('Main', { screen: 'Scan' });
+        }
     };
+    useFocusEffect(
+        React.useCallback(() => {
+            const subscription = BackHandler.addEventListener(
+                'hardwareBackPress',
+                () => { handleClose(); return true; }
+            );
+            return () => subscription.remove();
+        }, [isBusy, newImages.length, isAddingPages, navigation])
+    );
     const renderPagePreview = ({
         item,
         index,

@@ -3,12 +3,14 @@ import {
     File,
     Paths,
 } from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 import type {
     ScanPage,
     ScanPageSource,
 } from '../types/ScanPage';
 
+// SCAN FILE STORAGE VERSION: 6.2.6
 const MAX_PAGES_PER_SESSION = 50;
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -285,4 +287,25 @@ export const appendToScanSession = (
 
 export const getMaximumScanPages = (): number => {
     return MAX_PAGES_PER_SESSION;
+};
+
+/** Small permanent preview; never uses the full image as the list thumbnail. */
+export const createScanThumbnail = async (page: ScanPage): Promise<string> => {
+    const sessionDirectory = getSessionDirectory(page.sessionId);
+    const thumbnail = new File(sessionDirectory, 'preview_144.jpg');
+    if (thumbnail.exists) return thumbnail.uri;
+    const resized = await ImageManipulator.manipulateAsync(
+        page.editedUri,
+        [{ resize: { width: 144 } }],
+        { compress: 0.65, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    new File(resized.uri).copy(thumbnail);
+    return thumbnail.uri;
+};
+
+/** Only call after checking that no history item still references this session. */
+export const deleteScanSession = (sessionId: string): void => {
+    if (!/^scan_\d+_[a-z0-9]+$/.test(sessionId)) return;
+    const directory = new Directory(SCANS_ROOT, sessionId);
+    if (directory.exists) directory.delete();
 };

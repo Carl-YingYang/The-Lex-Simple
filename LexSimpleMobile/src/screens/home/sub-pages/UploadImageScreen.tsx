@@ -15,8 +15,16 @@ import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
+import {
+    appendToScanSession,
+    createScanSession,
+    createScanThumbnail,
+} from '../../../services/scanFileStorage';
+import { saveScanDraft } from '../../../services/scanHistoryStorage';
+import { isScanPage } from '../../../types/ScanPage';
+import type { ScanPage } from '../../../types/ScanPage';
 
-// UPLOAD IMAGE SCREEN VERSION: 1.0.0
+// UPLOAD IMAGE SCREEN VERSION: 6.2.6
 // Multi-image gallery picker with recoverable permission and error states.
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -45,7 +53,7 @@ const getValidUniqueUris = (
     }, []);
 };
 
-export default function UploadImageScreen({ navigation }: any) {
+export default function UploadImageScreen({ route, navigation }: any) {
     const { isDarkMode, colors: T } = useTheme();
     const { showAlert, AlertRender } = useCustomAlert();
     const {
@@ -160,10 +168,37 @@ export default function UploadImageScreen({ navigation }: any) {
                 return;
             }
 
-            navigation.replace('BatchEditScreen', {
-                pages: selectedPages,
+            const existingPages: ScanPage[] = Array.isArray(route?.params?.existingPages)
+                ? route.params.existingPages.filter(isScanPage)
+                : [];
+            const pages = existingPages.length
+                ? appendToScanSession(
+                    existingPages,
+                    selectedPages.map((uri) => ({ uri, source: 'gallery' }))
+                )
+                : createScanSession(
+                    selectedPages.map((uri) => ({ uri, source: 'gallery' }))
+                );
+            const draftId = route?.params?.draftId || pages[0].sessionId;
+            await saveScanDraft(draftId, pages, 'gallery');
+            if (!existingPages.length) {
+                try {
+                    const thumbnailUri = await createScanThumbnail(pages[0]);
+                    await saveScanDraft(draftId, pages, 'gallery', thumbnailUri);
+                } catch {
+                    // The full image and draft are already saved.
+                }
+            }
+            const params = {
+                pages,
+                draftId,
                 source: 'gallery',
-            });
+            };
+            if (route?.params?.appendToBatch) {
+                navigation.navigate({ name: 'BatchEditScreen', params, merge: true });
+            } else {
+                navigation.replace('BatchEditScreen', params);
+            }
         } catch (error) {
             console.error('[UploadImageScreen] Picker failed:', error);
             updatePickerState('error');
@@ -178,6 +213,9 @@ export default function UploadImageScreen({ navigation }: any) {
     }, [
         hasGalleryPermission,
         navigation,
+        route?.params?.existingPages,
+        route?.params?.draftId,
+        route?.params?.appendToBatch,
         openAppSettings,
         safeGoBack,
         showAlert,

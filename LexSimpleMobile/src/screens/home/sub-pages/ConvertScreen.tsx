@@ -14,7 +14,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+    completeScan,
+    getScanHistoryItem,
+    updateScanHistory,
+} from '../../../services/scanHistoryStorage';
 import * as Network from 'expo-network';
 
 import { postFileEndpoint } from '../../../services/AiEngine';
@@ -23,9 +27,8 @@ import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 
-// CONVERT SCREEN VERSION: 1.0.0
+// CONVERT SCREEN VERSION: 6.2.6
 // Document import with flat processing UI and recoverable error states.
-const HISTORY_KEY = '@lex_scan_history';
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -51,19 +54,6 @@ type HistoryItem = {
     ocrText?: string;
 };
 
-const parseHistory = (value: string | null): HistoryItem[] => {
-    if (!value) {
-        return [];
-    }
-
-    try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-        console.error('[ConvertScreen] Invalid history data:', error);
-        return [];
-    }
-};
 
 export default function ConvertScreen({ navigation }: any) {
     const { showAlert, AlertRender } = useCustomAlert();
@@ -101,8 +91,6 @@ export default function ConvertScreen({ navigation }: any) {
         fileName: string
     ): Promise<HistoryItem | null> => {
         try {
-            const existingHistory = await AsyncStorage.getItem(HISTORY_KEY);
-            const history = parseHistory(existingHistory);
             const newItem: HistoryItem = {
                 id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 uri: fileUri,
@@ -113,10 +101,7 @@ export default function ConvertScreen({ navigation }: any) {
                 status: 'unscanned',
             };
 
-            await AsyncStorage.setItem(
-                HISTORY_KEY,
-                JSON.stringify([newItem, ...history])
-            );
+            await updateScanHistory((items) => [newItem, ...items]);
 
             return newItem;
         } catch (error) {
@@ -131,35 +116,20 @@ export default function ConvertScreen({ navigation }: any) {
         extractedText: string
     ): Promise<HistoryItem | null> => {
         try {
-            const storedHistory = await AsyncStorage.getItem(HISTORY_KEY);
-            const history = parseHistory(storedHistory);
-            let updatedItem: HistoryItem | null = null;
-
-            const updatedHistory = history.map((item) => {
-                if (item.id !== id) {
-                    return item;
+            await completeScan(id, analysisData, extractedText, (analysisData as any)?.sanitizedText || '');
+            const updated = await getScanHistoryItem(id);
+            return updated && updated.type === 'document'
+                ? {
+                    id: updated.id,
+                    uri: updated.uri || '',
+                    title: updated.title,
+                    date: updated.date,
+                    type: 'document',
+                    status: updated.status === 'scanned' ? 'scanned' : 'unscanned',
+                    analysisResult: updated.analysisResult,
+                    ocrText: updated.ocrText,
                 }
-
-                updatedItem = {
-                    ...item,
-                    status: 'scanned',
-                    analysisResult: analysisData,
-                    ocrText: extractedText,
-                };
-
-                return updatedItem;
-            });
-
-            if (!updatedItem) {
-                return null;
-            }
-
-            await AsyncStorage.setItem(
-                HISTORY_KEY,
-                JSON.stringify(updatedHistory)
-            );
-
-            return updatedItem;
+                : null;
         } catch (error) {
             console.error('[ConvertScreen] Updating history failed:', error);
             return null;

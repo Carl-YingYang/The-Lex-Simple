@@ -12,7 +12,7 @@ import {
     View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { completeScan, deleteScans } from '../../../services/scanHistoryStorage';
 import * as Network from 'expo-network';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import ImageViewer from 'react-native-image-zoom-viewer';
@@ -24,7 +24,7 @@ import ClauseCard from '../../../components/ClauseCard';
 import { sanitizeLocalText } from '../../../utils/sanitizer';
 import { useTheme } from '../../../theme/ThemeContext';
 
-const HISTORY_STORAGE_KEY = '@lex_scan_history';
+// OFFLINE DETAIL SCREEN VERSION: 6.2.6
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
 const SUCCESS = '#10B981';
@@ -359,25 +359,7 @@ export default function OfflineDetailScreen({
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            const storedHistory =
-                                await AsyncStorage.getItem(
-                                    HISTORY_STORAGE_KEY
-                                );
-                            const parsed = storedHistory
-                                ? JSON.parse(storedHistory)
-                                : [];
-                            const history = Array.isArray(parsed)
-                                ? parsed
-                                : [];
-                            const updatedHistory = history.filter(
-                                (item: ScanItem) =>
-                                    item.id !== scanItem.id
-                            );
-
-                            await AsyncStorage.setItem(
-                                HISTORY_STORAGE_KEY,
-                                JSON.stringify(updatedHistory)
-                            );
+                            await deleteScans([scanItem.id]);
                             navigation.goBack();
                         } catch (error) {
                             console.error(
@@ -403,26 +385,11 @@ export default function OfflineDetailScreen({
             return;
         }
 
-        const storedHistory = await AsyncStorage.getItem(
-            HISTORY_STORAGE_KEY
-        );
-        const parsed = storedHistory ? JSON.parse(storedHistory) : [];
-        const history = Array.isArray(parsed) ? parsed : [];
-        const updatedHistory = history.map((item: ScanItem) =>
-            item.id === scanItem.id
-                ? {
-                      ...item,
-                      status: 'scanned',
-                      analysisResult: analysis,
-                      ocrText: analysis.ocrText,
-                      sanitizedText: analysis.sanitizedText,
-                  }
-                : item
-        );
-
-        await AsyncStorage.setItem(
-            HISTORY_STORAGE_KEY,
-            JSON.stringify(updatedHistory)
+        await completeScan(
+            scanItem.id,
+            analysis,
+            analysis.ocrText || scanItem.ocrText || '',
+            analysis.sanitizedText || scanItem.sanitizedText || ''
         );
     };
 

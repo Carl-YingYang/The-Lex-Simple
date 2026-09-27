@@ -1,6 +1,7 @@
 import React, {
     useCallback,
     useMemo,
+    useRef,
     useState,
 } from 'react';
 import {
@@ -19,7 +20,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+    deleteScans,
+    listScanHistory,
+    recoverInterruptedScans,
+    renameScan,
+    subscribeScanHistory,
+} from '../../../services/scanHistoryStorage';
+import type { ScanHistoryItem } from '../../../services/scanHistoryStorage';
 
 import { useCustomAlert } from '../../../components/CustomAlert';
 import FloatingProcessIndicator from '../../../components/FloatingProcessIndicator';
@@ -27,27 +35,13 @@ import { useBackgroundProcess } from '../../../context/BackgroundProcessContext'
 import { useTheme } from '../../../theme/ThemeContext';
 
 
-const HISTORY_STORAGE_KEY = '@lex_scan_history';
+// SCAN SCREEN VERSION: 6.2.7
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
 const SUCCESS = '#10B981';
 const WARNING = '#F59E0B';
 
 type HistoryFilter = 'all' | 'scanned' | 'unscanned';
-
-export interface ScanHistoryItem {
-    id: string;
-    uri?: string;
-    images?: string[];
-    pageUris?: string[];
-    title: string;
-    date: string;
-    type: 'camera' | 'gallery' | 'document';
-    status: 'unscanned' | 'scanned';
-    analysisResult?: any;
-    ocrText?: string;
-    sanitizedText?: string;
-}
 
 type SourceOptionProps = {
     icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -141,6 +135,7 @@ const isGenericTitle = (value: string): boolean => {
         normalized === 'document scan' ||
         normalized.startsWith('document scan (') ||
         normalized.includes('pages)')
+        || /^dokumento\s+\d+\s*·\s*pahina/i.test(normalized)
     );
 };
 
@@ -162,30 +157,22 @@ export default function ScanScreen({ navigation }: any) {
     const [itemToRename, setItemToRename] =
         useState<ScanHistoryItem | null>(null);
     const [newTitle, setNewTitle] = useState('');
+    const [visibleCount, setVisibleCount] = useState(15);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const lastLongPressedIdRef = useRef<string | null>(null);
+    const isSelecting = selectedIds.size > 0;
 
     const loadHistory = useCallback(async (): Promise<void> => {
         try {
-            const storedHistory = await AsyncStorage.getItem(
-                HISTORY_STORAGE_KEY
+            const parsed = await recoverInterruptedScans(
+                isGlobalProcessing,
+                activeFileId
             );
-
-            if (!storedHistory) {
-                setHistoryItems([]);
-                return;
-            }
-
-            const parsed = JSON.parse(storedHistory);
-            if (!Array.isArray(parsed)) {
-                setHistoryItems([]);
-                return;
-            }
-
-            const sortedHistory = [...parsed].sort(
+            const sortedHistory = parsed.sort(
                 (a, b) =>
-                    Number.parseInt(String(b?.id), 10) -
-                    Number.parseInt(String(a?.id), 10)
+                    (b.updatedAt || Number.parseInt(String(b.id), 10) || 0) -
+                    (a.updatedAt || Number.parseInt(String(a.id), 10) || 0)
             );
-
             setHistoryItems(sortedHistory);
         } catch (error) {
             console.error(
@@ -194,11 +181,19 @@ export default function ScanScreen({ navigation }: any) {
             );
             setHistoryItems([]);
         }
-    }, []);
+    }, [isGlobalProcessing, activeFileId]);
 
     useFocusEffect(
         useCallback(() => {
             void loadHistory();
+            const unsubscribe = subscribeScanHistory(() => {
+                void listScanHistory().then((items) =>
+                    setHistoryItems([...items].sort((a, b) =>
+                        (b.updatedAt || 0) - (a.updatedAt || 0)
+                    ))
+                );
+            });
+            return unsubscribe;
         }, [loadHistory])
     );
 
@@ -206,7 +201,7 @@ export default function ScanScreen({ navigation }: any) {
         (item: ScanHistoryItem): string => {
             let title = item.title?.trim() || 'Document';
 
-            if (isGenericTitle(title)) {
+            if (!item.userRenamed && isGenericTitle(title)) {
                 const analyzedTitle =
                     item.analysisResult?.documentTitle;
 
@@ -244,10 +239,24 @@ export default function ScanScreen({ navigation }: any) {
             historyItems.filter((item) =>
                 activeFilter === 'all'
                     ? true
-                    : item.status === activeFilter
+                    : activeFilter === 'unscanned'
+                      ? item.status !== 'scanned'
+                      : item.status === 'scanned'
             ),
         [activeFilter, historyItems]
     );
+    const visibleHistory = useMemo(
+        () => filteredHistory.slice(0, visibleCount),
+        [filteredHistory, visibleCount]
+    );
+    const toggleSelection = (id: string): void => {
+        setSelectedIds((current) => {
+            const next = new Set(current);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
 
     const showLegalInfo = (): void => {
         showAlert(
@@ -259,6 +268,25 @@ export default function ScanScreen({ navigation }: any) {
     };
 
     const handleCardPress = (item: ScanHistoryItem): void => {
+        if (lastLongPressedIdRef.current === item.id) {
+            lastLongPressedIdRef.current = null;
+            return;
+        }
+        if (isSelecting) {
+            toggleSelection(item.id);
+            return;
+        }
+        if (
+            item.draftPages?.length &&
+            (item.status === 'draft' || item.processingState === 'needs-retry')
+        ) {
+            navigation.navigate('BatchEditScreen', {
+                pages: item.draftPages,
+                draftId: item.id,
+                source: item.type,
+            });
+            return;
+        }
         if (item.status === 'scanned' && item.analysisResult) {
             navigation.navigate('ResultScreen', {
                 analysisResult: item.analysisResult,
@@ -291,16 +319,7 @@ export default function ScanScreen({ navigation }: any) {
         }
 
         try {
-            const updatedHistory = historyItems.map((item) =>
-                item.id === itemToRename.id
-                    ? { ...item, title: cleanTitle }
-                    : item
-            );
-
-            await AsyncStorage.setItem(
-                HISTORY_STORAGE_KEY,
-                JSON.stringify(updatedHistory)
-            );
+            const updatedHistory = await renameScan(itemToRename.id, cleanTitle);
             setHistoryItems(updatedHistory);
             closeRenameModal();
         } catch (error) {
@@ -319,14 +338,7 @@ export default function ScanScreen({ navigation }: any) {
 
     const deleteItem = async (id: string): Promise<void> => {
         try {
-            const updatedHistory = historyItems.filter(
-                (item) => item.id !== id
-            );
-
-            await AsyncStorage.setItem(
-                HISTORY_STORAGE_KEY,
-                JSON.stringify(updatedHistory)
-            );
+            const updatedHistory = await deleteScans([id]);
             setHistoryItems(updatedHistory);
         } catch (error) {
             console.error(
@@ -340,6 +352,43 @@ export default function ScanScreen({ navigation }: any) {
                 [{ text: 'OK' }]
             );
         }
+    };
+    const deleteSelected = async (): Promise<void> => {
+        const ids = Array.from(selectedIds);
+        const processingSelection = historyItems.some((item) =>
+            selectedIds.has(item.id) &&
+            isGlobalProcessing &&
+            (activeFileId === item.id ||
+                (activeFileId === null && item.processingState === 'analyzing'))
+        );
+        if (processingSelection) {
+            showAlert(
+                'May sinusuring file',
+                'Hintaying matapos ang pagsusuri bago ito burahin.',
+                'warning',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+        try {
+            const updated = await deleteScans(ids);
+            setHistoryItems(updated);
+            setSelectedIds(new Set());
+        } catch (error) {
+            console.error('[ScanScreen] Bulk delete failed:', error);
+            showAlert('Hindi nabura ang files', 'Pakisubukan ulit.', 'error', [{ text: 'OK' }]);
+        }
+    };
+    const confirmDeleteSelected = (): void => {
+        showAlert(
+            `Burahin ang ${selectedIds.size} file?`,
+            'Permanenteng aalisin ang mga napiling file.',
+            'warning',
+            [
+                { text: 'Kanselahin', style: 'cancel' },
+                { text: 'Burahin', style: 'destructive', onPress: () => void deleteSelected() },
+            ]
+        );
     };
 
     const handleDelete = (item: ScanHistoryItem): void => {
@@ -389,9 +438,11 @@ export default function ScanScreen({ navigation }: any) {
         item: ScanHistoryItem;
     }) => {
         const isAnalyzing =
-            isGlobalProcessing && activeFileId === item.id;
+            isGlobalProcessing &&
+            (activeFileId === item.id ||
+                (activeFileId === null && item.processingState === 'analyzing'));
         const images = getHistoryImages(item);
-        const previewUri = images[0];
+        const previewUri = item.thumbnailUri || images[0];
         const pageCount = images.length;
 
         return (
@@ -407,6 +458,17 @@ export default function ScanScreen({ navigation }: any) {
                 <TouchableOpacity
                     style={styles.historyMainPress}
                     onPress={() => handleCardPress(item)}
+                    onLongPress={() => {
+                        if (!isAnalyzing) {
+                            lastLongPressedIdRef.current = item.id;
+                            toggleSelection(item.id);
+                            setTimeout(() => {
+                                if (lastLongPressedIdRef.current === item.id) {
+                                    lastLongPressedIdRef.current = null;
+                                }
+                            }, 500);
+                        }
+                    }}
                     disabled={isAnalyzing}
                     accessibilityRole="button"
                     accessibilityLabel={`Buksan ang ${getDisplayTitle(item)}`}
@@ -420,7 +482,9 @@ export default function ScanScreen({ navigation }: any) {
                             },
                         ]}
                     >
-                        {item.type === 'document' || !previewUri ? (
+                        {selectedIds.has(item.id) ? (
+                            <Ionicons name="checkmark-circle" size={28} color={PRIMARY} />
+                        ) : item.type === 'document' || !previewUri ? (
                             <Ionicons
                                 name="document-text-outline"
                                 size={27}
@@ -521,7 +585,11 @@ export default function ScanScreen({ navigation }: any) {
                                         ? 'Sinusuri ngayon'
                                         : item.status === 'scanned'
                                           ? 'May resulta'
-                                          : 'Hindi pa nasuri'}
+                                          : item.status === 'draft'
+                                            ? 'Ipagpatuloy ang pag-edit'
+                                            : item.processingState === 'needs-retry'
+                                              ? 'Subukan ulit'
+                                              : 'Hindi pa nasuri'}
                                 </Text>
                             </View>
 
@@ -529,7 +597,7 @@ export default function ScanScreen({ navigation }: any) {
                     </View>
                 </TouchableOpacity>
 
-                {!isAnalyzing && (
+                {!isAnalyzing && !isSelecting && (
                     <TouchableOpacity
                         style={styles.historyMenuButton}
                         onPress={() => openHistoryOptions(item)}
@@ -715,9 +783,40 @@ export default function ScanScreen({ navigation }: any) {
                             { color: T.text },
                         ]}
                     >
-                        Recent Files
+                        {isSelecting ? 'Pumili ng files' : 'Recent Files'}
                     </Text>
+                    {!isSelecting && (
+                        <Text style={{ color: T.subText, fontSize: 11, marginTop: 3 }}>
+                            Pindutin nang matagal para pumili ng files
+                        </Text>
+                    )}
                 </View>
+                {isSelecting && (
+                    <View style={styles.selectionHeaderActions}>
+                        <TouchableOpacity
+                            onPress={() => setSelectedIds(new Set(
+                                filteredHistory.filter((item) => !(
+                                    isGlobalProcessing &&
+                                    (activeFileId === item.id ||
+                                        (activeFileId === null && item.processingState === 'analyzing'))
+                                )).map((item) => item.id)
+                            ))}
+                            style={[styles.selectionHeaderButton, { borderColor: T.border }]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Piliin lahat ng nakikitang file"
+                        >
+                            <Text style={{ color: PRIMARY_SOFT, fontWeight: '800' }}>Piliin lahat</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => setSelectedIds(new Set())}
+                            style={[styles.selectionHeaderButton, { borderColor: T.border }]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Tapusin ang pagpili"
+                        >
+                            <Text style={{ color: T.text, fontWeight: '800' }}>Tapos</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
 
             <View style={styles.filterRow}>
@@ -744,7 +843,11 @@ export default function ScanScreen({ navigation }: any) {
                                         : T.border,
                                 },
                             ]}
-                            onPress={() => setActiveFilter(value)}
+                            onPress={() => {
+                                setActiveFilter(value);
+                                setVisibleCount(15);
+                                setSelectedIds(new Set());
+                            }}
                         >
                             <Text
                                 style={[
@@ -782,9 +885,18 @@ export default function ScanScreen({ navigation }: any) {
             <FloatingProcessIndicator />
 
             <FlatList
-                data={filteredHistory}
+                data={visibleHistory}
                 keyExtractor={(item) => item.id}
                 renderItem={renderHistoryItem}
+                initialNumToRender={8}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+                onEndReachedThreshold={0.35}
+                onEndReached={() => {
+                    if (visibleCount < filteredHistory.length) {
+                        setVisibleCount((count) => count + 15);
+                    }
+                }}
                 ListHeaderComponent={ListHeader}
                 ListEmptyComponent={
                     <View
@@ -823,6 +935,22 @@ export default function ScanScreen({ navigation }: any) {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
             />
+            {isSelecting && (
+                <View style={[styles.selectionBar, { backgroundColor: T.card, borderColor: T.border }]}>
+                    <Text style={{ color: T.text, fontWeight: '800' }}>
+                        {selectedIds.size} napili
+                    </Text>
+                    <TouchableOpacity
+                        onPress={confirmDeleteSelected}
+                        style={styles.selectionDelete}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Burahin ang ${selectedIds.size} napiling file`}
+                    >
+                        <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                        <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Burahin</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
             <Modal
                 visible={renameModalVisible}
@@ -943,6 +1071,23 @@ export default function ScanScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+    selectionBar: {
+        minHeight: 64,
+        paddingHorizontal: 18,
+        borderTopWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    selectionDelete: {
+        minHeight: 42,
+        paddingHorizontal: 15,
+        borderRadius: 6,
+        backgroundColor: '#DC2626',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
     safeArea: {
         flex: 1,
     },
@@ -1052,6 +1197,18 @@ const styles = StyleSheet.create({
     divider: {
         height: 1,
         marginVertical: 18,
+    },
+    selectionHeaderActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    selectionHeaderButton: {
+        minHeight: 40,
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderRadius: 6,
+        paddingHorizontal: 9,
     },
     recentHeader: {
         minHeight: 34,

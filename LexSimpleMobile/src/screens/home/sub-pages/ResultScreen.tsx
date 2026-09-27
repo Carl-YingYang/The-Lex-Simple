@@ -21,7 +21,7 @@ import { useTheme } from '../../../theme/ThemeContext';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
 import type { SanitizedDocumentApiPayload } from '../../../utils/sanitizer';
 
-// RESULT SCREEN VERSION: 6.2.3
+// RESULT SCREEN VERSION: 6.2.4
 // Floating Lexie Insight chat bubble build.
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -366,7 +366,14 @@ export default function ResultScreen({ route, navigation }: any) {
             : noFindings
               ? 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.'
               : `${result.findings.length} bahagi ang kailangan mong suriin.`;
-    const riskConfig = getRiskConfig(result.score);
+    const riskConfig: RiskConfig = noFindings
+        ? {
+            mainColor: PRIMARY_SOFT,
+            icon: 'checkmark-circle-outline',
+            label: 'NO FLAGS IN READ TEXT',
+            shortLabel: 'Walang na-flag',
+        }
+        : getRiskConfig(result.score);
     const totalDeduction = result.score === null
         ? 0
         : Math.max(0, 100 - result.score);
@@ -782,7 +789,9 @@ export default function ResultScreen({ route, navigation }: any) {
                     activeOpacity={0.86}
                     onPress={() => setScoreModalVisible(true)}
                     accessibilityRole="button"
-                    accessibilityLabel="Tingnan ang score breakdown"
+                    accessibilityLabel={noFindings
+                        ? 'Tingnan ang paliwanag sa finding check'
+                        : 'Tingnan ang score breakdown'}
                 >
                     <View style={styles.scoreTopRow}>
                         <Text
@@ -813,26 +822,44 @@ export default function ResultScreen({ route, navigation }: any) {
                         </View>
                     </View>
 
-                    <View style={styles.scoreRow}>
-                        <Text
-                            style={[
-                                styles.scoreValue,
-                                { color: riskConfig.mainColor },
-                            ]}
-                        >
-                            {result.score === null ? '—' : result.score}
-                        </Text>
-                        {result.score !== null && (
+                    {noFindings ? (
+                        <View style={styles.noFindingsRow}>
+                            <Ionicons
+                                name="document-text-outline"
+                                size={25}
+                                color={riskConfig.mainColor}
+                            />
                             <Text
                                 style={[
-                                    styles.scoreMaximum,
-                                    { color: T.subText },
+                                    styles.noFindingsValue,
+                                    { color: T.text },
                                 ]}
                             >
-                                /100
+                                0 na-flag
                             </Text>
-                        )}
-                    </View>
+                        </View>
+                    ) : (
+                        <View style={styles.scoreRow}>
+                            <Text
+                                style={[
+                                    styles.scoreValue,
+                                    { color: riskConfig.mainColor },
+                                ]}
+                            >
+                                {result.score === null ? '—' : result.score}
+                            </Text>
+                            {result.score !== null && (
+                                <Text
+                                    style={[
+                                        styles.scoreMaximum,
+                                        { color: T.subText },
+                                    ]}
+                                >
+                                    /100
+                                </Text>
+                            )}
+                        </View>
+                    )}
 
                     <Text
                         style={[
@@ -844,7 +871,9 @@ export default function ResultScreen({ route, navigation }: any) {
                     </Text>
 
                     <Text style={styles.scoreActionText}>
-                        {result.score === null
+                        {noFindings
+                            ? 'Ano ang ibig sabihin nito?'
+                            : result.score === null
                             ? 'Bakit walang score?'
                             : 'Tingnan kung paano nakuha ang score'}
                     </Text>
@@ -1062,7 +1091,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.text },
                                     ]}
                                 >
-                                    {result.score === null
+                                    {noFindings
+                                        ? 'Walang na-flag'
+                                        : result.score === null
                                         ? 'Bakit walang score?'
                                         : 'Paano nakuha ang score?'}
                                 </Text>
@@ -1072,7 +1103,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    {result.score === null
+                                    {noFindings
+                                        ? 'Natapos ang pagsusuri sa nabasang text'
+                                        : result.score === null
                                         ? needsReview
                                             ? 'May hindi tiyak na nabasang text'
                                             : 'Walang na-flag sa nabasang text'
@@ -1105,7 +1138,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    {needsReview
+                                    {noFindings
+                                        ? 'Walang na-flag na clause sa nabasang text. Tingnan pa rin ang orihinal na dokumento bago magdesisyon.'
+                                        : needsReview
                                         ? [resultMessage, ...result.ocrIssues.slice(0, 3)].join('\n')
                                         : 'Walang ibinigay na score dahil walang na-flag sa available OCR text. Hindi nito kinukumpirma na ligtas ang dokumento. Suriin ang scan at orihinal na clauses.'}
                                 </Text>
@@ -1510,6 +1545,18 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'baseline',
         paddingTop: 5,
+    },
+    noFindingsRow: {
+        minHeight: 73,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 10,
+    },
+    noFindingsValue: {
+        fontSize: 24,
+        lineHeight: 31,
+        fontWeight: '900',
     },
     scoreValue: {
         fontSize: 68,
