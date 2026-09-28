@@ -1,4 +1,4 @@
-"""Knowledge PDF review and configurable publication scopes (v6.3.10).
+"""Knowledge PDF review and configurable publication scopes (v6.3.13).
 
 PDFs are private audit copies. Only approved, source-labelled provisions are
 searchable. Old unverified `documents` rows remain in SQLite but are inactive.
@@ -28,7 +28,10 @@ MAX_BYTES = 12 * 1024 * 1024
 MAX_PAGES = 500
 MAX_TEXT = 2_000_000
 SECTION = re.compile(
-    r"(?im)^[ \t]*(?:SECTION|SEC\.?|ARTICLE|ART\.?)\s+(\d+[A-Z]?)(?=[.:-]|[ \t]|$)[.:-]?[ \t]*"
+    # A heading ends its number with punctuation or ends the line. A bare
+    # reference such as "Article 78 or a rule ..." inside Article 4 is text,
+    # not the start of a new article.
+    r"(?im)^[ \t]*(?:SECTION|SEC\.?|ARTICLE|ART\.?)\s+(\d+[A-Z]?)(?:[.:-][ \t]*|(?=\n|$))"
 )
 ARTICLE = re.compile(r"(?m)^[ \t]*(?:ARTICLE|ART\.?)\s+(\d+)(?=[.:-]|[ \t]|$)[.:-]?[ \t]*")
 TRUSTED_HOSTS = (
