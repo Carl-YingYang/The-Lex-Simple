@@ -1,28 +1,49 @@
+"""Lex-Simple API: knowledge intake v6.3.2."""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# I-import yung router na kakagawa lang natin
 from api.routes import router as api_router
+from db.sqlite_store import init_db
+from services.knowledge_catalog import ensure_schema, recover_interrupted_indexes
+
 
 app = FastAPI(
     title="Lex-Simple Backend",
-    description="Production-grade AI API with embedded RAG for linguistic simplification.",
-    version="1.0.0"
+    description="Legal literacy and source-reviewed knowledge API.",
+    version="6.3.2",
+    openapi_tags=[
+        {"name": "1 · Batas: I-upload at I-approve",
+         "description": "Sundan ang 1 → 2 → 3. Isang PDF muna bago ang susunod."},
+        {"name": "2 · Batas: Listahan ng Files",
+         "description": "Tingnan kung draft, indexing, active, o failed ang bawat batas."},
+        {"name": "3 · Batas: Ibang Gawain",
+         "description": "Page selection, legacy records, disable, at pag-alis ng draft."},
+        {"name": "Knowledge Base", "description": "Dictionary at existing guide sync."},
+        {"name": "AI Processing", "description": "Simplify, chat, at explain endpoints."},
+        {"name": "User Feedback", "description": "Feedback endpoints."},
+    ],
 )
 
-# 🛡️ CORS Middleware (Para makapasok yung requests galing sa React Native / Ngrok)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Pwede niyo itong higpitan sa production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Ikabit yung mga endpoints natin (yung /simplify at /ingest)
+
+@app.on_event("startup")
+def initialize_knowledge_catalog():
+    init_db()
+    ensure_schema()
+    recover_interrupted_indexes()
+
+
 app.include_router(api_router)
 
-# Simpleng health check
+
 @app.get("/")
 def read_root():
-    return {"message": "Lex-Simpl AI & RAG Backend is Live and Online!"}
+    return {"message": "Lex-Simple backend is online."}
