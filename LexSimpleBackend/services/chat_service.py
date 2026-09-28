@@ -1,11 +1,9 @@
 import re
-import sqlite3
 from typing import List, Dict, Optional, Any
 
 from db.chroma_store import query_vector_db
 from services.prompts import get_chat_reply_prompt
 from services.llm_config import get_ai_client, CHAT_MODEL
-from core.config import settings
 
 
 # ============================================================
@@ -173,126 +171,17 @@ def _contains_exact_reference(
 def search_exact_legal_reference(
     reference: Optional[Dict[str, str]]
 ) -> List[str]:
-    """
-    Search the SQLite legal database for an explicitly
-    requested Article or Section.
-
-    Exact reference lookup is prioritized over semantic search.
-    """
-
+    """Only approved, source-labelled provisions are eligible for exact lookup."""
     if not reference:
         return []
-
-    number = reference["number"]
-    kind = reference["kind"]
-
-    db_path = getattr(
-        settings,
-        "DB_PATH",
-        "./lex_metadata.db"
-    )
-
-    print(
-        f"[CHAT EXACT] DB PATH: {db_path}"
-    )
-
-    print(
-        f"[CHAT EXACT] Searching for: "
-        f"{kind} {number}"
-    )
-
-    results: List[str] = []
-
-    conn = None
-
     try:
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-
-        cursor = conn.cursor()
-
-        query = """
-            SELECT
-                chunk_text,
-                filename,
-                chunk_id
-            FROM documents
-            WHERE
-                chunk_text LIKE ?
-                OR chunk_text LIKE ?
-                OR chunk_text LIKE ?
-            LIMIT 10
-        """
-
-        cursor.execute(
-            query,
-            (
-                f"%[{kind} {number}]%",
-                f"%{kind} {number}%",
-                f"%{kind.lower()} {number}%",
-            )
+        from services.knowledge_catalog import find_verified_reference_context
+        return find_verified_reference_context(
+            reference["kind"], reference["number"], limit=5,
         )
-
-        rows = cursor.fetchall()
-
-        print(
-            f"[CHAT EXACT] Candidate rows: {len(rows)}"
-        )
-
-        for row in rows:
-
-            chunk_text = row["chunk_text"]
-
-            if not chunk_text:
-                continue
-
-            if not _contains_exact_reference(
-                chunk_text,
-                reference
-            ):
-                continue
-
-            source = (
-                row["filename"]
-                or "Philippine Legal Database"
-            )
-
-            chunk_id = row["chunk_id"]
-
-            formatted_context = (
-                f"SOURCE: {source}\n"
-                f"REFERENCE: {reference['label']}\n"
-                f"CHUNK ID: {chunk_id}\n"
-                f"{chunk_text}"
-            )
-
-            if formatted_context not in results:
-                results.append(formatted_context)
-
-        print(
-            f"[CHAT EXACT] Results found: {len(results)}"
-        )
-
-    except sqlite3.OperationalError as e:
-
-        print(
-            f"[CHAT EXACT SQLITE ERROR] {e}"
-        )
-
-    except Exception as e:
-
-        print(
-            f"[CHAT EXACT LOOKUP ERROR] "
-            f"{type(e).__name__}: {e}"
-        )
-
-    finally:
-
-        if conn is not None:
-            conn.close()
-
-    return results
+    except Exception as exc:
+        print(f"[CHAT EXACT LOOKUP ERROR] {type(exc).__name__}: {exc}")
+        return []
 
 
 # ============================================================
@@ -690,6 +579,20 @@ def generate_chat_reply(
         system_prompt = get_chat_reply_prompt(
             final_context
         )
+        system_prompt += """
+
+        SOURCE RULES (v6.3.3):
+        The retrieved legal text is the only source of legal facts in this reply.
+        Explain its words in plain Filipino. Keep amounts, dates, conditions,
+        exceptions and enumerated requirements faithful to that text.
+        Do not add examples, fees, insurance, penalties or exceptions unless
+        the retrieved text actually mentions them. In particular, do not
+        illustrate a numbered list with plausible but unsupported examples.
+        Do not turn a question about one section into advice about another.
+        If the retrieved text does not support the requested detail, say so
+        briefly. Do not print any citation or URL: the server adds the
+        verified source information after the reply.
+        """
 
         # ====================================================
         # 4. BUILD PROPER CONVERSATIONAL MESSAGES

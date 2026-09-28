@@ -15,6 +15,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,13 +36,18 @@ import { useBackgroundProcess } from '../../../context/BackgroundProcessContext'
 import { useTheme } from '../../../theme/ThemeContext';
 
 
-// SCAN SCREEN VERSION: 6.2.7
+// SCAN SCREEN VERSION: 6.2.9
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
 const SUCCESS = '#10B981';
 const WARNING = '#F59E0B';
 
 type HistoryFilter = 'all' | 'scanned' | 'unscanned';
+
+type ImagePreview = {
+    images: string[];
+    title: string;
+} | null;
 
 type SourceOptionProps = {
     icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -141,6 +147,7 @@ const isGenericTitle = (value: string): boolean => {
 
 export default function ScanScreen({ navigation }: any) {
     const { isDarkMode, toggleTheme, colors: T } = useTheme();
+    const { width: previewWidth } = useWindowDimensions();
     const {
         isProcessing: isGlobalProcessing,
         activeFileId,
@@ -159,6 +166,8 @@ export default function ScanScreen({ navigation }: any) {
     const [newTitle, setNewTitle] = useState('');
     const [visibleCount, setVisibleCount] = useState(15);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [imagePreview, setImagePreview] = useState<ImagePreview>(null);
+    const [previewPage, setPreviewPage] = useState(0);
     const lastLongPressedIdRef = useRef<string | null>(null);
     const isSelecting = selectedIds.size > 0;
 
@@ -298,6 +307,39 @@ export default function ScanScreen({ navigation }: any) {
         navigation.navigate('OfflineDetailScreen', {
             scanItem: item,
         });
+    };
+
+    const openImagePreview = (item: ScanHistoryItem): void => {
+        if (isSelecting) {
+            handleCardPress(item);
+            return;
+        }
+        const images = getHistoryImages(item);
+        if (item.type === 'document' || images.length === 0) {
+            handleCardPress(item);
+            return;
+        }
+        setPreviewPage(0);
+        setImagePreview({ images, title: getDisplayTitle(item) });
+    };
+
+    const closeImagePreview = (): void => {
+        setImagePreview(null);
+        setPreviewPage(0);
+    };
+
+    const handleCardLongPress = (
+        item: ScanHistoryItem,
+        isAnalyzing: boolean
+    ): void => {
+        if (isAnalyzing) return;
+        lastLongPressedIdRef.current = item.id;
+        toggleSelection(item.id);
+        setTimeout(() => {
+            if (lastLongPressedIdRef.current === item.id) {
+                lastLongPressedIdRef.current = null;
+            }
+        }, 500);
     };
 
     const openRenameModal = (item: ScanHistoryItem): void => {
@@ -455,59 +497,72 @@ export default function ScanScreen({ navigation }: any) {
                     },
                 ]}
             >
-                <TouchableOpacity
-                    style={styles.historyMainPress}
-                    onPress={() => handleCardPress(item)}
-                    onLongPress={() => {
-                        if (!isAnalyzing) {
-                            lastLongPressedIdRef.current = item.id;
-                            toggleSelection(item.id);
-                            setTimeout(() => {
-                                if (lastLongPressedIdRef.current === item.id) {
-                                    lastLongPressedIdRef.current = null;
-                                }
-                            }, 500);
+                <View style={styles.historyMainPress}>
+                    <TouchableOpacity
+                        style={styles.previewTouchArea}
+                        onPress={(event) => {
+                            event.stopPropagation();
+                            openImagePreview(item);
+                        }}
+                        onLongPress={(event) => {
+                            event.stopPropagation();
+                            handleCardLongPress(item, isAnalyzing);
+                        }}
+                        disabled={isAnalyzing && item.type === 'document'}
+                        activeOpacity={0.78}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                            isSelecting
+                                ? `Piliin ang ${getDisplayTitle(item)}`
+                                : item.type !== 'document' && images.length > 0
+                                  ? `Tingnan ang ${pageCount} larawan ng ${getDisplayTitle(item)}`
+                                  : `Buksan ang ${getDisplayTitle(item)}`
                         }
-                    }}
-                    disabled={isAnalyzing}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Buksan ang ${getDisplayTitle(item)}`}
-                >
-                    <View
-                        style={[
-                            styles.previewBox,
-                            {
-                                backgroundColor: T.bg,
-                                borderColor: T.border,
-                            },
-                        ]}
                     >
-                        {selectedIds.has(item.id) ? (
-                            <Ionicons name="checkmark-circle" size={28} color={PRIMARY} />
-                        ) : item.type === 'document' || !previewUri ? (
-                            <Ionicons
-                                name="document-text-outline"
-                                size={27}
-                                color={PRIMARY_SOFT}
-                            />
-                        ) : (
-                            <Image
-                                source={{ uri: previewUri }}
-                                style={styles.previewImage}
-                                resizeMode="cover"
-                            />
-                        )}
+                        <View
+                            style={[
+                                styles.previewBox,
+                                {
+                                    backgroundColor: T.bg,
+                                    borderColor: T.border,
+                                },
+                            ]}
+                        >
+                            {selectedIds.has(item.id) ? (
+                                <Ionicons name="checkmark-circle" size={28} color={PRIMARY} />
+                            ) : item.type === 'document' || !previewUri ? (
+                                <Ionicons
+                                    name="document-text-outline"
+                                    size={27}
+                                    color={PRIMARY_SOFT}
+                                />
+                            ) : (
+                                <Image
+                                    source={{ uri: previewUri }}
+                                    style={styles.previewImage}
+                                    resizeMode="cover"
+                                />
+                            )}
 
-                        {pageCount > 1 && (
-                            <View style={styles.pageCountBadge}>
-                                <Text style={styles.pageCountText}>
-                                    {pageCount}
-                                </Text>
-                            </View>
-                        )}
-                    </View>
+                            {pageCount > 1 && (
+                                <View style={styles.pageCountBadge}>
+                                    <Text style={styles.pageCountText}>
+                                        {pageCount}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+                    </TouchableOpacity>
 
-                    <View style={styles.historyContent}>
+                    <TouchableOpacity
+                        style={styles.historyContent}
+                        onPress={() => handleCardPress(item)}
+                        onLongPress={() => handleCardLongPress(item, isAnalyzing)}
+                        disabled={isAnalyzing}
+                        activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Buksan ang ${getDisplayTitle(item)}`}
+                    >
                         <Text
                             style={[
                                 styles.historyTitle,
@@ -594,8 +649,8 @@ export default function ScanScreen({ navigation }: any) {
                             </View>
 
                         </View>
-                    </View>
-                </TouchableOpacity>
+                    </TouchableOpacity>
+                </View>
 
                 {!isAnalyzing && !isSelecting && (
                     <TouchableOpacity
@@ -754,7 +809,7 @@ export default function ScanScreen({ navigation }: any) {
                 onPress={() => navigation.navigate('AskAiScreen')}
                 activeOpacity={0.82}
                 accessibilityRole="button"
-                accessibilityLabel="Magtanong sa Ask AI"
+                accessibilityLabel="Magtanong kay Lexie AI"
             >
                 <Ionicons
                     name="chatbubble-ellipses-outline"
@@ -764,7 +819,7 @@ export default function ScanScreen({ navigation }: any) {
                 <Text
                     style={[styles.askAiText, { color: T.text }]}
                 >
-                    Magtanong sa Ask AI
+                    Magtanong sa Lexie AI
                 </Text>
             </TouchableOpacity>
 
@@ -1065,6 +1120,76 @@ export default function ScanScreen({ navigation }: any) {
                 </KeyboardAvoidingView>
             </Modal>
 
+            <Modal
+                visible={imagePreview !== null}
+                animationType="fade"
+                onRequestClose={closeImagePreview}
+            >
+                <SafeAreaView style={styles.imageViewer} edges={['top', 'bottom']}>
+                    <StatusBar barStyle="light-content" backgroundColor="#080B10" />
+                    <View style={styles.imageViewerHeader}>
+                        <TouchableOpacity
+                            style={styles.imageViewerClose}
+                            onPress={closeImagePreview}
+                            accessibilityRole="button"
+                            accessibilityLabel="Isara ang larawan"
+                        >
+                            <Ionicons name="close" size={25} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <View style={styles.imageViewerHeading}>
+                            <Text style={styles.imageViewerTitle} numberOfLines={1}>
+                                {imagePreview?.title}
+                            </Text>
+                            <Text style={styles.imageViewerCount}>
+                                {previewPage + 1} / {imagePreview?.images.length ?? 0}
+                            </Text>
+                        </View>
+                    </View>
+                    {imagePreview && (
+                        <FlatList
+                            data={imagePreview.images}
+                            horizontal
+                            pagingEnabled
+                            initialNumToRender={1}
+                            maxToRenderPerBatch={2}
+                            windowSize={3}
+                            showsHorizontalScrollIndicator={false}
+                            keyExtractor={(uri, index) => `${uri}-${index}`}
+                            getItemLayout={(_, index) => ({
+                                length: previewWidth,
+                                offset: previewWidth * index,
+                                index,
+                            })}
+                            onMomentumScrollEnd={({ nativeEvent }) => {
+                                const nextPage = Math.round(
+                                    nativeEvent.contentOffset.x / previewWidth
+                                );
+                                setPreviewPage(Math.max(0, Math.min(
+                                    nextPage,
+                                    imagePreview.images.length - 1
+                                )));
+                            }}
+                            renderItem={({ item: uri, index }) => (
+                                <View style={[styles.imageViewerPage, { width: previewWidth }]}>
+                                    <Image
+                                        source={{ uri }}
+                                        style={styles.imageViewerImage}
+                                        resizeMode="contain"
+                                        accessibilityLabel={`Larawan ng pahina ${index + 1}`}
+                                    />
+                                </View>
+                            )}
+                            style={styles.imageViewerList}
+                        />
+                    )}
+                    {imagePreview && imagePreview.images.length > 1 && (
+                        <Text style={styles.imageViewerHint}>
+                            I-swipe para makita ang ibang pahina
+                        </Text>
+                    )}
+                </SafeAreaView>
+            </Modal>
+
             <AlertRender />
         </SafeAreaView>
     );
@@ -1250,6 +1375,9 @@ const styles = StyleSheet.create({
         padding: 10,
         paddingRight: 42,
     },
+    previewTouchArea: {
+        marginRight: 12,
+    },
     previewBox: {
         width: 66,
         height: 88,
@@ -1258,7 +1386,56 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 12,
+    },
+    imageViewer: {
+        flex: 1,
+        backgroundColor: '#080B10',
+    },
+    imageViewerHeader: {
+        minHeight: 60,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#252B35',
+    },
+    imageViewerClose: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+    },
+    imageViewerHeading: {
+        flex: 1,
+    },
+    imageViewerTitle: {
+        color: '#FFFFFF',
+        fontWeight: '800',
+        fontSize: 15,
+    },
+    imageViewerCount: {
+        color: '#A3ACBA',
+        fontSize: 12,
+        marginTop: 3,
+    },
+    imageViewerList: {
+        flex: 1,
+    },
+    imageViewerPage: {
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    imageViewerImage: {
+        width: '100%',
+        height: '100%',
+    },
+    imageViewerHint: {
+        color: '#A3ACBA',
+        textAlign: 'center',
+        fontSize: 12,
+        paddingVertical: 15,
     },
     previewImage: {
         width: '100%',

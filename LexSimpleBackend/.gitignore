@@ -19,3 +19,9 @@ temp_uploads/
 lex_guides.db
 ngrok*/
 ngrok.exe
+
+# Private copies of uploaded law PDFs
+knowledge_files/
+
+# Automatic database backup during migration
+*.bak

@@ -1,11 +1,10 @@
-# AI ROUTER VERSION: 6.2.7
+# AI ROUTER VERSION: 6.3.4
 import copy
 import hashlib
 import hmac
 import os
 import re
 import shutil
-import sqlite3
 from typing import Dict, List, Optional, Tuple
 
 import docx
@@ -20,6 +19,10 @@ from services.chat_service import generate_chat_reply
 from services.llm_service import explain_raw_statutory_text
 from core.database import get_db_connection
 from services.dictionary_repository import get_dictionary_entry
+from services.knowledge_catalog import find_verified_reference_context
+from services.chat_grounding import (
+    prepare_chat_evidence, append_verified_sources, remove_unsupported_examples,
+)
 
 
 router = APIRouter()
@@ -573,73 +576,31 @@ def chat_with_ai(request: ChatRequest):
             history,
         )
 
-        print(f"[DEBUG] RAG Query: {contextual_query}")
-
-        context_data = ""
-
         try:
-            search_results = query_vector_db(
-                contextual_query,
-                n_results=3,
+            evidence = prepare_chat_evidence(
+                request.message.strip(), contextual_query,
+                find_verified_reference_context, query_vector_db,
             )
-
-            if search_results and search_results.get("documents"):
-                for document_list in search_results["documents"]:
-                    if document_list:
-                        context_data += (
-                            "\n".join(document_list) + "\n---\n"
-                        )
         except Exception as error:
-            print(f"RAG Search Error: {error}")
+            print(f"[CHAT RETRIEVAL ERROR] {type(error).__name__}: {error}")
+            return {
+                "status": "success",
+                "reply": "Hindi ko mabuksan ang legal database ngayon. Pakisubukan ulit.",
+            }
 
-        article_match = re.search(
-            r"\b(article|art\.?|section|sec\.?)\s+"
-            r"([0-9ivxlc]+[a-z]?)\b",
-            request.message.lower(),
-        )
-
-        if article_match:
-            prefix = (
-                "SECTION"
-                if article_match.group(1).startswith("sec")
-                else "ARTICLE"
-            )
-            number = article_match.group(2)
-
-            try:
-                connection = sqlite3.connect("./lex_metadata.db")
-                connection.row_factory = sqlite3.Row
-                cursor = connection.cursor()
-                exact_title_1 = f"[{prefix} {number}]"
-                exact_title_2 = f"{prefix} {number}"
-
-                cursor.execute(
-                    "SELECT chunk_text FROM documents "
-                    "WHERE chunk_text LIKE ? OR chunk_text LIKE ? LIMIT 2",
-                    (f"%{exact_title_1}%", f"%{exact_title_2}%"),
-                )
-                rows = cursor.fetchall()
-                connection.close()
-
-                if rows:
-                    sqlite_context = "\n\n".join(
-                        dict(row)["chunk_text"] for row in rows
-                    )
-                    context_data = (
-                        sqlite_context + "\n---\n" + context_data
-                    )
-            except Exception as error:
-                print(f"SQLite Article Lookup Error: {error}")
+        if not evidence.context:
+            return {"status": "success", "reply": evidence.missing_reply}
 
         ai_response = generate_chat_reply(
             user_msg=request.message.strip(),
-            retrieved_context=context_data.strip(),
+            retrieved_context=evidence.context,
             history=history,
         )
+        checked_response = remove_unsupported_examples(ai_response, evidence.context)
 
         return {
             "status": "success",
-            "reply": ai_response,
+            "reply": append_verified_sources(checked_response, evidence.sources),
         }
     except HTTPException:
         raise
@@ -665,6 +626,7 @@ def explain_statutory_text(request: ExplainRequest):
             "code": "invalid_source", "message": "Walang sapat na legal text para ipaliwanag."
         })
     legal_basis = None
+    source_url = None
     if request.source_id is not None:
         try:
             conn = get_db_connection()
@@ -681,6 +643,7 @@ def explain_statutory_text(request: ExplainRequest):
                 "code": "stale_source", "message": "Nagbago ang legal text. I-update muna ang dictionary."
             })
         title, raw_text, legal_basis = entry["term"], entry["raw_text"], entry["legal_basis"]
+        source_url = entry.get("source_url")
 
     result = explain_raw_statutory_text(title, raw_text)
     if result.get("status") != "success":
@@ -691,4 +654,6 @@ def explain_statutory_text(request: ExplainRequest):
         })
     if legal_basis:
         result["data"]["legal_basis"] = legal_basis
+    if source_url:
+        result["data"]["source_url"] = source_url
     return result

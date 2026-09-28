@@ -1,8 +1,7 @@
-"""Exact source records for the offline and online legal dictionary.
+"""Source-aware dictionary records, v6.3.0.
 
-DICTIONARY REPOSITORY VERSION: 6.2.7
-The document row ID identifies a particular chunk of a particular source.
-No AI response or fuzzy match is ever presented as the source text.
+The in-memory fallback keeps the repository's existing unit tests useful;
+the application database exposes only approved, active knowledge files.
 """
 
 import os
@@ -10,20 +9,49 @@ import re
 import sqlite3
 from typing import Optional
 
+
 TITLE_PREFIX = re.compile(r"^\s*\[([^\]\n]{1,120})\]\s*", re.DOTALL)
-ARTICLE_QUERY = re.compile(r"^(?:art\.?|article)\s+(\d+[a-z]?)$", re.IGNORECASE)
-SECTION_QUERY = re.compile(r"^(?:sec\.?|section)\s+(\d+[a-z]?)$", re.IGNORECASE)
+ARTICLE_QUERY = re.compile(r"^(?:art\.?|article)\s+(\d+[a-z]?)$", re.I)
+SECTION_QUERY = re.compile(r"^(?:sec\.?|section)\s+(\d+[a-z]?)$", re.I)
 
 
 def normalize_query(value: str) -> str:
     query = " ".join(value.strip().split())
-    article = ARTICLE_QUERY.fullmatch(query)
-    if article:
-        return f"ARTICLE {article.group(1).upper()}"
-    section = SECTION_QUERY.fullmatch(query)
-    if section:
-        return f"SECTION {section.group(1).upper()}"
+    for regex, label in ((ARTICLE_QUERY, "ARTICLE"), (SECTION_QUERY, "SECTION")):
+        match = regex.fullmatch(query)
+        if match:
+            return f"{label} {match.group(1).upper()}"
     return query
+
+
+def _catalog_ready(connection: sqlite3.Connection) -> bool:
+    columns = {item[1] for item in connection.execute("PRAGMA table_info(documents)")}
+    return {"active", "knowledge_file_id", "provision_label"}.issubset(columns)
+
+
+def _ensure_production_schema(connection: sqlite3.Connection) -> None:
+    # Existing test connections are in-memory. Do not migrate their fixture.
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    if path and not _catalog_ready(connection):
+        from services.knowledge_catalog import ensure_schema
+        ensure_schema()
+
+
+def _select(connection: sqlite3.Connection, where: str = "", params: tuple = ()) -> list[sqlite3.Row]:
+    _ensure_production_schema(connection)
+    if _catalog_ready(connection):
+        sql = """SELECT d.id, d.filename, d.chunk_text,
+                        d.provision_label, k.law_id, k.source_url
+                 FROM documents d JOIN knowledge_files k ON d.knowledge_file_id=k.id
+                 WHERE d.active=1 AND k.status='active'"""
+        if where:
+            sql += " AND (" + where + ")"
+        return connection.execute(sql + " ORDER BY d.id", params).fetchall()
+    # In-memory fixtures for legacy behavior only.
+    sql = "SELECT id, filename, chunk_text FROM documents"
+    if where:
+        sql += " WHERE " + where.replace("d.", "")
+    return connection.execute(sql + " ORDER BY id", params).fetchall()
 
 
 def _entry_from_row(row: sqlite3.Row) -> Optional[dict]:
@@ -31,61 +59,46 @@ def _entry_from_row(row: sqlite3.Row) -> Optional[dict]:
     raw = str(record.get("chunk_text") or "").strip()
     if not raw:
         return None
-
     match = TITLE_PREFIX.match(raw)
-    source = str(record.get("filename") or "").strip()
+    filename = str(record.get("filename") or "").strip()
     title = match.group(1).strip() if match else (
-        os.path.splitext(os.path.basename(source))[0].replace("_", " ").strip()
+        os.path.splitext(os.path.basename(filename))[0].replace("_", " ").strip()
         or "Legal provision"
     )
-    text = raw[match.end():].strip() if match else raw
-    if not text:
+    content = raw[match.end():].strip() if match else raw
+    if not content:
         return None
-
+    law_id = record.get("law_id")
+    label = record.get("provision_label") or title
+    legal_basis = f"{law_id}, {label}" if law_id else filename or "Source not specified in database"
     return {
-        "id": int(record["id"]),
-        "term": title,
-        "definition": text,
-        "raw_text": text,
-        "legal_basis": source or "Source not specified in database",
+        "id": int(record["id"]), "term": title, "definition": content,
+        "raw_text": content, "legal_basis": legal_basis,
+        "source_url": record.get("source_url"),
     }
 
 
 def list_dictionary_entries(connection: sqlite3.Connection) -> list[dict]:
-    rows = connection.execute(
-        "SELECT id, filename, chunk_text FROM documents ORDER BY id ASC"
-    ).fetchall()
-    return [entry for row in rows if (entry := _entry_from_row(row))]
+    return [entry for row in _select(connection) if (entry := _entry_from_row(row))]
 
 
-def get_dictionary_entry(
-    connection: sqlite3.Connection,
-    entry_id: int,
-) -> Optional[dict]:
-    row = connection.execute(
-        "SELECT id, filename, chunk_text FROM documents WHERE id = ?",
-        (entry_id,),
-    ).fetchone()
-    return _entry_from_row(row) if row else None
+def get_dictionary_entry(connection: sqlite3.Connection, entry_id: int) -> Optional[dict]:
+    rows = _select(connection, "d.id = ?", (entry_id,))
+    return _entry_from_row(rows[0]) if rows else None
 
 
-def search_dictionary_entries(
-    connection: sqlite3.Connection,
-    query: str,
-    limit: int = 10,
-) -> list[dict]:
+def search_dictionary_entries(connection: sqlite3.Connection, query: str,
+                              limit: int = 10) -> list[dict]:
     needle = normalize_query(query).casefold()
     if len(needle) < 2:
         return []
-
-    # Parameterized SQL and escaped LIKE wildcards; a user's % is literal.
     escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    rows = connection.execute(
-        "SELECT id, filename, chunk_text FROM documents "
-        "WHERE lower(chunk_text) LIKE ? ESCAPE '\\' "
-        "OR lower(filename) LIKE ? ESCAPE '\\'",
-        (f"%{escaped}%", f"%{escaped}%"),
-    ).fetchall()
+    rows = _select(connection,
+        "lower(d.chunk_text) LIKE ? ESCAPE '\\' OR lower(d.filename) LIKE ? ESCAPE '\\' "
+        "OR lower(d.provision_label) LIKE ? ESCAPE '\\' OR lower(k.law_id) LIKE ? ESCAPE '\\'"
+        if _catalog_ready(connection) else
+        "lower(d.chunk_text) LIKE ? ESCAPE '\\' OR lower(d.filename) LIKE ? ESCAPE '\\'",
+        (f"%{escaped}%",) * (4 if _catalog_ready(connection) else 2))
     entries = [entry for row in rows if (entry := _entry_from_row(row))]
 
     def rank(entry: dict) -> tuple[int, int]:
