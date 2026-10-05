@@ -505,7 +505,8 @@ def build_retrieved_context(
 def generate_chat_reply(
     user_msg: str,
     history: Optional[List[Dict[str, str]]] = None,
-    retrieved_context: Optional[str] = None  # 🚀 ADDED TO MATCH ai.py
+    retrieved_context: Optional[str] = None,
+    document_only: bool = False,
 ) -> str:
 
     try:
@@ -576,10 +577,27 @@ def generate_chat_reply(
         # ====================================================
 
         # IMPORTANT: get_chat_reply_prompt() now accepts ONLY retrieved_context
-        system_prompt = get_chat_reply_prompt(
-            final_context
-        )
-        system_prompt += """
+        if document_only:
+            system_prompt = """
+            You are Lex Insight. Explain the attached sanitized document in
+            simple Filipino or Taglish. The SANITIZED DOCUMENT TEXT is the
+            source of document facts; previous AI findings are only clues.
+            Distinguish what the document says from whether it is legally
+            enforceable. Do not claim a right or legal conclusion from the
+            wording alone. Never invent a rent amount, due date, size of a
+            rent increase, or an automatic lawful eviction.
+
+            Answer the current question directly in at most five short
+            numbered points (roughly 180 words). No Markdown, tables,
+            headings, horizontal rules, asterisks, or stray formatting.
+            Do not list any laws or legal citations. Do not repeat private
+            names or addresses. If the user asks about the app's score,
+            explain that it is an app estimate, not legal validity.
+            Finish every sentence. Do not add a second recap.
+            """
+        else:
+            system_prompt = get_chat_reply_prompt(final_context)
+            system_prompt += """
 
         SOURCE RULES (v6.3.3):
         The retrieved legal text is the only source of legal facts in this reply.
@@ -592,7 +610,14 @@ def generate_chat_reply(
         If the retrieved text does not support the requested detail, say so
         briefly. Do not print any citation or URL: the server adds the
         verified source information after the reply.
-        """
+        If a legal rule from the retrieved text is relevant, name its exact
+        law ID and Article/Section in the answer (for example,
+        "Ayon sa RA 386, Article 1686..."). Never name a provision that does
+        not support this user's question.
+        Keep the response concise, preferably under 180 words. Plain
+        paragraphs or numbered lines only; no Markdown tables or raw
+        formatting markers. Finish every sentence.
+            """
 
         # ====================================================
         # 4. BUILD PROPER CONVERSATIONAL MESSAGES
@@ -633,7 +658,11 @@ def generate_chat_reply(
             model=CHAT_MODEL,
             messages=messages,
             temperature=0.2,
-            max_tokens=800
+            max_tokens=950,
+            extra_body={
+                "reasoning_effort": "low",
+                "include_reasoning": False,
+            } if CHAT_MODEL.startswith("openai/gpt-oss-") else {},
         )
 
         # ====================================================
@@ -652,6 +681,30 @@ def generate_chat_reply(
                 "Pasensya na, walang nabuong sagot "
                 "mula sa AI. Pakisubukan ulit."
             )
+
+        if completion.choices[0].finish_reason == "length":
+            # A long model-generated table can hit the cap mid-sentence.
+            # Retry once with an explicitly smaller answer.
+            messages.append({
+                "role": "user",
+                "content": "Sagutin muli nang diretso sa 3 maiikling punto, "
+                           "walang table o Markdown. Tapusin ang bawat pangungusap.",
+            })
+            try:
+                shorter = client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=950,
+                    extra_body={
+                        "reasoning_effort": "low",
+                        "include_reasoning": False,
+                    } if CHAT_MODEL.startswith("openai/gpt-oss-") else {},
+                )
+                if shorter.choices and shorter.choices[0].message.content:
+                    response = shorter.choices[0].message.content
+            except Exception as retry_error:
+                print(f"[CHAT RETRY ERROR] {type(retry_error).__name__}")
 
         return response.strip()
 

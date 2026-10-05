@@ -210,6 +210,63 @@ def append_verified_sources(
     )
 
 
+def sources_mentioned_in_reply(
+    reply: str, sources: tuple[Source, ...], question: str = ""
+) -> tuple[Source, ...]:
+    """Only attach a verified source named in the answer or explicitly asked for."""
+    requested_law, requested_provision = _reference(question)
+    chosen = []
+    for source in sources:
+        if requested_law and requested_provision:
+            if (source.law_id.upper(), source.provision.upper()) == (
+                requested_law, requested_provision
+            ):
+                chosen.append(source)
+            continue
+        label = re.escape(source.law_id).replace(r"\ ", r"\s*")
+        provision = re.escape(source.provision).replace(r"\ ", r"\s*")
+        # A general mention of "Civil Code" or "rent" is not an attribution.
+        # Require the exact law and provision near each other in the reply.
+        if re.search(rf"{label}[^\n]{{0,70}}{provision}", reply, re.I):
+            chosen.append(source)
+    return tuple(chosen[:2])
+
+
+def clean_chat_reply(reply: str) -> str:
+    """Render plain text in the mobile Text bubble without Markdown debris."""
+    reply = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1 (\2)", reply)
+    lines = reply.replace("\r", "").split("\n")
+    cleaned = []
+    for index, raw_line in enumerate(lines):
+        line = raw_line.strip().replace("\ufffd", "")
+        if not line:
+            if cleaned and cleaned[-1]:
+                cleaned.append("")
+            continue
+        if re.match(r"^(?:Mga nahanap na sanggunian|Pinagkunang seksiyon):?$", line, re.I):
+            break  # only server-verified sources may appear below the answer
+        if re.fullmatch(r"[-*_]{3,}", line):
+            continue
+        if line.startswith("|") and line.endswith("|"):
+            cells = [part.strip() for part in line.strip("|").split("|")]
+            if all(re.fullmatch(r":?-{2,}:?", cell) for cell in cells):
+                continue
+            next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+            if next_line.startswith("|") and re.fullmatch(r"[|:\s-]+", next_line):
+                continue  # table header
+            line = "• " + ": ".join(cells)
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        line = re.sub(r"^[-*]\s+", "• ", line)
+        line = re.sub(r"^>\s*", "", line)
+        line = line.replace("**", "").replace("__", "").replace("`", "").replace("~~", "")
+        if re.match(r"^(SOURCE|OFFICIAL URL|LEGAL TEXT):", line, re.I):
+            continue
+        cleaned.append(line)
+    while cleaned and (not cleaned[-1] or re.search(r"(?:\s[-–—:]|\b(?:at|o|ng))$", cleaned[-1])):
+        cleaned.pop()
+    return "\n".join(cleaned).strip()
+
+
 _PARENTHETICAL_EXAMPLE = re.compile(
     r"\s*\((?:hal\.?|halimbawa|e\.?g\.?|for example)\s*[^()]{1,180}\)",
     re.IGNORECASE,

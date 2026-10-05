@@ -1,4 +1,4 @@
-# LLM SERVICE VERSION: 6.2.8
+# LLM SERVICE VERSION: 6.3.25
 import hashlib
 import json
 import logging
@@ -18,6 +18,7 @@ from services.prompts import (
     get_analyze_legal_text_prompt,
     get_explain_statutory_text_prompt,
 )
+from services.sanitizer import sanitize_legal_text
 
 
 _cost_logger = logging.getLogger("lex.cost")
@@ -40,6 +41,7 @@ LEGAL_CHUNK_JSON_SCHEMA = {
     "type": "object",
     "properties": {
         "documentTitle": {"type": "string"},
+        "chunkSummary": {"type": "string"},
         "clauses": {
             "type": "array",
             "items": {
@@ -77,7 +79,7 @@ LEGAL_CHUNK_JSON_SCHEMA = {
             },
         },
     },
-    "required": ["documentTitle", "clauses", "keyClauses"],
+    "required": ["documentTitle", "chunkSummary", "clauses", "keyClauses"],
     "additionalProperties": False,
 }
 
@@ -274,6 +276,137 @@ def normalize_key_clauses(
             "foundText": exact_text,
         })
     return normalized
+
+
+def normalize_chunk_summary(value) -> str:
+    """Keep the overview short and sanitize the generated text again."""
+    if not isinstance(value, str):
+        return ""
+    summary = re.sub(r"\s+", " ", sanitize_legal_text(value)).strip()
+    return summary if 20 <= len(summary) <= 900 else ""
+
+
+def normalize_document_summary(value) -> str:
+    """Keep readable paragraphs in the final overview shown in the app."""
+    if not isinstance(value, str):
+        return ""
+    summary = sanitize_legal_text(value).strip()
+    summary = re.sub(r"[ \t]+", " ", summary)
+    summary = re.sub(r"\n{3,}", "\n\n", summary)
+    return summary if 30 <= len(summary) <= 1_800 else ""
+
+
+def _request_summary(client, prompt: str) -> str:
+    for attempt in range(2):
+        options = {
+            "model": CHAT_MODEL,
+            "messages": [
+                {"role": "system", "content": "Return exactly one JSON object."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 1_000,
+        }
+        if CHAT_MODEL.startswith("openai/gpt-oss-"):
+            options["extra_body"] = {
+                "reasoning_effort": "low",
+                "include_reasoning": False,
+            }
+        if attempt == 0:
+            options["response_format"] = {"type": "json_object"}
+        try:
+            completion = client.chat.completions.create(**options)
+            _log_completion_cost(completion, endpoint="/simplify")
+            raw = completion.choices[0].message.content or ""
+            parsed = json.loads(extract_and_clean_json(raw))
+            summary = normalize_document_summary(parsed.get("documentSummary"))
+            if summary:
+                return summary
+        except Exception as error:
+            _service_logger.warning("Summary attempt %s failed: %s", attempt + 1, error)
+    return ""
+
+
+def _summarize_document(
+    client, summaries: List[str], source_chunks: List[str], original_ocr_text: str = ""
+) -> str:
+    """Summarize every chunk, then combine its overview for the whole document."""
+    instructions = (
+        "Return ONLY JSON with a string field named documentSummary. "
+        "Write a plain Filipino overview of this WHOLE document, within "
+        "1800 characters. Start with one sentence about its purpose. "
+        "Then use separate numbered lines (1., 2., ...) for EACH major "
+        "distinct condition or topic, up to six. Explain who does what, "
+        "when, and the stated consequence when present. For a four-clause "
+        "lease, cover all four clauses instead of squeezing them into one "
+        "sentence. Use short, everyday words and no Markdown formatting. "
+        "Do not repeat the same points in a second recap. Do not invent "
+        "details, assert a legal right beyond the wording, or copy personal "
+        "names, contact details, or redacted values. The text may be a form, "
+        "certificate, letter, or agreement; do not call it a contract unless "
+        "the text says so. Describe 'grounds for eviction' as wording of the "
+        "document, not as an eviction that has already happened.\n\n"
+    )
+
+    # For ordinary scans, use the full sanitized OCR. The first chunk's
+    # one-sentence overview is too short to represent the whole document.
+    if original_ocr_text and len(original_ocr_text) <= 12_000:
+        prompt = instructions + "SANITIZED OCR:\n" + original_ocr_text
+        summary = _request_summary(client, prompt)
+        numbered_clauses = len(re.findall(
+            r"(?m)^\s*\d{1,2}[.)]\s+", original_ocr_text
+        ))
+        numbered_points = len(re.findall(r"(?m)^\d+[.)]\s+", summary))
+        if numbered_clauses >= 3 and numbered_points < min(6, numbered_clauses):
+            retry = _request_summary(
+                client,
+                prompt + "\nRETRY: Cover each of the "
+                f"{min(6, numbered_clauses)} numbered clauses in a separate "
+                "numbered line. Do not collapse them into one sentence.",
+            )
+            if retry and len(re.findall(r"(?m)^\d+[.)]\s+", retry)) >= min(6, numbered_clauses):
+                summary = retry
+        if summary:
+            return summary
+
+    summaries = list(summaries)
+    for index, summary in enumerate(summaries):
+        if summary:
+            continue
+        summaries[index] = normalize_chunk_summary(_request_summary(
+            client,
+            "Summarize this one scanned document part in 2 to 5 short Filipino "
+            "sentences (max 900 characters). Return ONLY JSON with field "
+            "documentSummary. Describe its purpose and important conditions. "
+            "It may be a form, certificate, letter, or agreement. Do not "
+            "invent anything or copy personal names, contact details, or "
+            "redacted values. If unreadable, use an empty string.\n\n"
+            + source_chunks[index],
+        ))
+    if not all(summaries):
+        return ""
+    if not summaries:
+        return ""
+    if len(summaries) == 1:
+        return summaries[0]
+
+    if sum(map(len, summaries)) > 18_000:
+        partials = [
+            _summarize_document(client, summaries[index:index + 10], [])
+            for index in range(0, len(summaries), 10)
+        ]
+        return (
+            _summarize_document(client, partials, [])
+            if all(partials) else ""
+        )
+    prompt = (
+        instructions + "Ordered summaries of this document. If they refer "
+        "to different documents, return an empty string.\n\n" + "\n".join(
+            f"Part {index}: {value}"
+            for index, value in enumerate(summaries, start=1)
+        )
+    )
+    return _request_summary(client, prompt)
 
 
 def _split_long_text(
@@ -483,7 +616,8 @@ def _analyze_chunk(
 
 Return ONLY one valid JSON object with this exact shape:
 {
-  "documentTitle": "Short legal document title",
+  "documentTitle": "Visible document heading if readable; otherwise a short descriptive title",
+  "chunkSummary": "2 to 5 short Filipino sentences summarizing this OCR chunk",
   "clauses": [
     {
       "clause_title": "Short clause label",
@@ -504,6 +638,10 @@ Return ONLY one valid JSON object with this exact shape:
 }
 
 "clauses" is ONLY for possible risks. Do not invent a risk just to fill it.
+Summarize each chunk, including certificates and forms. Describe the purpose,
+important details and conditions across the whole chunk. Do not copy personal
+names, contact details or redacted text. Never invent dates, amounts, safety
+claims, or legal conclusions. For unreadable text return an empty string.
 For an ordinary readable agreement, return 1-5 important terms in
 "keyClauses" even when "clauses" is empty. Explain payment, dates,
 obligations, or notice without claiming they are unfair. Keep the two arrays
@@ -541,17 +679,71 @@ separate. Never invent original_text or copy RAG context into it.
         raise ValueError(
             f"Chunk {chunk_number} returned a malformed clauses array."
         )
-    normalized_clauses = normalize_ai_keys(
-        raw_clauses,
-        source_chunk=source_chunk,
-        chunk_number=chunk_number,
-    )
     raw_key_clauses = payload.get("keyClauses")
     if not isinstance(raw_key_clauses, list):
         raise ValueError(
             f"Chunk {chunk_number} did not return a keyClauses array."
         )
-    key_clauses = normalize_key_clauses(raw_key_clauses, source_chunk)
+
+    def grounded_parts(items: dict) -> tuple[list, list, int, int]:
+        risks = normalize_ai_keys(items["clauses"], source_chunk, chunk_number)
+        details = normalize_key_clauses(items["keyClauses"], source_chunk)
+        return (risks, details,
+                len(items["clauses"]) - len(risks),
+                len(items["keyClauses"]) - len(details))
+
+    first = {"clauses": raw_clauses, "keyClauses": raw_key_clauses}
+    normalized_clauses, key_clauses, dropped_risks, dropped_details = grounded_parts(first)
+    chunk_summary = normalize_chunk_summary(payload.get("chunkSummary"))
+
+    if dropped_risks or dropped_details:
+        # A second attempt can quote the actual OCR spelling. Never accept a
+        # risk candidate that still cannot be matched to the scanned text.
+        try:
+            retry = _request_chunk_json(
+                client=client,
+                prompt=prompt + strict_schema + "\nRETRY: Some original_text values did not "
+                "match the OCR. Copy each original_text literally from the OCR "
+                "above, including typos. Preserve the risk clauses you identified.",
+                chunk_number=chunk_number,
+            )
+        except Exception as error:
+            _service_logger.warning("OCR quote retry failed for chunk %s: %s", chunk_number, error)
+            retry = {}
+        retry_payload = retry.get("data", retry) if isinstance(retry, dict) else {}
+        retry_risks = retry_payload.get("clauses", retry_payload.get("findings", []))
+        retry_details = retry_payload.get("keyClauses", [])
+        if isinstance(retry_risks, list) and isinstance(retry_details, list):
+            risks2, details2, dropped_risks2, _ = grounded_parts(
+                {"clauses": retry_risks, "keyClauses": retry_details}
+            )
+            known_risk_texts = {
+                item["original_text"] for item in normalized_clauses
+            }
+            for risk in risks2:
+                # Risk findings retain the internal `original_text` key;
+                # neutral key clauses below use `foundText` instead.
+                if risk["original_text"] not in known_risk_texts:
+                    normalized_clauses.append(risk)
+                    known_risk_texts.add(risk["original_text"])
+            for detail in details2:
+                if detail["foundText"] not in {item["foundText"] for item in key_clauses}:
+                    key_clauses.append(detail)
+            recovered_titles = {
+                str(item.get("clause_title", "")).casefold()
+                for item in risks2
+            }
+            unresolved_first = sum(
+                str(item.get("clause_title", "")).casefold() not in recovered_titles
+                for item in raw_clauses if isinstance(item, dict)
+                and not _recover_exact_source_text(
+                    str(item.get("original_text", item.get("foundText", ""))), source_chunk
+                )
+            )
+            dropped_risks = max(unresolved_first, dropped_risks2)
+            chunk_summary = chunk_summary or normalize_chunk_summary(
+                retry_payload.get("chunkSummary")
+            )
 
     return {
         "documentTitle": str(
@@ -559,10 +751,10 @@ separate. Never invent original_text or copy RAG context into it.
         ).strip(),
         "clauses": normalized_clauses,
         "keyClauses": key_clauses,
-        "droppedUngroundedCount": (
-            len(raw_clauses) - len(normalized_clauses)
-            + len(raw_key_clauses) - len(key_clauses)
-        ),
+        "chunkSummary": chunk_summary,
+        "droppedFindingCount": dropped_risks,
+        "droppedKeyClauseCount": dropped_details,
+        "chunkUnusable": not (normalized_clauses or key_clauses or chunk_summary),
         "ragContext": retrieved_context,
     }
 
@@ -763,6 +955,7 @@ def _deduplicate_clauses(clauses: List[dict]) -> List[dict]:
 def _combine_chunk_results(
     chunk_results: List[dict],
     original_ocr_text: str,
+    document_summary: str = "",
 ) -> dict:
     document_title = next(
         (
@@ -793,8 +986,8 @@ def _combine_chunk_results(
         key_clauses.append(clause)
         if len(key_clauses) >= 10:
             break
-    dropped_ungrounded_count = sum(
-        result.get("droppedUngroundedCount", 0)
+    dropped_risk_count = sum(
+        result.get("droppedFindingCount", result.get("droppedUngroundedCount", 0))
         for result in chunk_results
     )
     total_deduction = min(
@@ -814,13 +1007,17 @@ def _combine_chunk_results(
 
     return {
         "documentTitle": document_title,
+        "documentSummary": document_summary or None,
         # No findings is an absence of detected flags, not a perfect safety score.
         "safety_score": max(0, 100 - total_deduction) if unique_clauses else None,
         "clauses": unique_clauses,
         "keyClauses": key_clauses,
         "analysisIncomplete": (
-            dropped_ungrounded_count > 0
-            or (not unique_clauses and not key_clauses)
+            dropped_risk_count > 0
+            or any(result.get("chunkUnusable", False) for result in chunk_results)
+            # A readable certificate/form can have a useful summary without
+            # a risk finding or a neutral contract clause.
+            or (not unique_clauses and not key_clauses and not document_summary)
         ),
         "processingMeta": {
             "chunkCount": len(chunk_results),
@@ -873,9 +1070,14 @@ def analyze_legal_text(ocr_text: str):
             )
             chunk_results.append(chunk_result)
 
+        summaries = [result.get("chunkSummary", "") for result in chunk_results]
+        document_summary = _summarize_document(
+            client, summaries, chunks, normalized_ocr
+        )
         combined_result = _combine_chunk_results(
             chunk_results,
             original_ocr_text=normalized_ocr,
+            document_summary=document_summary,
         )
 
         # Store only a non-sensitive trace instead of duplicating the full

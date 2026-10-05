@@ -22,6 +22,7 @@ from services.dictionary_repository import get_dictionary_entry
 from services.knowledge_catalog import find_verified_reference_context
 from services.chat_grounding import (
     prepare_chat_evidence, append_verified_sources, remove_unsupported_examples,
+    sources_mentioned_in_reply, clean_chat_reply,
 )
 
 
@@ -571,6 +572,43 @@ def chat_with_ai(request: ChatRequest):
             )
 
         history = normalize_chat_history(request.history or [])
+        # The app owns its scoring state. A question about the missing score
+        # needs that state, not a vector search for unrelated legal articles.
+        question = request.message.rsplit("[CURRENT USER QUESTION]", 1)[-1].strip()
+        if re.search(r"\bscore\b", question, re.I) and re.search(
+            r"bakit|walang|wala|hindi\s+ibinigay|why|no\s+score",
+            question, re.I,
+        ):
+            score_context = "\n".join(
+                [request.message] + [item["content"] for item in reversed(history)]
+            )
+            match = re.search(r"(?m)^SCORE STATUS REASON:\s*([^\n]+)", score_context)
+            if match:
+                return {"status": "success", "reply": match.group(1).strip()}
+            return {
+                "status": "success",
+                "reply": "Hindi ko makita ang dahilan sa kasalukuyang chat. Buksan ang Resulta at i-tap ang ‘Bakit walang score?’ para makita ang status ng scan.",
+            }
+
+        has_document = (
+            "[ATTACHED DOCUMENT CONTEXT:" in request.message
+            or any("[PREVIOUSLY ATTACHED DOCUMENT:" in item["content"]
+                   for item in history)
+        )
+        asks_for_law = bool(re.search(
+            r"\b(?:RA|PD)\s*\d+\b|\b(?:article|section|art\.|sec\.)\s*\d+\b|"
+            r"\b(?:legal\s+basis|batas|law|legal|ligal|enforceable)\b",
+            question, re.I,
+        ))
+        if has_document and not asks_for_law:
+            reply = generate_chat_reply(
+                user_msg=request.message.strip(),
+                retrieved_context="Attached sanitized document only; no legal provisions selected.",
+                history=history,
+                document_only=True,
+            )
+            return {"status": "success", "reply": clean_chat_reply(reply)}
+
         contextual_query = build_contextual_query(
             request.message.strip(),
             history,
@@ -596,11 +634,16 @@ def chat_with_ai(request: ChatRequest):
             retrieved_context=evidence.context,
             history=history,
         )
-        checked_response = remove_unsupported_examples(ai_response, evidence.context)
+        checked_response = clean_chat_reply(
+            remove_unsupported_examples(ai_response, evidence.context)
+        )
+        cited_sources = sources_mentioned_in_reply(
+            checked_response, evidence.sources, question
+        )
 
         return {
             "status": "success",
-            "reply": append_verified_sources(checked_response, evidence.sources),
+            "reply": append_verified_sources(checked_response, cited_sources),
         }
     except HTTPException:
         raise
