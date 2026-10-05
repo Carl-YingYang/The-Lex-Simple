@@ -12,12 +12,12 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 CHAT_MODEL = os.getenv(
     "GROQ_CHAT_MODEL",
-    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 ).strip()
 
 EXTRACT_MODEL = os.getenv(
     "GROQ_EXTRACT_MODEL",
-    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 ).strip()
 
 # DICTIONARY AI VERSION: 6.2.8
@@ -25,7 +25,7 @@ EXTRACT_MODEL = os.getenv(
 # force it to use a retired model. Override only with GROQ_EXPLAIN_MODEL.
 EXPLAIN_MODEL = os.getenv(
     "GROQ_EXPLAIN_MODEL",
-    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 ).strip()
 
 

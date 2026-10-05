@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
 
-// CLAUSE CARD VERSION: 6.2.3
+// CLAUSE CARD VERSION: 6.3.18
 const ConfidenceIcon = require('../../assets/icons/confidence_chart.png');
 const LibraryIcon = require('../../assets/icons/library.png');
 const MessageAiIcon = require('../../assets/icons/message_ai.png');
@@ -94,7 +94,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
       {/* ASK AI SECTION */}
       <View style={[styles.askAiSection, { borderTopColor: T.border }]}>
-        <Text style={[styles.askAiLabel, { color: T.subText }]}>Ask Lexie About This Clause</Text>
+        <Text style={[styles.askAiLabel, { color: T.subText }]}>Tanungin ang Lex Insight tungkol dito</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsScroll}>
           {dynamicPrompts.map((prompt, i) => (
@@ -114,7 +114,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts)}
         >
           <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
-          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Discuss in Lexie Insight</Text>
+          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Buksan sa Lex Insight</Text>
         </TouchableOpacity>
       </View>
     </View>

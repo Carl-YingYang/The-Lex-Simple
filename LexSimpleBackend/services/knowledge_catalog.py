@@ -1,4 +1,4 @@
-"""Knowledge PDF review and configurable publication scopes (v6.3.13).
+"""Knowledge PDF review and configurable publication scopes (v6.3.16).
 
 PDFs are private audit copies. Only approved, source-labelled provisions are
 searchable. Old unverified `documents` rows remain in SQLite but are inactive.
@@ -15,6 +15,7 @@ import sqlite3
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,6 +35,7 @@ SECTION = re.compile(
     r"(?im)^[ \t]*(?:SECTION|SEC\.?|ARTICLE|ART\.?)\s+(\d+[A-Z]?)(?:[.:-][ \t]*|(?=\n|$))"
 )
 ARTICLE = re.compile(r"(?m)^[ \t]*(?:ARTICLE|ART\.?)\s+(\d+)(?=[.:-]|[ \t]|$)[.:-]?[ \t]*")
+BSP_SECTION = re.compile(r"(?im)^[ \t]*\.?[ \t]*Section[ \t]+([1-7Il])\.[ \t]*")
 TRUSTED_HOSTS = (
     "elibrary.judiciary.gov.ph", "officialgazette.gov.ph", "senate.gov.ph",
     "dole.gov.ph", "bsp.gov.ph", "gov.ph",
@@ -56,6 +58,44 @@ def validate_source(url: str, law_id: str) -> tuple[str, str]:
     if not re.fullmatch(r"(?:RA|PD) \d{1,6}|BSP CIRCULAR \d{1,6}", normalized):
         raise ValueError("Law ID format: RA 3765, PD 442, o BSP CIRCULAR 1160.")
     return url.strip(), normalized
+
+
+@lru_cache(maxsize=32)
+def _bsp_ocr_page(pdf_path: str, page_index: int) -> str:
+    """OCR the printed BSP circular once per page during preview and approval."""
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        raise ValueError("Kailangan ang pytesseract at Pillow para sa BSP PDF OCR.") from exc
+    command = os.getenv("TESSERACT_CMD", "").strip()
+    if command:
+        pytesseract.pytesseract.tesseract_cmd = command
+    with fitz.open(pdf_path) as pdf:
+        pix = pdf[page_index].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    try:
+        return pytesseract.image_to_string(image, lang="eng", config="--psm 6")
+    except pytesseract.TesseractNotFoundError as exc:
+        raise ValueError("Hindi makita ang Tesseract. I-set ang TESSERACT_CMD sa backend .env.") from exc
+
+
+def _page_text(page: fitz.Page, law_id: str) -> str:
+    """Use image OCR for BSP 1160; exclude DOLE 2022 Labor Code footnotes."""
+    if law_id == "BSP CIRCULAR 1160":
+        return _bsp_ocr_page(page.parent.name, page.number)
+    if law_id != "PD 442":
+        return page.get_text(sort=True)
+    separators = [
+        drawing["rect"].y0 for drawing in page.get_drawings()
+        if 130 <= drawing["rect"].width <= 170
+        and drawing["rect"].height <= 2
+        and 200 < drawing["rect"].y0 < page.rect.height - 40
+    ]
+    if not separators:
+        return page.get_text(sort=True)
+    area = fitz.Rect(0, 0, page.rect.width, min(separators))
+    return page.get_text(sort=True, clip=area)
 
 
 def parse_article_ranges(value: str, law_id: str) -> list[list[int]]:
@@ -272,7 +312,7 @@ def extract_provisions(pdf_path: str, first_page: int, last_page: int,
             raise ValueError("Hindi tugma ang law ID sa PDF front matter. I-check ang file.")
         pages = []
         for number in selected:
-            lines = [_clean_line(line) for line in pdf[number - 1].get_text(sort=True).splitlines()]
+            lines = [_clean_line(line) for line in _page_text(pdf[number - 1], law_id).splitlines()]
             pages.append((number, [line for line in lines if line]))
 
     counts = Counter()
@@ -290,11 +330,11 @@ def extract_provisions(pdf_path: str, first_page: int, last_page: int,
         # A final legal section often shares its page with signatories.
         # Stop at "Approved," after the last section on the last selected page.
         if number == pages[-1][0]:
-            pattern = ARTICLE if law_id == "RA 386" else SECTION
+            pattern = ARTICLE if law_id == "RA 386" else BSP_SECTION if law_id == "BSP CIRCULAR 1160" else SECTION
             last_section = max((i for i, line in enumerate(lines) if pattern.match(line)), default=-1)
             if last_section >= 0 or law_id == "RA 386":
                 signing = next((i for i in range(last_section + 1, len(lines))
-                                if re.match(r"(?i)^Approved\s*[, :]", lines[i])), None)
+                                if re.match(r"(?i)^(?:Approved\s*[, :]|FOR THE MONETARY BOARD\s*:)", lines[i])), None)
                 if signing is not None:
                     lines = lines[:signing]
         filtered = [line for index, line in enumerate(lines) if not (
@@ -302,28 +342,37 @@ def extract_provisions(pdf_path: str, first_page: int, last_page: int,
         ) and not (line.isdigit() and (index < 2 or index >= len(lines) - 2))
             and not re.match(r"(?i)^Source:\s*Supreme Court E-Library\b", line)
             and not re.match(r"(?i)^This page was dynamically generated\b", line)
-            and not re.match(r"(?i)^by the E-Library Content Management System\b", line)]
+            and not re.match(r"(?i)^by the E-Library Content Management System\b", line)
+            and not (law_id == "BSP CIRCULAR 1160" and re.fullmatch(
+                r"(?i)Page\s*[0-9ILT]+\s*of\s*26", line))]
         assembled.append((number, "\n".join(filtered)))
 
     whole = "\n".join(text for _, text in assembled)
     if len(whole) > MAX_TEXT:
         raise ValueError("Masyadong mahaba ang extracted text.")
-    if law_id.startswith("BSP CIRCULAR"):
+    if law_id.startswith("BSP CIRCULAR") and law_id != "BSP CIRCULAR 1160":
         warnings.append("Scanned BSP PDF: i-review nang manu-mano ang bawat extracted section bago i-approve.")
-
     # Keep page markers for locating the beginning of each provision.
     offsets = []
     joined = ""
     for number, text in assembled:
         offsets.append((len(joined), number))
         joined += text + "\n"
-    matches = list((ARTICLE if law_id == "RA 386" else SECTION).finditer(joined))
+    pattern = ARTICLE if law_id == "RA 386" else BSP_SECTION if law_id == "BSP CIRCULAR 1160" else SECTION
+    matches = list(pattern.finditer(joined))
     if not matches:
         raise ValueError("Walang nakitang Article/Section. Palitan ang page range o i-review ang PDF OCR.")
     # The official RA 386 PDF has line-wrapped references that look like article
     # headings, plus two printed number errors. Accept a correction only when
     # the next heading confirms the expected sequence; expose it in the preview.
-    numbered = [(match, int(match.group(1))) for match in matches]
+    numbered = [
+        (match, int(match.group(1).replace("I", "1").replace("l", "1"))
+         if law_id == "BSP CIRCULAR 1160" else int(match.group(1)))
+        for match in matches
+    ]
+    if law_id == "BSP CIRCULAR 1160" and first_page == 1 and last_page == total and not excluded_pages:
+        if [number for _, number in numbered] != list(range(1, 8)):
+            raise ValueError("Hindi nabasa nang buo ang Section 1–7 ng BSP Circular 1160. I-review ang scan.")
     if law_id == "RA 386":
         reviewed = []
         expected = numbered[0][1]
@@ -362,8 +411,20 @@ def extract_provisions(pdf_path: str, first_page: int, last_page: int,
                                       for start, end in article_ranges):
             continue
         end = matches_with_numbers[i + 1][0].start() if i + 1 < len(matches_with_numbers) else len(joined)
-        kind = "SECTION" if match.group(0).strip().lower().startswith(("sec", "section")) else "ARTICLE"
-        label = f"{kind} {effective_number if law_id == 'RA 386' else match.group(1).upper()}"
+        kind = "SECTION" if law_id == "BSP CIRCULAR 1160" or match.group(0).strip().lower().startswith(("sec", "section")) else "ARTICLE"
+        label = f"{kind} {effective_number if law_id in ('RA 386', 'BSP CIRCULAR 1160') else match.group(1).upper()}"
+        if law_id == "BSP CIRCULAR 1160":
+            # Section 1 spans nearly the whole PDF. Preserve its real page on
+            # each excerpt instead of attributing every excerpt to page 1.
+            for j, (offset, page_number) in enumerate(offsets):
+                page_end = offsets[j + 1][0] if j + 1 < len(offsets) else len(joined)
+                left, right = max(match.start(), offset), min(end, page_end)
+                if left >= right:
+                    continue
+                fragment = re.sub(r"\s+", " ", joined[left:right]).strip()
+                if len(fragment) >= 20:
+                    provisions.extend(_split_long(label, fragment, page_number))
+            continue
         body = joined[match.start():end].strip()
         if law_id == "RA 386" and effective_number != int(match.group(1)):
             start = match.start(1) - match.start()
@@ -398,6 +459,26 @@ def _file_row(db: sqlite3.Connection, file_id: str) -> sqlite3.Row:
     return row
 
 
+def _matching_draft_id(db: sqlite3.Connection, law_id: str, digest: str,
+                       title: str, source_url: str, first_page: int,
+                       last_page: int, excluded_pages: list[int],
+                       ranges: list[list[int]], exclusions: list[dict]) -> str | None:
+    """Find the same unapproved import, including its selected publication scope."""
+    rows = db.execute("""SELECT id, stored_path, excluded_pages, article_ranges,
+                        excluded_provisions FROM knowledge_files
+                        WHERE law_id=? AND file_sha256=? AND title=? AND source_url=?
+                        AND first_page=? AND last_page=? AND status='draft'
+                        ORDER BY created_at DESC""",
+                      (law_id, digest, title, source_url, first_page, last_page)).fetchall()
+    for file_id, stored_path, pages_json, ranges_json, exclusions_json in rows:
+        if (Path(stored_path).is_file()
+                and sorted(json.loads(pages_json)) == sorted(excluded_pages)
+                and json.loads(ranges_json) == ranges
+                and json.loads(exclusions_json) == exclusions):
+            return file_id
+    return None
+
+
 def create_draft(data: bytes, filename: str, title: str, law_id: str,
                  source_url: str, first_page: int, last_page: int | None,
                  excluded_pages: list[int], article_ranges: str = "",
@@ -411,25 +492,41 @@ def create_draft(data: bytes, filename: str, title: str, law_id: str,
     title = title.strip()
     if not 3 <= len(title) <= 150:
         raise ValueError("Maglagay ng maikling pamagat (3–150 characters).")
+    digest = hashlib.sha256(data).hexdigest()
+    with fitz.open(stream=data, filetype="pdf") as pdf:
+        total_pages = len(pdf)
+    end = last_page or total_pages
+    with sqlite3.connect(settings.DB_PATH) as db:
+        existing = _matching_draft_id(db, law_id, digest, title, source_url,
+                                      first_page, end, excluded_pages, ranges, exclusions)
+    if existing:
+        return {**preview_draft(existing), "selectedPages": [first_page, end],
+                "reusedDraft": True}
+
     file_id = uuid.uuid4().hex
     path = ROOT / f"{file_id}.pdf"
     path.write_bytes(data)
     try:
-        with fitz.open(path) as pdf:
-            total_pages = len(pdf)
-        end = last_page or total_pages
         total, parts, warnings = extract_provisions(str(path), first_page, end, excluded_pages, law_id, ranges)
         summary = _scope_summary(parts, exclusions)
-        digest = hashlib.sha256(data).hexdigest()
+        duplicate_id = None
         with sqlite3.connect(settings.DB_PATH) as db:
-            db.execute("""INSERT INTO knowledge_files
-                (id, law_id, title, original_filename, source_url, file_sha256,
-                 stored_path, total_pages, first_page, last_page, excluded_pages, article_ranges,
-                 excluded_provisions, status, created_at, chunk_count)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (file_id, law_id, title, os.path.basename(filename), source_url,
-                 digest, str(path), total, first_page, end, json.dumps(excluded_pages),
-                 json.dumps(ranges), json.dumps(exclusions), "draft", _now(), len(parts)))
+            db.execute("BEGIN IMMEDIATE")
+            duplicate_id = _matching_draft_id(db, law_id, digest, title, source_url,
+                                              first_page, end, excluded_pages, ranges, exclusions)
+            if not duplicate_id:
+                db.execute("""INSERT INTO knowledge_files
+                    (id, law_id, title, original_filename, source_url, file_sha256,
+                     stored_path, total_pages, first_page, last_page, excluded_pages, article_ranges,
+                     excluded_provisions, status, created_at, chunk_count)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (file_id, law_id, title, os.path.basename(filename), source_url,
+                     digest, str(path), total, first_page, end, json.dumps(excluded_pages),
+                     json.dumps(ranges), json.dumps(exclusions), "draft", _now(), len(parts)))
+        if duplicate_id:
+            path.unlink(missing_ok=True)
+            return {**preview_draft(duplicate_id), "selectedPages": [first_page, end],
+                    "reusedDraft": True}
     except Exception:
         path.unlink(missing_ok=True)
         raise

@@ -1,3 +1,4 @@
+# SUMMARY PROMPT UPDATE VERSION: 6.3.19
 # DICTIONARY PROMPT UPDATE VERSION: 6.2.7
 # services/prompts.py
 
@@ -287,7 +288,8 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
         Structure:
 
         {{
-        "documentTitle": "STRICTLY 1 TO 4 WORDS MAXIMUM. Use the most common, short legal term (e.g., 'Lease Agreement', 'Deed of Sale', 'NDA', 'Loan Contract'). DO NOT use long sentences.",
+        "documentTitle": "1 to 4 words. Use the visible document heading when readable; otherwise use a short descriptive title. A form, certificate or letter is not automatically a contract.",
+        "chunkSummary": "2 to 5 short Filipino sentences explaining what this OCR chunk says; no legal conclusions or invented details.",
         "clauses": [
             {{
             "clause_title": "Short natural clause label",
@@ -309,6 +311,13 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
 
         IMPORTANT:
         • Do not calculate the final document score in this chunk response
+        • Write chunkSummary for EVERY readable chunk, including certificates,
+          forms, letters, and notices. Say what the document actually does,
+          who is involved by role, and important conditions in plain Filipino.
+          Summarize the entire chunk, not only its opening. Keep it under 900
+          characters. Do not copy names, contact details, or redacted values.
+          Include a date or amount only when clearly legible and essential.
+          Do not call a certificate an agreement. For unreadable OCR return "".
         • The backend combines all chunks and calculates the score deterministically
         • score_deduction must be an integer from 1 to 100 for every returned clause
         • If there is no grounded finding, return "clauses": []

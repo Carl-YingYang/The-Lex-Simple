@@ -21,8 +21,7 @@ import { useTheme } from '../../../theme/ThemeContext';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
 import type { SanitizedDocumentApiPayload } from '../../../utils/sanitizer';
 
-// RESULT SCREEN VERSION: 6.2.4
-// Floating Lexie Insight chat bubble build.
+// RESULT SCREEN VERSION: 6.3.24
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
 const SUCCESS = '#10B981';
@@ -42,6 +41,7 @@ type AnalysisResult = {
     score: number | null;
     riskLevel: string;
     documentTitle?: string;
+    documentSummary?: string;
     findings: Finding[];
     keyClauses: Array<{
         title: string;
@@ -70,6 +70,35 @@ type RiskConfig = {
 type BreakdownFindingProps = {
     finding: Finding;
     theme: any;
+    showDeduction?: boolean;
+};
+
+const splitDocumentSummary = (summary: string): {
+    introduction: string;
+    points: Array<{ number: string; text: string }>;
+} => {
+    const introduction: string[] = [];
+    const points: Array<{ number: string; text: string }> = [];
+
+    // The LLM sometimes returns "1. ... 2. ..." on one line. Normalize it
+    // before building the cards, including old results saved in scan history.
+    const readable = summary.replace(/\r/g, '').replace(
+        /\s+(?=[1-6][.)]\s+\S)/g, '\n'
+    );
+    for (const rawLine of readable.split(/\n+/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const numbered = line.match(/^(\d{1,2})[.)]\s+(.+)$/);
+        if (numbered) {
+            points.push({ number: numbered[1], text: numbered[2].trim() });
+        } else if (points.length > 0) {
+            points[points.length - 1].text += ` ${line}`;
+        } else {
+            introduction.push(line);
+        }
+    }
+
+    return { introduction: introduction.join(' '), points };
 };
 
 const clampScore = (value: unknown): number | null => {
@@ -90,7 +119,7 @@ const getRiskConfig = (score: number | null): RiskConfig => {
         return {
             mainColor: PRIMARY_SOFT,
             icon: 'information-circle-outline',
-            label: 'NO FINDINGS DETECTED',
+            label: 'REVIEW REQUIRED',
             shortLabel: 'Kailangang suriin',
         };
     }
@@ -217,6 +246,9 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
             : payload.document_title
               ? String(payload.document_title)
               : undefined,
+        documentSummary: typeof payload.documentSummary === 'string'
+            ? payload.documentSummary.trim().slice(0, 1800)
+            : undefined,
         findings: rawFindings
             .map(normalizeFinding)
             .filter((item): item is Finding => item !== null),
@@ -266,6 +298,7 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
 const BreakdownFinding = ({
     finding,
     theme,
+    showDeduction = true,
 }: BreakdownFindingProps) => {
     const [expanded, setExpanded] = useState(false);
     const isLong = finding.description.length > 125;
@@ -281,7 +314,7 @@ const BreakdownFinding = ({
                 >
                     {finding.title}
                 </Text>
-                {typeof finding.scoreDeduction === 'number' && (
+                {showDeduction && typeof finding.scoreDeduction === 'number' && (
                     <Text style={styles.deductionText}>
                         -{finding.scoreDeduction}
                     </Text>
@@ -320,6 +353,10 @@ export default function ResultScreen({ route, navigation }: any) {
     const [selectedLegalText, setSelectedLegalText] = useState('');
     const [selectedCondition, setSelectedCondition] = useState<AnalysisResult['keyClauses'][number] | null>(null);
     const [showAllConditions, setShowAllConditions] = useState(false);
+    const [summaryModalVisible, setSummaryModalVisible] = useState(false);
+    const summaryScrollRef = useRef<ScrollView | null>(null);
+    const summaryScrollMetrics = useRef({ content: 0, viewport: 0, offset: 0 });
+    const [summaryHasMore, setSummaryHasMore] = useState(false);
     const [selectedDocumentIndex, setSelectedDocumentIndex] = useState(0);
     const [retryingIndex, setRetryingIndex] = useState<number | null>(null);
     const [retriedDocuments, setRetriedDocuments] = useState<Record<number, any>>({});
@@ -345,6 +382,10 @@ export default function ResultScreen({ route, navigation }: any) {
         () => normalizeAnalysisResult(activeAnalysis),
         [activeAnalysis]
     );
+    const summaryParts = useMemo(
+        () => splitDocumentSummary(result.documentSummary || ''),
+        [result.documentSummary]
+    );
     const hasAnalysisResult = Boolean(activeAnalysis);
     const needsReview = [
         'inconclusive_ocr',
@@ -355,6 +396,8 @@ export default function ResultScreen({ route, navigation }: any) {
         result.analysisOutcome !== 'mixed_documents' &&
         Boolean(result.sanitizedText || result.findings.length || result.keyClauses.length);
     const noFindings = result.analysisOutcome === 'no_findings_detected';
+    const showCompletedSummary = !activeAnalysis?.failureMessage &&
+        Boolean(result.documentSummary);
     const resultMessage = activeAnalysis?.failureMessage
         ? String(activeAnalysis.failureMessage)
         : result.analysisOutcome === 'mixed_documents'
@@ -362,7 +405,9 @@ export default function ResultScreen({ route, navigation }: any) {
         : result.analysisOutcome === 'inconclusive_ocr'
           ? 'May posibleng maling nabasang halaga o talaan. Tingnan ang orihinal na larawan bago umasa sa mga numero.'
           : result.analysisOutcome === 'inconclusive_analysis'
-            ? 'Hindi nakumpleto o hindi sapat ang analysis. Subukan ulit; wala pang maaasahang finding.'
+            ? result.findings.length > 0
+                ? `${result.findings.length} bahagi ang nakita sa OCR. May iba pang hindi na-verify, kaya walang kabuuang score. Suriin ang orihinal na dokumento.`
+                : 'Hindi nakumpleto ang pagsusuri. Subukan ulit at tingnan ang orihinal na dokumento.'
             : noFindings
               ? 'Walang na-flag sa nabasang text. Hindi ito patunay na ligtas ang dokumento.'
               : `${result.findings.length} bahagi ang kailangan mong suriin.`;
@@ -558,9 +603,24 @@ export default function ResultScreen({ route, navigation }: any) {
             }
         });
 
-        return bestScore > 0
-            ? bestChunk
-            : 'Walang matching legal reference na na-save para sa finding na ito.';
+        if (bestScore === 0) {
+            return 'Walang matching legal reference na na-save para sa finding na ito.';
+        }
+
+        // RAG metadata labels are useful to the backend but unreadable in the
+        // modal. Keep the provision text and its official link as plain text.
+        const source = bestChunk.match(/^SOURCE:\s*([^\n]+)/m)?.[1]?.trim();
+        const url = bestChunk.match(/^OFFICIAL URL:\s*(https:\/\/\S+)/m)?.[1];
+        const rawLawText = bestChunk.split(/\bLEGAL TEXT:\s*/i).pop() || '';
+        const lawText = rawLawText.trim()
+            .replace(/^(?:RA|PD)\s*\d+\s+(?:ARTICLE|SECTION)\s*\d+[A-Z]?\s*/i, '')
+            .replace(/^\[(?:ARTICLE|SECTION)\s*\d+[A-Z]?\]\s*/i, '')
+            .trim();
+        return [
+            source || 'Kaugnay na probisyon',
+            lawText || 'Walang nabasang teksto ng probisyon.',
+            url ? `Opisyal na sanggunian: ${url}` : '',
+        ].filter(Boolean).join('\n\n');
     };
 
     const showLegalBasis = (finding: Finding): void => {
@@ -585,7 +645,7 @@ export default function ResultScreen({ route, navigation }: any) {
             ? result.keyClauses.map((clause, index) =>
                 `${index + 1}. ${clause.title}\nPaliwanag: ${clause.explanation}\nNakitang text: ${clause.foundText}`
             ).join('\n\n')
-            : 'Walang naitalang pangunahing kondisyon.';
+            : 'Walang naitalang mahalagang detalye.';
 
         navigation.navigate('AskAiScreen', {
             attachedFile: {
@@ -597,15 +657,33 @@ export default function ResultScreen({ route, navigation }: any) {
                     result.score === null
                         ? 'Score: Hindi ibinigay; hindi ibig sabihin na ligtas ang dokumento.'
                         : `Score: ${result.score}/100`,
+                    `SCORE STATUS REASON: ${result.score !== null
+                        ? 'May score mula sa mga na-verify na finding.'
+                        : result.analysisOutcome === 'inconclusive_analysis' && result.findings.length > 0
+                        ? 'May na-verify na findings sa OCR, pero may bahagi ng analysis na hindi na-verify; hindi kumpleto ang basehan para sa kabuuang score.'
+                        : result.analysisOutcome === 'inconclusive_ocr'
+                        ? 'Hindi sapat ang kalidad ng OCR para sa score.'
+                        : result.analysisOutcome === 'mixed_documents'
+                        ? 'Magkakaibang dokumento ang nasa scan.'
+                        : result.analysisOutcome === 'no_findings_detected'
+                        ? 'Walang na-flag na risk clause sa nabasang text; hindi ito patunay na ligtas ang dokumento.'
+                        : 'Hindi nakumpleto ang pagsusuri.'}`,
                     needsReview
-                        ? 'Status: May bahagi ng analysis na hindi kumpleto. Gamitin lamang ang mga nakitang text bilang gabay.'
+                        ? result.analysisOutcome === 'inconclusive_analysis' && result.findings.length > 0
+                            ? 'Status: Bahagyang natapos ang analysis. May mga finding na tumugma sa OCR, pero may iba pang hindi na-verify. Walang kabuuang score para sa resultang ito.'
+                            : 'Status: Hindi nakumpleto ang pagsusuri. Tingnan ang orihinal na dokumento.'
                         : 'Status: Nasuri ang nabasang text.',
                     `Risk: ${riskConfig.shortLabel}`,
+                    '',
+                    'BUOD NG DOKUMENTO',
+                    showCompletedSummary
+                        ? result.documentSummary
+                        : 'Walang naitalang buod.',
                     '',
                     'FINDINGS',
                     findingsText,
                     '',
-                    `MGA PANGUNAHING KONDISYON (${result.keyClauses.length} SA RESULTA)`,
+                    `MAHAHALAGANG DETALYE (${result.keyClauses.length} SA RESULTA)`,
                     conditionsText,
                     '',
                     'BAHAGI NG SANITIZED DOCUMENT TEXT',
@@ -677,7 +755,7 @@ export default function ResultScreen({ route, navigation }: any) {
             />
 
             <ScrollView
-                testID="result-screen-v5"
+                testID="result-screen-v6.3.22"
                 style={{ backgroundColor: T.bg }}
                 contentContainerStyle={styles.content}
                 showsVerticalScrollIndicator={false}
@@ -702,6 +780,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                         setLegalModalVisible(false);
                                         setSelectedCondition(null);
                                         setShowAllConditions(false);
+                                        setSummaryModalVisible(false);
                                     }}
                                     accessibilityRole="tab"
                                     accessibilityState={{ selected: index === selectedDocumentIndex }}
@@ -731,6 +810,28 @@ export default function ResultScreen({ route, navigation }: any) {
                         </Text>
                     </TouchableOpacity>
                 )}
+                {!!result.documentTitle?.trim() && (
+                    <View style={styles.documentHeader}>
+                        <Text
+                            style={[
+                                styles.documentEyebrow,
+                                { color: T.subText },
+                            ]}
+                        >
+                            DOCUMENT
+                        </Text>
+                        <Text
+                            style={[
+                                styles.documentTitle,
+                                { color: T.text },
+                            ]}
+                            numberOfLines={2}
+                        >
+                            {result.documentTitle.trim()}
+                        </Text>
+                    </View>
+                )}
+
                 <View
                     style={[
                         styles.noticeCard,
@@ -755,28 +856,6 @@ export default function ResultScreen({ route, navigation }: any) {
                         advice o kapalit ng abogado.
                     </Text>
                 </View>
-
-                {!!result.documentTitle?.trim() && (
-                    <View style={styles.documentHeader}>
-                        <Text
-                            style={[
-                                styles.documentEyebrow,
-                                { color: T.subText },
-                            ]}
-                        >
-                            DOCUMENT
-                        </Text>
-                        <Text
-                            style={[
-                                styles.documentTitle,
-                                { color: T.text },
-                            ]}
-                            numberOfLines={2}
-                        >
-                            {result.documentTitle.trim()}
-                        </Text>
-                    </View>
-                )}
 
                 <TouchableOpacity
                     style={[
@@ -919,6 +998,30 @@ export default function ResultScreen({ route, navigation }: any) {
                     </View>
                 </TouchableOpacity>
 
+                {showCompletedSummary && (
+                    <TouchableOpacity
+                        style={[styles.privacyCard, {
+                            backgroundColor: T.card,
+                            borderColor: T.border,
+                        }]}
+                        onPress={() => setSummaryModalVisible(true)}
+                        activeOpacity={0.82}
+                        accessibilityRole="button"
+                        accessibilityLabel="Buksan ang AI buod ng dokumento"
+                    >
+                        <View style={styles.summaryIconBox}>
+                            <Ionicons name="document-text-outline" size={21} color={PRIMARY_SOFT} />
+                        </View>
+                        <View style={styles.privacyCopy}>
+                            <Text style={[styles.privacyTitle, { color: T.text }]}>AI buod ng dokumento</Text>
+                            <Text style={[styles.privacyDescription, { color: T.subText }]}>
+                                Basahin ang maikling paliwanag ng buong nabasang dokumento.
+                            </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={17} color={T.subText} />
+                    </TouchableOpacity>
+                )}
+
                 <View style={styles.sectionHeader}>
                     <Text
                         style={[
@@ -997,14 +1100,14 @@ export default function ResultScreen({ route, navigation }: any) {
                     <>
                         <View style={styles.sectionHeader}>
                             <Text style={[styles.sectionTitle, { color: T.text }]}>
-                                Mga pangunahing kondisyon
+                                Mahahalagang detalye
                             </Text>
                             <Text style={[styles.sectionCount, { color: T.subText }]}>
                                 {result.keyClauses.length}
                             </Text>
                         </View>
                         <Text style={[styles.keyClauseIntro, { color: T.subText }]}>
-                            Mga nabasang kondisyon sa dokumento. Tap para makita ang buong text.
+                            Mga detalyeng nabasa sa dokumento. Tap para makita ang orihinal na text.
                         </Text>
                         {(showAllConditions ? result.keyClauses : result.keyClauses.slice(0, 3)).map((clause, index) => (
                             <TouchableOpacity
@@ -1043,6 +1146,7 @@ export default function ResultScreen({ route, navigation }: any) {
                     </>
                 )}
 
+
             </ScrollView>
 
             {canAskLexie && <TouchableOpacity
@@ -1050,7 +1154,7 @@ export default function ResultScreen({ route, navigation }: any) {
                 onPress={askLexieAboutDocument}
                 activeOpacity={0.88}
                 accessibilityRole="button"
-                accessibilityLabel="Buksan ang Lexie Insight"
+                accessibilityLabel="Buksan ang Lex Insight"
             >
                 <View style={styles.lexieIconBox}>
                     <Ionicons
@@ -1059,7 +1163,7 @@ export default function ResultScreen({ route, navigation }: any) {
                         color="#FFFFFF"
                     />
                 </View>
-                <Text style={styles.lexieTitle}>Lexie Insight</Text>
+                <Text style={styles.lexieTitle}>Lex Insight</Text>
             </TouchableOpacity>}
 
             <Modal
@@ -1107,7 +1211,9 @@ export default function ResultScreen({ route, navigation }: any) {
                                         ? 'Natapos ang pagsusuri sa nabasang text'
                                         : result.score === null
                                         ? needsReview
-                                            ? 'May hindi tiyak na nabasang text'
+                                            ? result.analysisOutcome === 'inconclusive_analysis' && result.findings.length > 0
+                                                ? 'May findings pero may hindi na-verify'
+                                                : 'Kailangan pang suriin ang nabasang text'
                                             : 'Walang na-flag sa nabasang text'
                                         : 'Buod ng mga nakitang bahagi'}
                                 </Text>
@@ -1238,6 +1344,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                                 key={`${finding.title}-${index}`}
                                                 finding={finding}
                                                 theme={T}
+                                                showDeduction={result.score !== null}
                                             />
                                         )
                                     )}
@@ -1275,6 +1382,100 @@ export default function ResultScreen({ route, navigation }: any) {
             </Modal>
 
             <Modal
+                visible={summaryModalVisible}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={() => setSummaryModalVisible(false)}
+                onShow={() => {
+                    summaryScrollMetrics.current.offset = 0;
+                    const { content, viewport } = summaryScrollMetrics.current;
+                    setSummaryHasMore(content > viewport + 12);
+                    summaryScrollRef.current?.scrollTo({ y: 0, animated: false });
+                }}
+            >
+                <View style={styles.modalBackdrop}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={() => setSummaryModalVisible(false)} />
+                    <View style={[styles.modalCard, styles.summaryModalCard, { backgroundColor: T.card, borderColor: T.border }]}>
+                        <View style={styles.modalHeader}>
+                            <View style={styles.modalHeadingCopy}>
+                                <Text style={[styles.modalTitle, { color: T.text }]}>AI buod ng dokumento</Text>
+                                <Text style={[styles.modalSubtitle, { color: T.subText }]} numberOfLines={2}>
+                                    {result.documentTitle || 'Nabasang dokumento'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setSummaryModalVisible(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Isara ang AI buod"
+                            >
+                                <Ionicons name="close" size={21} color={T.text} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView
+                            ref={summaryScrollRef}
+                            style={styles.summaryModalScroll}
+                            contentContainerStyle={styles.summaryModalBody}
+                            showsVerticalScrollIndicator
+                            persistentScrollbar
+                            onLayout={(event) => {
+                                const metrics = summaryScrollMetrics.current;
+                                metrics.viewport = event.nativeEvent.layout.height;
+                                setSummaryHasMore(metrics.content > metrics.viewport + 12);
+                            }}
+                            onContentSizeChange={(_, height) => {
+                                const metrics = summaryScrollMetrics.current;
+                                metrics.content = height;
+                                setSummaryHasMore(height > metrics.viewport + 12);
+                            }}
+                            onScroll={(event) => {
+                                const metrics = summaryScrollMetrics.current;
+                                metrics.offset = event.nativeEvent.contentOffset.y;
+                                const hasMore = metrics.offset + metrics.viewport < metrics.content - 12;
+                                setSummaryHasMore((previous) => previous === hasMore ? previous : hasMore);
+                            }}
+                            scrollEventThrottle={32}
+                        >
+                            {!!summaryParts.introduction && (
+                                <Text style={[styles.summaryLead, { color: T.text }]} selectable>
+                                    {summaryParts.introduction}
+                                </Text>
+                            )}
+                            {summaryParts.points.map((point, index) => (
+                                <View
+                                    key={`${point.number}-${index}`}
+                                    style={[styles.summaryPointCard, { borderColor: T.border }]}
+                                    accessible
+                                    accessibilityLabel={`Punto ${point.number}. ${point.text}`}
+                                >
+                                    <View style={styles.summaryPointNumber}>
+                                        <Text style={styles.summaryPointNumberText}>{point.number}</Text>
+                                    </View>
+                                    <Text style={[styles.summaryPointText, { color: T.text }]} selectable>
+                                        {point.text}
+                                    </Text>
+                                </View>
+                            ))}
+                            {!summaryParts.introduction && summaryParts.points.length === 0 && (
+                                <Text style={[styles.summaryLead, { color: T.text }]} selectable>
+                                    {result.documentSummary}
+                                </Text>
+                            )}
+                        </ScrollView>
+                        <View style={[styles.summaryModalFooter, { borderTopColor: T.border }]}>
+                            {summaryHasMore && <Ionicons name="chevron-down" size={15} color={PRIMARY_SOFT} />}
+                            <Text style={[styles.summaryNote, { color: T.subText }]}>
+                                {summaryHasMore
+                                    ? 'Mag-scroll para mabasa ang buong buod'
+                                    : 'Buod ng AI. Ihambing sa orihinal na dokumento.'}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
                 visible={selectedCondition !== null}
                 transparent
                 animationType="fade"
@@ -1290,7 +1491,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     {selectedCondition?.title}
                                 </Text>
                                 <Text style={[styles.modalSubtitle, { color: T.subText }]}>
-                                    Pangunahing kondisyon
+                                    Mahalagang detalye
                                 </Text>
                             </View>
                             <TouchableOpacity
@@ -1321,7 +1522,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     accessibilityRole="button"
                                 >
                                     <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
-                                    <Text style={styles.conditionAskText}>Tanungin si Lexie</Text>
+                                    <Text style={styles.conditionAskText}>Tanungin ang Lex Insight</Text>
                                 </TouchableOpacity>
                             )}
                         </ScrollView>
@@ -1471,6 +1672,7 @@ const styles = StyleSheet.create({
         paddingBottom: 112,
     },
     noticeCard: {
+        marginTop: 12,
         minHeight: 58,
         borderWidth: 1,
         borderRadius: 9,
@@ -1601,6 +1803,41 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    summaryIconBox: {
+        width: 40,
+        height: 40,
+        borderRadius: 8,
+        backgroundColor: 'rgba(52, 120, 246, 0.14)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    summaryModalCard: { height: '72%', maxHeight: 660, borderRadius: 14 },
+    summaryModalScroll: { flex: 1 },
+    summaryModalBody: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 16 },
+    summaryLead: { fontSize: 15, lineHeight: 23, fontWeight: '600', marginBottom: 12 },
+    summaryPointCard: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        paddingVertical: 14,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    summaryPointNumber: {
+        width: 25, height: 25, borderRadius: 13,
+        backgroundColor: 'rgba(52,120,246,0.18)',
+        alignItems: 'center', justifyContent: 'center', marginRight: 11,
+    },
+    summaryPointNumberText: { color: PRIMARY_SOFT, fontSize: 12, fontWeight: '800' },
+    summaryPointText: { flex: 1, fontSize: 15, lineHeight: 23 },
+    summaryModalFooter: {
+        minHeight: 45,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
+    summaryNote: { flex: 1, fontSize: 11, lineHeight: 16 },
     privacyCopy: {
         flex: 1,
         minWidth: 0,

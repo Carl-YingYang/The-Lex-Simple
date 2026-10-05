@@ -1,4 +1,4 @@
-# VALIDATOR VERSION: 2.0.0
+# VALIDATOR VERSION: 6.3.21
 import logging
 import re
 from typing import List, Optional, Tuple
@@ -386,6 +386,14 @@ def validate_llm_response(llm_data: dict) -> dict:
         "processingMeta": processing_meta,
         "scoreAdjusted": score_adjusted,
     }
+
+    summary = data.get("documentSummary")
+    if (
+        isinstance(summary, str)
+        and summary.strip()
+        and len(summary.strip()) <= 1_800
+    ):
+        validated_data["documentSummary"] = summary.strip()
 
     rag_context = data.get("rag_context_used")
     if isinstance(rag_context, str):
