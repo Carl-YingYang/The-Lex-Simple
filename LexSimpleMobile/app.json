@@ -30,6 +30,7 @@
     "plugins": [
       "expo-asset",
       "expo-sqlite",
+      "expo-secure-store",
       [
         "expo-speech-recognition",
         {
@@ -54,7 +55,8 @@
           }
         }
       ],
-      "react-native-document-scanner-plugin"
+      "react-native-document-scanner-plugin",
+      "expo-secure-store"
     ],
     "extra": {
       "apiUrl": "https://presuppurative-unconceitedly-peyton.ngrok-free.dev"

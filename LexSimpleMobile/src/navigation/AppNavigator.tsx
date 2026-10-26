@@ -1,9 +1,12 @@
 import React from 'react';
 import {
+    ActivityIndicator,
     Image,
     LogBox,
     Pressable,
     StyleSheet,
+    Text,
+    TouchableOpacity,
     View,
 } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -18,6 +21,9 @@ import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
 import { navigationRef } from './RootNavigation';
+import { getLocalOwner } from '../services/localDataScope';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import LoginScreen from '../screens/auth/LoginScreen';
 
 import ScanScreen from '../screens/home/tab-pages/ScanScreen';
 import LibraryScreen from '../screens/dictionary/tab-pages/LibraryScreen';
@@ -153,7 +159,17 @@ function MainTabs() {
 }
 
 function NavigationContent() {
+    const { phase, retry } = useAuth();
     const { colors, isDarkMode } = useTheme();
+    if (phase === 'loading') {
+        return <View style={styles.prepare}><ActivityIndicator color={ACTIVE_COLOR} />
+            <Text style={styles.prepareText}>Inihahanda ang account at saved scans…</Text></View>;
+    }
+    if (phase === 'error') {
+        return <View style={styles.prepare}><Text style={styles.prepareText}>Hindi mabuksan ang session o local data. Nananatili ang saved scans.</Text>
+            <TouchableOpacity onPress={() => void retry().catch(() => undefined)}><Text style={styles.retry}>Subukan muli</Text></TouchableOpacity></View>;
+    }
+    if (phase === 'login' || phase === 'recovery') return <LoginScreen />;
     const baseTheme = isDarkMode ? DarkTheme : DefaultTheme;
     const navigationTheme = {
         ...baseTheme,
@@ -170,11 +186,13 @@ function NavigationContent() {
     return (
         <BackgroundProcessProvider>
             <NavigationContainer
+                key={getLocalOwner()}
                 ref={navigationRef}
                 theme={navigationTheme}
             >
                 <FloatingProcessIndicator />
                 <Stack.Navigator
+                    initialRouteName="Main"
                     screenOptions={{ headerShown: false }}
                 >
                     <Stack.Screen name="Main" component={MainTabs} />
@@ -197,13 +215,18 @@ function NavigationContent() {
 
 export default function AppNavigator() {
     return (
-        <ThemeProvider>
-            <NavigationContent />
-        </ThemeProvider>
+        <AuthProvider>
+            <ThemeProvider>
+                <NavigationContent />
+            </ThemeProvider>
+        </AuthProvider>
     );
 }
 
 const styles = StyleSheet.create({
+    prepare: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#F8F8FD' },
+    prepareText: { marginTop: 12, color: '#444', textAlign: 'center' },
+    retry: { color: ACTIVE_COLOR, fontWeight: '700', marginTop: 16 },
     tabBar: {
         height: 64,
         paddingTop: 5,

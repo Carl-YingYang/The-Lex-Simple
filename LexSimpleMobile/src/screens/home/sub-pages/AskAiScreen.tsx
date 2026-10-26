@@ -26,8 +26,8 @@ import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { postEndpoint } from '../../../services/AiEngine';
 import { useTheme } from '../../../theme/ThemeContext';
+import { localDataKey } from '../../../services/localDataScope';
 
-const CHAT_HISTORY_KEY = '@lex_chat_history';
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
 const DANGER = '#EF4444';
@@ -233,6 +233,8 @@ const MessageBubble = ({
 };
 
 export default function AskAiScreen({ route }: any) {
+    // Captured per screen instance so a late response cannot write to another account.
+    const chatHistoryKey = useRef(localDataKey('chatHistory')).current;
     const { colors: T } = useTheme();
     const { showAlert, AlertRender } = useCustomAlert();
 
@@ -265,7 +267,7 @@ export default function AskAiScreen({ route }: any) {
     ): Promise<void> => {
         try {
             await AsyncStorage.setItem(
-                CHAT_HISTORY_KEY,
+                chatHistoryKey,
                 JSON.stringify(getPersistableMessages(nextMessages))
             );
         } catch (error) {
@@ -287,7 +289,7 @@ export default function AskAiScreen({ route }: any) {
         setIsListening(false);
     });
 
-    useSpeechRecognitionEvent('error', (event) => {
+    useSpeechRecognitionEvent('error', (event: any) => {
         setIsListening(false);
 
         if (event.error === 'client' || event.error === 'network') {
@@ -299,7 +301,7 @@ export default function AskAiScreen({ route }: any) {
         }
     });
 
-    useSpeechRecognitionEvent('result', (event) => {
+    useSpeechRecognitionEvent('result', (event: any) => {
         const transcript = event.results?.[0]?.transcript;
 
         if (!transcript) {
@@ -331,7 +333,7 @@ export default function AskAiScreen({ route }: any) {
         const loadChat = async (): Promise<void> => {
             try {
                 const storedHistory = await AsyncStorage.getItem(
-                    CHAT_HISTORY_KEY
+                    chatHistoryKey
                 );
 
                 if (!storedHistory) {
@@ -1284,7 +1286,7 @@ export default function AskAiScreen({ route }: any) {
 
     return (
         <ScreenLayout
-            title="Ask AI"
+            title="Lexie Ai"
             noPadding
             rightIcon="trash-outline"
             onRightPress={requestClearChat}

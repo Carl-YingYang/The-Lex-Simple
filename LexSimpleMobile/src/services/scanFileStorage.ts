@@ -4,6 +4,7 @@ import {
     Paths,
 } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { getLocalOwner, type LocalOwner } from './localDataScope';
 
 import type {
     ScanPage,
@@ -35,6 +36,16 @@ const SCANS_ROOT = new Directory(
     'lexsimple',
     'scans'
 );
+const ownerRoot = (owner: LocalOwner): Directory =>
+    owner === 'guest'
+        ? new Directory(SCANS_ROOT, 'guest')
+        : new Directory(SCANS_ROOT, 'users', owner.slice(5));
+const sessionRoot = (sessionId: string, owner: LocalOwner): Directory => {
+    // Old scans remain in their original location for the guest.
+    const legacy = new Directory(SCANS_ROOT, sessionId);
+    if (owner === 'guest' && legacy.exists) return legacy;
+    return new Directory(ownerRoot(owner), sessionId);
+};
 
 export type LocalScanImage = {
     uri: string;
@@ -47,7 +58,7 @@ export type LocalScanImage = {
 export type ScanImageInput = string | LocalScanImage;
 
 const ensureScansRoot = (): void => {
-    SCANS_ROOT.create({
+    ownerRoot(getLocalOwner()).create({
         idempotent: true,
         intermediates: true,
     });
@@ -107,10 +118,7 @@ const getSafeExtension = (sourceFile: File): string => {
 const getSessionDirectory = (
     sessionId: string
 ): Directory => {
-    const directory = new Directory(
-        SCANS_ROOT,
-        sessionId
-    );
+    const directory = sessionRoot(sessionId, getLocalOwner());
 
     directory.create({
         idempotent: true,
@@ -304,8 +312,8 @@ export const createScanThumbnail = async (page: ScanPage): Promise<string> => {
 };
 
 /** Only call after checking that no history item still references this session. */
-export const deleteScanSession = (sessionId: string): void => {
+export const deleteScanSession = (sessionId: string, owner = getLocalOwner()): void => {
     if (!/^scan_\d+_[a-z0-9]+$/.test(sessionId)) return;
-    const directory = new Directory(SCANS_ROOT, sessionId);
+    const directory = sessionRoot(sessionId, owner);
     if (directory.exists) directory.delete();
 };

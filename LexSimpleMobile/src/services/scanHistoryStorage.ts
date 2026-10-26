@@ -1,11 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanPage } from '../types/ScanPage';
 import { deleteScanSession } from './scanFileStorage';
+import { getLocalOwner, localDataKey, type LocalOwner } from './localDataScope';
 
 // SCAN HISTORY STORAGE VERSION: 6.2.6
 // Serializes read/modify/write operations in this JS process.
-const HISTORY_KEY = '@lex_scan_history';
 let pending: Promise<unknown> = Promise.resolve();
+const itemOwners = new Map<string, LocalOwner>();
+export const waitForScanHistoryWrites = async (): Promise<void> => { await pending; };
 const listeners = new Set<() => void>();
 export const subscribeScanHistory = (listener: () => void): (() => void) => {
     listeners.add(listener);
@@ -31,8 +33,8 @@ export type ScanHistoryItem = {
     sanitizedText?: string;
 };
 
-const readUnlocked = async (): Promise<ScanHistoryItem[]> => {
-    const raw = await AsyncStorage.getItem(HISTORY_KEY);
+const readUnlocked = async (key: string): Promise<ScanHistoryItem[]> => {
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
     try {
         const parsed: unknown = JSON.parse(raw);
@@ -50,19 +52,30 @@ const mutate = <T>(
     return task;
 };
 
-export const listScanHistory = (): Promise<ScanHistoryItem[]> =>
-    mutate(readUnlocked);
+export const listScanHistory = (): Promise<ScanHistoryItem[]> => {
+    const owner = getLocalOwner();
+    const key = localDataKey('scanHistory', owner);
+    return mutate(async () => {
+        const items = await readUnlocked(key);
+        items.forEach((item) => itemOwners.set(item.id, owner));
+        return items;
+    });
+};
 
 export const updateScanHistory = (
-    transform: (items: ScanHistoryItem[]) => ScanHistoryItem[]
-): Promise<ScanHistoryItem[]> =>
-    mutate(async () => {
-        const current = await readUnlocked();
+    transform: (items: ScanHistoryItem[]) => ScanHistoryItem[],
+    owner = getLocalOwner()
+): Promise<ScanHistoryItem[]> => {
+    const key = localDataKey('scanHistory', owner);
+    return mutate(async () => {
+        const current = await readUnlocked(key);
         const next = transform(current);
-        await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+        await AsyncStorage.setItem(key, JSON.stringify(next));
+        next.forEach((item) => itemOwners.set(item.id, owner));
         listeners.forEach((listener) => listener());
         return next;
     });
+};
 
 export const getScanHistoryItem = async (
     id: string
@@ -79,6 +92,8 @@ export const saveScanDraft = async (
     thumbnailUri?: string
 ): Promise<void> => {
     if (!id || pages.length === 0) return;
+    const owner = getLocalOwner();
+    itemOwners.set(id, owner);
     await updateScanHistory((items) => {
         const previous = items.find((item) => item.id === id);
         if (previous?.status === 'scanned') return items;
@@ -97,7 +112,7 @@ export const saveScanDraft = async (
             processingState: previous?.processingState,
         };
         return [next, ...items.filter((item) => item.id !== id)];
-    });
+    }, owner);
 };
 
 export const savePendingScan = async (
@@ -108,6 +123,8 @@ export const savePendingScan = async (
     sanitizedText: string,
     defaultTitle: string
 ): Promise<void> => {
+    const owner = getLocalOwner();
+    itemOwners.set(id, owner);
     await updateScanHistory((items) => {
         const previous = items.find((item) => item.id === id);
         const next: ScanHistoryItem = {
@@ -130,7 +147,7 @@ export const savePendingScan = async (
             sanitizedText,
         };
         return [next, ...items.filter((item) => item.id !== id)];
-    });
+    }, owner);
 };
 
 export const completeScan = async (
@@ -139,6 +156,7 @@ export const completeScan = async (
     ocrText: string,
     sanitizedText: string
 ): Promise<void> => {
+    const owner = itemOwners.get(id) || getLocalOwner();
     await updateScanHistory((items) =>
         items.map((item) => item.id !== id
             ? item
@@ -157,15 +175,16 @@ export const completeScan = async (
                 sanitizedText,
                 updatedAt: Date.now(),
             })
-    );
+    , owner);
 };
 
 export const markScanNeedsRetry = async (id: string): Promise<void> => {
+    const owner = itemOwners.get(id) || getLocalOwner();
     await updateScanHistory((items) =>
         items.map((item) => item.id === id && item.status !== 'scanned'
             ? { ...item, status: 'unscanned' as const, processingState: 'needs-retry' as const }
             : item)
-    );
+    , owner);
 };
 
 export const renameScan = async (
@@ -181,6 +200,7 @@ export const renameScan = async (
 export const deleteScans = async (
     ids: string[]
 ): Promise<ScanHistoryItem[]> => {
+    const owner = getLocalOwner();
     const selected = new Set(ids);
     const sessionsToCheck = new Set<string>();
     const remaining = await updateScanHistory((items) => {
@@ -194,7 +214,7 @@ export const deleteScans = async (
             item.draftPages?.some((page) => page.sessionId === sessionId)
         );
         if (!usedElsewhere) {
-            try { deleteScanSession(sessionId); }
+            try { deleteScanSession(sessionId, owner); }
             catch (error) { console.warn('[ScanHistory] Image cleanup failed', error); }
         }
     }

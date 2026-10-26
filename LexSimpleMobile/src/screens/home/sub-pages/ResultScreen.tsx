@@ -12,7 +12,7 @@ import {
     View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateScanHistory } from '../../../services/scanHistoryStorage';
 
 import ScreenLayout from '../../../components/ScreenLayout';
 import ClauseCard from '../../../components/ClauseCard';
@@ -251,7 +251,7 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
             : undefined,
         findings: rawFindings
             .map(normalizeFinding)
-            .filter((item): item is Finding => item !== null),
+            .filter((item: Finding | null): item is Finding => item !== null),
         keyClauses: Array.isArray(payload.keyClauses)
             ? payload.keyClauses
                 .filter((item: any) =>
@@ -456,15 +456,11 @@ export default function ResultScreen({ route, navigation }: any) {
             setRetriedDocuments((existing) => ({ ...existing, [index]: updated }));
             if (selectedDocument.historyId) {
                 try {
-                    const stored = await AsyncStorage.getItem('@lex_scan_history');
-                    const history = stored ? JSON.parse(stored) : [];
-                    if (Array.isArray(history)) {
-                        await AsyncStorage.setItem('@lex_scan_history', JSON.stringify(
-                            history.map((item: any) => item.id === selectedDocument.historyId
-                                ? { ...item, status: 'scanned', analysisResult: updated }
-                                : item)
-                        ));
-                    }
+                    await updateScanHistory((history) =>
+                        history.map((item) => item.id === selectedDocument.historyId
+                            ? { ...item, status: 'scanned', analysisResult: updated }
+                            : item)
+                    );
                 } catch (error) {
                     console.error('[ResultScreen] History update failed:', error);
                 }

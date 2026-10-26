@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -23,6 +23,9 @@ import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
+import { useAuth } from '../../../context/AuthContext';
+import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 
 // PROFILE SCREEN VERSION: 5.0.0
 // Uses the built-in map placeholder until a Google Maps API key is configured.
@@ -89,6 +92,11 @@ function MenuItem({ title, description, icon, iconColor, iconBg, onPress }: Menu
 }
 
 export default function ProfileScreen({ navigation }: any) {
+  const { user, signOut } = useAuth();
+  const owner = useRef(getLocalOwner()).current;
+  const profileKey = localDataKey('profile', owner);
+  const scanHistoryKey = localDataKey('scanHistory', owner);
+  const { cancelProcess } = useBackgroundProcess();
   const [totalScanned, setTotalScanned] = useState(0);
   const [name, setName] = useState(DEFAULT_PROFILE.name);
   const [email, setEmail] = useState(DEFAULT_PROFILE.email);
@@ -139,7 +147,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const loadScanStats = async () => {
     try {
-      const history = await AsyncStorage.getItem('@lex_scan_history');
+      const history = await AsyncStorage.getItem(scanHistoryKey);
       if (!history) return setTotalScanned(0);
       const parsed = JSON.parse(history);
       setTotalScanned(Array.isArray(parsed) ? parsed.length : 0);
@@ -151,11 +159,18 @@ export default function ProfileScreen({ navigation }: any) {
 
   const loadProfileData = async () => {
     try {
-      const profile = await AsyncStorage.getItem('@lex_profile');
-      if (!profile) return;
+      const profile = await AsyncStorage.getItem(profileKey);
+      if (!profile) {
+        setName(user?.email?.split('@')[0] || DEFAULT_PROFILE.name);
+        setEmail(user?.email || DEFAULT_PROFILE.email);
+        setAvatarUri(null);
+        setCity('');
+        setProvince('');
+        return;
+      }
       const parsed = JSON.parse(profile);
       setName(parsed.name || DEFAULT_PROFILE.name);
-      setEmail(parsed.email || DEFAULT_PROFILE.email);
+      setEmail(user?.email || parsed.email || DEFAULT_PROFILE.email);
       setAvatarUri(parsed.avatar || null);
       setCity(parsed.city || DEFAULT_PROFILE.city);
       setProvince(parsed.province || DEFAULT_PROFILE.province);
@@ -166,7 +181,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const openEditModal = () => {
     setEditName(name);
-    setEditEmail(email);
+    setEditEmail(user?.email || email);
     setEditCity(city);
     setEditProvince(province);
     setIsEditing(true);
@@ -174,7 +189,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const saveProfileData = async () => {
     const cleanName = editName.trim();
-    const cleanEmail = editEmail.trim().toLowerCase();
+    const cleanEmail = user?.email || editEmail.trim().toLowerCase();
     const cleanCity = editCity.trim();
     const cleanProvince = editProvince.trim();
 
@@ -199,7 +214,7 @@ export default function ProfileScreen({ navigation }: any) {
         city: cleanCity,
         province: cleanProvince,
       };
-      await AsyncStorage.setItem('@lex_profile', JSON.stringify(nextProfile));
+      await AsyncStorage.setItem(profileKey, JSON.stringify(nextProfile));
       setName(cleanName);
       setEmail(cleanEmail);
       setCity(cleanCity);
@@ -221,7 +236,7 @@ export default function ProfileScreen({ navigation }: any) {
         quality: 0.75,
       });
       if (!result.canceled && result.assets?.[0]?.uri) {
-        setAvatarUri(result.assets[0].uri);
+        setAvatarUri(keepProfileImage(result.assets[0].uri, owner));
       }
     } catch {
       showAlert('Gallery Error', 'Unable to open your gallery. Please try again.', 'error');
@@ -243,6 +258,15 @@ export default function ProfileScreen({ navigation }: any) {
     setFeedbackFeature('General Feedback');
     setIsDropdownOpen(false);
     setIsFeedbackVisible(true);
+  };
+
+  const logout = async () => {
+    try {
+      cancelProcess();
+      await signOut();
+    } catch {
+      showAlert('Logout failed', 'Please try again.', 'error');
+    }
   };
 
   const submitFeedback = async () => {
@@ -431,6 +455,14 @@ export default function ProfileScreen({ navigation }: any) {
           iconBg="rgba(167, 139, 250, 0.12)"
           onPress={() => navigation.navigate('AboutScreen')}
         />
+        <MenuItem
+          title="Log out"
+          description={user ? 'Sign out of your account. Your scans stay on this device.' : 'Return to login. Your guest scans stay on this device.'}
+          icon="log-out-outline"
+          iconColor={COLORS.primaryLight}
+          iconBg="rgba(167, 139, 250, 0.12)"
+          onPress={() => void logout()}
+        />
 
         <Text style={[styles.sectionLabel, styles.supportLabel, { color: T.subText }]}>SUPPORT</Text>
         <MenuItem
@@ -503,7 +535,7 @@ export default function ProfileScreen({ navigation }: any) {
                   <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
 
                   <Text style={[styles.inputLabel, { color: T.subText }]}>EMAIL ADDRESS</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
+                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editEmail} onChangeText={setEditEmail} editable={!user} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
 
                   <View style={styles.twoColumnRow}>
                     <View style={styles.halfField}>
