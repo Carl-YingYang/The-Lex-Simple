@@ -1,7 +1,10 @@
 # PIPELINE VERSION: 7.0.0
 import copy
 import hashlib
+import os
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -15,6 +18,11 @@ from services.validator import validate_llm_response
 CACHE_SCHEMA_VERSION = "document-analysis-v7-ocr-advisory"
 MIN_READABLE_CHARACTERS = 40
 MIN_READABLE_WORDS = 8
+
+# ANALYSIS_CACHE_MAX bounds the orchestrator's in-memory LRU cache of
+# completed analyses. The public endpoints are sync FastAPI handlers that run
+# in a threadpool, so every cache read/write goes through a threading.Lock.
+ANALYSIS_CACHE_MAX = max(1, int(os.getenv("ANALYSIS_CACHE_MAX", "300")))
 
 # These patterns identify content captured from an app, browser, editor, or
 # source-code screen. They are intentionally separate from ordinary OCR noise:
@@ -183,7 +191,8 @@ class Orchestrator:
         rule_engine: Optional[RuleEngine] = None,
     ):
         self.rule_engine = rule_engine or RuleEngine()
-        self._cache: Dict[str, dict] = {}
+        self._cache: OrderedDict[str, dict] = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def process(self, request: ProcessRequest) -> ProcessResult:
         if not isinstance(request.text, str):
@@ -223,11 +232,17 @@ class Orchestrator:
 
         cache_key = self._make_cache_key(sanitized_text)
 
-        if cache_key in self._cache:
+        with self._cache_lock:
+            cached_response = self._cache.get(cache_key)
+            if cached_response is not None:
+                self._cache.move_to_end(cache_key)
+                cached_response = copy.deepcopy(cached_response)
+
+        if cached_response is not None:
             print("[ORCHESTRATOR] Cache hit for sanitized document hash.")
             return ProcessResult(
                 status="cache_hit",
-                data=copy.deepcopy(self._cache[cache_key]),
+                data=cached_response,
                 source_layer="cache",
                 llm_calls_made=0,
             )
@@ -302,7 +317,10 @@ class Orchestrator:
         )
 
         # Cache only a complete, validated analysis.
-        self._cache[cache_key] = copy.deepcopy(final_response)
+        with self._cache_lock:
+            self._cache[cache_key] = copy.deepcopy(final_response)
+            while len(self._cache) > ANALYSIS_CACHE_MAX:
+                self._cache.popitem(last=False)
 
         return ProcessResult(
             status="hybrid" if rule_matches else "llm",
