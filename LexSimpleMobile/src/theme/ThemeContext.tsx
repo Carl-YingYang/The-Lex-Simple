@@ -1,24 +1,37 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
+// THEMECONTEXT VERSION: 2.0.0
+// Nag-derive na ngayon mula sa theme/tokens.ts. Ang pampublikong API ay hindi nagbago:
+// { isDarkMode, toggleTheme, colors } — may dagdag na semantic tokens sa colors.
+// Ang mga umiiral na screen na gumagamit ng T.bg / T.card / T.text / T.subText / T.border
+// ay magpapatuloy nang WALANG PAGBABAGO (sila pa rin ang parehong mga susi sa tema).
+import React, { createContext, useContext, useMemo, useState } from 'react';
 
-const ThemeContext = createContext({
+import { darkTheme, lightTheme, type ThemeColors } from './tokens';
+
+interface ThemeContextValue {
+    isDarkMode: boolean;
+    toggleTheme: () => void;
+    colors: ThemeColors;
+}
+
+const ThemeContext = createContext<ThemeContextValue>({
     isDarkMode: true,
     toggleTheme: () => { },
-    colors: {
-        bg: '#000000', card: '#1C1C1E', text: '#FFFFFF', subText: '#8E8E93', border: '#2C2C2E',
-    }
+    colors: darkTheme,
 });
 
-export const ThemeProvider = ({ children }: any) => {
+export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     const [isDarkMode, setIsDarkMode] = useState(true);
     const toggleTheme = () => setIsDarkMode(prev => !prev);
 
-    const colors = useMemo(() => isDarkMode ? {
-        bg: '#000000', card: '#1C1C1E', text: '#FFFFFF', subText: '#8E8E93', border: '#2C2C2E',
-    } : {
-        bg: '#F2F2F7', card: '#FFFFFF', text: '#000000', subText: '#3C3C43', border: '#D1D1D6',
-    }, [isDarkMode]);
+    const colors = useMemo(
+        () => (isDarkMode ? darkTheme : lightTheme),
+        [isDarkMode]
+    );
 
-    const value = useMemo(() => ({ isDarkMode, toggleTheme, colors }), [isDarkMode, colors]);
+    const value = useMemo(
+        () => ({ isDarkMode, toggleTheme, colors }),
+        [isDarkMode, colors]
+    );
 
     return (
         <ThemeContext.Provider value={value}>
