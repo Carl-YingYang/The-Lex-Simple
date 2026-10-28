@@ -4,13 +4,13 @@ import hashlib
 import hmac
 import os
 import re
-import shutil
+import uuid
 from typing import Dict, List, Optional, Tuple
 
 import docx
 import fitz
 import pdfplumber
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from db.chroma_store import query_vector_db
@@ -18,6 +18,7 @@ from orchestrator.pipeline import Orchestrator, ProcessRequest
 from services.chat_service import generate_chat_reply
 from services.llm_service import explain_raw_statutory_text
 from core.database import get_db_connection
+from core.rate_limit import LIMIT_AI, LIMIT_CHAT, LIMIT_IP_CEILING, client_ip_key, limiter
 from services.dictionary_repository import get_dictionary_entry
 from services.knowledge_catalog import find_verified_reference_context
 from services.chat_grounding import (
@@ -33,13 +34,21 @@ MAX_DOCUMENT_PAGES = 50
 MAX_PAGE_CHARACTERS = 50_000
 MAX_DOCUMENT_CHARACTERS = 500_000
 MIN_DOCUMENT_CHARACTERS = 20
+MAX_TEXT_FIELD_CHARACTERS = 200_000
+MAX_PAGE_ITEMS = 100
+MAX_SANITIZED_PAGE_CHARACTERS = 50_000
+MAX_CHAT_MESSAGE_CHARACTERS = 60_000
+MAX_CHAT_HISTORY_ITEMS = 30
+MAX_EXPLAIN_TITLE_CHARACTERS = 300
+MAX_EXPLAIN_TEXT_CHARACTERS = 60_000
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
 
 
 class SanitizedPageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     page_number: int = Field(..., alias="pageNumber", ge=1)
-    sanitized_text: str = Field(..., alias="sanitizedText")
+    sanitized_text: str = Field(..., alias="sanitizedText", max_length=MAX_SANITIZED_PAGE_CHARACTERS)
     text_hash: Optional[str] = Field(default=None, alias="textHash")
 
 class LegalRequest(BaseModel):
@@ -47,21 +56,21 @@ class LegalRequest(BaseModel):
 
     # Temporary backward compatibility for the existing mobile payload:
     # {"text": "..."}
-    text: Optional[str] = None
+    text: Optional[str] = Field(default=None, max_length=MAX_TEXT_FIELD_CHARACTERS)
 
     # Preferred privacy-safe multi-page payload.
     document_id: Optional[str] = Field(default=None, alias="documentId")
     page_count: Optional[int] = Field(default=None, alias="pageCount", ge=1)
-    pages: Optional[List[SanitizedPageRequest]] = None
+    pages: Optional[List[SanitizedPageRequest]] = Field(default=None, max_length=MAX_PAGE_ITEMS)
 
 class ChatRequest(BaseModel):
-    message: str
-    history: Optional[List[Dict[str, str]]] = None
+    message: str = Field(max_length=MAX_CHAT_MESSAGE_CHARACTERS)
+    history: Optional[List[Dict[str, str]]] = Field(default=None, max_length=MAX_CHAT_HISTORY_ITEMS)
 
 
 class ExplainRequest(BaseModel):
-    title: str
-    raw_text: str
+    title: str = Field(max_length=MAX_EXPLAIN_TITLE_CHARACTERS)
+    raw_text: str = Field(max_length=MAX_EXPLAIN_TEXT_CHARACTERS)
     source_id: Optional[int] = Field(default=None, ge=1)
 
 
@@ -344,22 +353,45 @@ def _analyze_and_attach_input_meta(text: str, input_meta: dict) -> dict:
 
 
 @router.post("/simplify")
-def simplify_text(request: LegalRequest):
-    combined_text, input_meta = _prepare_legal_input(request)
+@limiter.limit(LIMIT_AI)
+@limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
+def simplify_text(request: Request, payload: LegalRequest):
+    combined_text, input_meta = _prepare_legal_input(payload)
     return _analyze_and_attach_input_meta(combined_text, input_meta)
 
 
 @router.post("/simplify_file")
-async def simplify_uploaded_file(file: UploadFile = File(...)):
+@limiter.limit(LIMIT_AI)
+@limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
+async def simplify_uploaded_file(request: Request, file: UploadFile = File(...)):
     temp_dir = "temp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
 
     safe_filename = os.path.basename(file.filename or "uploaded_file")
-    file_location = os.path.join(temp_dir, safe_filename)
+    ext = os.path.splitext(safe_filename)[1]
+    file_location = os.path.join(temp_dir, f"{uuid.uuid4().hex}{ext}")
 
     try:
+        max_upload_bytes = MAX_UPLOAD_MB * 1024 * 1024
+        bytes_written = 0
         with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={
+                            "code": "upload_too_large",
+                            "message": (
+                                f"The uploaded file exceeds the "
+                                f"{MAX_UPLOAD_MB} MB limit."
+                            ),
+                        },
+                    )
+                buffer.write(chunk)
 
         extracted_text = ""
         filename_lower = safe_filename.casefold()
@@ -563,24 +595,26 @@ def build_contextual_query(message: str, history: list) -> str:
 
 
 @router.post("/chat")
-def chat_with_ai(request: ChatRequest):
+@limiter.limit(LIMIT_CHAT)
+@limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
+def chat_with_ai(request: Request, payload: ChatRequest):
     try:
-        if not request.message or not request.message.strip():
+        if not payload.message or not payload.message.strip():
             raise HTTPException(
                 status_code=400,
                 detail="Message cannot be empty.",
             )
 
-        history = normalize_chat_history(request.history or [])
+        history = normalize_chat_history(payload.history or [])
         # The app owns its scoring state. A question about the missing score
         # needs that state, not a vector search for unrelated legal articles.
-        question = request.message.rsplit("[CURRENT USER QUESTION]", 1)[-1].strip()
+        question = payload.message.rsplit("[CURRENT USER QUESTION]", 1)[-1].strip()
         if re.search(r"\bscore\b", question, re.I) and re.search(
             r"bakit|walang|wala|hindi\s+ibinigay|why|no\s+score",
             question, re.I,
         ):
             score_context = "\n".join(
-                [request.message] + [item["content"] for item in reversed(history)]
+                [payload.message] + [item["content"] for item in reversed(history)]
             )
             match = re.search(r"(?m)^SCORE STATUS REASON:\s*([^\n]+)", score_context)
             if match:
@@ -591,7 +625,7 @@ def chat_with_ai(request: ChatRequest):
             }
 
         has_document = (
-            "[ATTACHED DOCUMENT CONTEXT:" in request.message
+            "[ATTACHED DOCUMENT CONTEXT:" in payload.message
             or any("[PREVIOUSLY ATTACHED DOCUMENT:" in item["content"]
                    for item in history)
         )
@@ -602,7 +636,7 @@ def chat_with_ai(request: ChatRequest):
         ))
         if has_document and not asks_for_law:
             reply = generate_chat_reply(
-                user_msg=request.message.strip(),
+                user_msg=payload.message.strip(),
                 retrieved_context="Attached sanitized document only; no legal provisions selected.",
                 history=history,
                 document_only=True,
@@ -610,13 +644,13 @@ def chat_with_ai(request: ChatRequest):
             return {"status": "success", "reply": clean_chat_reply(reply)}
 
         contextual_query = build_contextual_query(
-            request.message.strip(),
+            payload.message.strip(),
             history,
         )
 
         try:
             evidence = prepare_chat_evidence(
-                request.message.strip(), contextual_query,
+                payload.message.strip(), contextual_query,
                 find_verified_reference_context, query_vector_db,
             )
         except Exception as error:
@@ -630,7 +664,7 @@ def chat_with_ai(request: ChatRequest):
             return {"status": "success", "reply": evidence.missing_reply}
 
         ai_response = generate_chat_reply(
-            user_msg=request.message.strip(),
+            user_msg=payload.message.strip(),
             retrieved_context=evidence.context,
             history=history,
         )
@@ -659,22 +693,24 @@ def chat_with_ai(request: ChatRequest):
 
 
 @router.post("/explain")
-def explain_statutory_text(request: ExplainRequest):
+@limiter.limit(LIMIT_AI)
+@limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
+def explain_statutory_text(request: Request, payload: ExplainRequest):
     # AI sees the exact chosen excerpt. A source ID also prevents stale offline
     # data from being silently paired with a different legal provision.
-    title = request.title.strip()
-    raw_text = request.raw_text.strip()
+    title = payload.title.strip()
+    raw_text = payload.raw_text.strip()
     if not title or len(raw_text) < 5 or len(raw_text) > 12000:
         raise HTTPException(status_code=400, detail={
             "code": "invalid_source", "message": "Walang sapat na legal text para ipaliwanag."
         })
     legal_basis = None
     source_url = None
-    if request.source_id is not None:
+    if payload.source_id is not None:
         try:
             conn = get_db_connection()
             try:
-                entry = get_dictionary_entry(conn, request.source_id)
+                entry = get_dictionary_entry(conn, payload.source_id)
             finally:
                 conn.close()
         except Exception:

@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -24,8 +25,7 @@ import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
-import { useAuth } from '../../../context/AuthContext';
-import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
+import { getApiIdentityHeaders } from '../../../services/installId';
 
 // PROFILE SCREEN VERSION: 5.0.0
 // Uses the built-in map placeholder until a Google Maps API key is configured.
@@ -92,11 +92,9 @@ function MenuItem({ title, description, icon, iconColor, iconBg, onPress }: Menu
 }
 
 export default function ProfileScreen({ navigation }: any) {
-  const { user, signOut } = useAuth();
   const owner = useRef(getLocalOwner()).current;
   const profileKey = localDataKey('profile', owner);
   const scanHistoryKey = localDataKey('scanHistory', owner);
-  const { cancelProcess } = useBackgroundProcess();
   const [totalScanned, setTotalScanned] = useState(0);
   const [name, setName] = useState(DEFAULT_PROFILE.name);
   const [email, setEmail] = useState(DEFAULT_PROFILE.email);
@@ -118,6 +116,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [shareContact, setShareContact] = useState(false);
 
   const { showAlert, AlertRender } = useCustomAlert();
   const { colors: T } = useTheme();
@@ -161,8 +160,8 @@ export default function ProfileScreen({ navigation }: any) {
     try {
       const profile = await AsyncStorage.getItem(profileKey);
       if (!profile) {
-        setName(user?.email?.split('@')[0] || DEFAULT_PROFILE.name);
-        setEmail(user?.email || DEFAULT_PROFILE.email);
+        setName(DEFAULT_PROFILE.name);
+        setEmail(DEFAULT_PROFILE.email);
         setAvatarUri(null);
         setCity('');
         setProvince('');
@@ -170,7 +169,7 @@ export default function ProfileScreen({ navigation }: any) {
       }
       const parsed = JSON.parse(profile);
       setName(parsed.name || DEFAULT_PROFILE.name);
-      setEmail(user?.email || parsed.email || DEFAULT_PROFILE.email);
+      setEmail(parsed.email || DEFAULT_PROFILE.email);
       setAvatarUri(parsed.avatar || null);
       setCity(parsed.city || DEFAULT_PROFILE.city);
       setProvince(parsed.province || DEFAULT_PROFILE.province);
@@ -181,7 +180,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const openEditModal = () => {
     setEditName(name);
-    setEditEmail(user?.email || email);
+    setEditEmail(email);
     setEditCity(city);
     setEditProvince(province);
     setIsEditing(true);
@@ -189,7 +188,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const saveProfileData = async () => {
     const cleanName = editName.trim();
-    const cleanEmail = user?.email || editEmail.trim().toLowerCase();
+    const cleanEmail = editEmail.trim().toLowerCase();
     const cleanCity = editCity.trim();
     const cleanProvince = editProvince.trim();
 
@@ -260,15 +259,6 @@ export default function ProfileScreen({ navigation }: any) {
     setIsFeedbackVisible(true);
   };
 
-  const logout = async () => {
-    try {
-      cancelProcess();
-      await signOut();
-    } catch {
-      showAlert('Logout failed', 'Please try again.', 'error');
-    }
-  };
-
   const submitFeedback = async () => {
     const cleanMessage = feedbackMessage.trim();
 
@@ -285,20 +275,25 @@ export default function ProfileScreen({ navigation }: any) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
 
+    const feedbackBody: Record<string, string> = {
+      category: feedbackCategory,
+      feature: feedbackFeature,
+      message: cleanMessage,
+    };
+    if (shareContact) {
+      if (name.trim() && name !== DEFAULT_PROFILE.name) feedbackBody.name = name;
+      if (email.trim() && email !== DEFAULT_PROFILE.email) feedbackBody.email = email;
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/submit_feedback`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
+          ...(await getApiIdentityHeaders()),
         },
-        body: JSON.stringify({
-          name,
-          email,
-          category: feedbackCategory,
-          feature: feedbackFeature,
-          message: cleanMessage,
-        }),
+        body: JSON.stringify(feedbackBody),
         signal: controller.signal,
       });
 
@@ -322,6 +317,7 @@ export default function ProfileScreen({ navigation }: any) {
       }
 
       setFeedbackMessage('');
+      setShareContact(false);
       setIsFeedbackVisible(false);
       showAlert('Thank You!', 'Your feedback helps us improve Lex-Simple.', 'success');
     } catch (error: any) {
@@ -455,15 +451,6 @@ export default function ProfileScreen({ navigation }: any) {
           iconBg="rgba(167, 139, 250, 0.12)"
           onPress={() => navigation.navigate('AboutScreen')}
         />
-        <MenuItem
-          title="Log out"
-          description={user ? 'Sign out of your account. Your scans stay on this device.' : 'Return to login. Your guest scans stay on this device.'}
-          icon="log-out-outline"
-          iconColor={COLORS.primaryLight}
-          iconBg="rgba(167, 139, 250, 0.12)"
-          onPress={() => void logout()}
-        />
-
         <Text style={[styles.sectionLabel, styles.supportLabel, { color: T.subText }]}>SUPPORT</Text>
         <MenuItem
           title="Send feedback"
@@ -535,7 +522,7 @@ export default function ProfileScreen({ navigation }: any) {
                   <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
 
                   <Text style={[styles.inputLabel, { color: T.subText }]}>EMAIL ADDRESS</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editEmail} onChangeText={setEditEmail} editable={!user} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
+                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
 
                   <View style={styles.twoColumnRow}>
                     <View style={styles.halfField}>
@@ -563,7 +550,7 @@ export default function ProfileScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      <Modal visible={isFeedbackVisible} transparent animationType="fade" onRequestClose={() => { if (!isSubmittingFeedback) setIsFeedbackVisible(false); }} statusBarTranslucent>
+      <Modal visible={isFeedbackVisible} transparent animationType="fade" onRequestClose={() => { if (!isSubmittingFeedback) { setIsFeedbackVisible(false); setShareContact(false); } }} statusBarTranslucent>
         <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setIsDropdownOpen(false); }}>
           <View style={styles.feedbackOverlay}>
             <KeyboardAvoidingView behavior="padding" style={styles.feedbackKeyboardArea}>
@@ -572,7 +559,7 @@ export default function ProfileScreen({ navigation }: any) {
                   <View style={[styles.feedbackCard, { backgroundColor: T.card, borderColor: T.border }]}> 
                     <View style={styles.feedbackHeader}>
                       <Text style={[styles.feedbackTitle, { color: T.text }]}>Send Feedback</Text>
-                      <TouchableOpacity disabled={isSubmittingFeedback} onPress={() => setIsFeedbackVisible(false)} style={[styles.feedbackCloseButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]}> 
+                      <TouchableOpacity disabled={isSubmittingFeedback} onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }} style={[styles.feedbackCloseButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]}> 
                         <Ionicons name="close" size={16} color={T.text} />
                       </TouchableOpacity>
                     </View>
@@ -632,8 +619,19 @@ export default function ProfileScreen({ navigation }: any) {
                       onFocus={() => setIsDropdownOpen(false)}
                     />
 
+                    <View style={styles.shareContactRow}>
+                      <Switch
+                        value={shareContact}
+                        onValueChange={setShareContact}
+                        disabled={isSubmittingFeedback}
+                        trackColor={{ false: T.border, true: COLORS.primaryLight }}
+                        thumbColor="#FFFFFF"
+                      />
+                      <Text style={[styles.shareContactLabel, { color: T.subText }]}>Isama ang pangalan at email ko (opsyonal) para masagot ninyo ako.</Text>
+                    </View>
+
                     <View style={styles.feedbackActions}>
-                      <TouchableOpacity disabled={isSubmittingFeedback} style={[styles.feedbackCancelButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => setIsFeedbackVisible(false)}>
+                      <TouchableOpacity disabled={isSubmittingFeedback} style={[styles.feedbackCancelButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}>
                         <Text style={{ color: T.text, fontWeight: 'bold' }}>Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={[styles.feedbackSubmitButton, isSubmittingFeedback && styles.feedbackDisabled]} onPress={submitFeedback} disabled={isSubmittingFeedback}>
@@ -744,6 +742,8 @@ const styles = StyleSheet.create({
   feedbackDropdownList: { borderRadius: 6, marginTop: -7, marginBottom: 14, borderWidth: 1, overflow: 'hidden' },
   feedbackDropdownOption: { minHeight: 43, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1 },
   feedbackMessageInput: { height: 100, textAlignVertical: 'top', marginBottom: 20 },
+  shareContactRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  shareContactLabel: { flex: 1, fontSize: 12, lineHeight: 17, marginLeft: 10 },
   feedbackActions: { flexDirection: 'row', marginHorizontal: -5 },
   feedbackCancelButton: { flex: 1, minHeight: 44, marginHorizontal: 5, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   feedbackSubmitButton: { flex: 1, minHeight: 44, marginHorizontal: 5, borderRadius: 6, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },

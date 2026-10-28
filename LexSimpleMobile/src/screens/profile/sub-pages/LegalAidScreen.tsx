@@ -17,6 +17,7 @@ import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { getApiIdentityHeaders } from '../../../services/installId';
 
 // LEGAL AID SCREEN VERSION: 3.0.0
 
@@ -108,7 +109,10 @@ export default function LegalAidScreen() {
     try {
       const response = await fetch(`${API_BASE_URL}/guides/sync`, {
         method: 'GET',
-        headers: { 'ngrok-skip-browser-warning': 'true' },
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+          ...(await getApiIdentityHeaders()),
+        },
         signal: controller.signal,
       });
 

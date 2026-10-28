@@ -1,0 +1,7 @@
+
+# Local databases and backups
+LexSimpleBackend/chroma_db_old/
+LexSimpleBackend/chroma_guides_db_old/
+LexSimpleBackend_Backup_20260927_233512/
+lex-backup.git/
+fresh/

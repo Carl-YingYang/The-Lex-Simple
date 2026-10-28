@@ -5,6 +5,7 @@ import React, {
 } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     BackHandler,
     FlatList,
     Image,
@@ -157,6 +158,37 @@ export default function BatchEditScreen({
         cancelProcess,
     } = useBackgroundProcessScreen('BatchEditScreen');
     const { showAlert, AlertRender } = useCustomAlert();
+    const processingPulse = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        if (!isAiAnalyzing) {
+            processingPulse.setValue(0);
+            return;
+        }
+        const pulseLoop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(processingPulse, {
+                    toValue: 1,
+                    duration: 950,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(processingPulse, {
+                    toValue: 0,
+                    duration: 950,
+                    useNativeDriver: true,
+                }),
+            ])
+        );
+        pulseLoop.start();
+        return () => pulseLoop.stop();
+    }, [isAiAnalyzing, processingPulse]);
+    const processingPulseScale = processingPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 1.06],
+    });
+    const processingPulseOpacity = processingPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.62, 1],
+    });
     const currentPage = pages[currentIndex];
     const documentSource =
         route?.params?.source === 'gallery'
@@ -917,29 +949,41 @@ export default function BatchEditScreen({
                     </Text>
                 </View>
                 <View style={styles.processingBody}>
-                    <View style={styles.processingIconBox}>
+                    <Animated.View
+                        style={[
+                            styles.processingIconBox,
+                            {
+                                transform: [
+                                    { scale: processingPulseScale },
+                                ],
+                                opacity: processingPulseOpacity,
+                            },
+                        ]}
+                    >
                         <Ionicons
                             name="document-text-outline"
-                            size={34}
+                            size={30}
                             color={COLORS.primaryLight}
                         />
-                    </View>
+                    </Animated.View>
                     <Text style={styles.processingTitle}>
                         Sinusuri ang lahat ng pahina
                     </Text>
                     <Text style={styles.processingMessage}>
-                        Tinitingnan ang mga clause at posibleng panganib. Maaari kang bumalik sa home habang nagpapatuloy ito.
+                        Tinitingnan ang mga clause at posibleng panganib.
                     </Text>
                     <View style={styles.processingInfoRow}>
                         <Ionicons
                             name="shield-checkmark-outline"
-                            size={19}
+                            size={14}
                             color={COLORS.success}
                         />
                         <Text style={styles.processingInfoText}>
                             Nilinis na text lamang ang ipinadala. Hindi kasama ang larawan.
                         </Text>
                     </View>
+                </View>
+                <View style={styles.processingFooter}>
                     <TouchableOpacity
                         style={styles.backgroundButton}
                         onPress={() =>
@@ -1347,8 +1391,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     processingIconBox: {
-        width: 66,
-        height: 66,
+        width: 58,
+        height: 58,
         borderRadius: 7,
         alignItems: 'center',
         justifyContent: 'center',
@@ -1361,42 +1405,40 @@ const styles = StyleSheet.create({
         fontSize: 20,
         fontWeight: '900',
         textAlign: 'center',
-        marginTop: 22,
+        marginTop: 18,
     },
     processingMessage: {
-        maxWidth: 360,
+        maxWidth: 320,
         color: COLORS.subText,
-        fontSize: 14,
-        lineHeight: 21,
+        fontSize: 13,
+        lineHeight: 19,
         textAlign: 'center',
-        marginTop: 9,
+        marginTop: 8,
     },
     processingInfoRow: {
-        width: '100%',
-        maxWidth: 360,
-        minHeight: 58,
-        marginTop: 24,
-        paddingHorizontal: 14,
-        paddingVertical: 11,
+        maxWidth: 340,
+        marginTop: 20,
+        paddingHorizontal: 10,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        borderRadius: 6,
     },
     processingInfoText: {
-        flex: 1,
-        color: COLORS.subText,
-        fontSize: 12,
-        lineHeight: 18,
-        marginLeft: 10,
+        flexShrink: 1,
+        color: COLORS.muted,
+        fontSize: 11,
+        lineHeight: 16,
+        marginLeft: 7,
+    },
+    processingFooter: {
+        width: '100%',
+        maxWidth: 360,
+        alignSelf: 'center',
+        paddingHorizontal: 22,
+        paddingBottom: 18,
     },
     backgroundButton: {
         width: '100%',
-        maxWidth: 360,
         height: 50,
-        marginTop: 24,
         borderRadius: 6,
         alignItems: 'center',
         justifyContent: 'center',
@@ -1409,8 +1451,9 @@ const styles = StyleSheet.create({
     },
     processingCancelButton: {
         height: 44,
-        marginTop: 10,
+        marginTop: 6,
         paddingHorizontal: 22,
+        alignSelf: 'center',
         alignItems: 'center',
         justifyContent: 'center',
     },

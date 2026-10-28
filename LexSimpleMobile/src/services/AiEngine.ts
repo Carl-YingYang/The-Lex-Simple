@@ -2,6 +2,7 @@
 import type {
     SanitizedDocumentApiPayload,
 } from '../utils/sanitizer';
+import { getApiIdentityHeaders } from './installId';
 
 
 const DEFAULT_BASE_URL = 'http://localhost:8000';
@@ -310,6 +311,7 @@ const request = async <TResponse>(
                 headers: {
                     Accept: 'application/json',
                     'ngrok-skip-browser-warning': 'true',
+                    ...(await getApiIdentityHeaders()),
                     ...(options.headers ?? {}),
                 },
                 signal: abortContext.signal,
@@ -319,6 +321,16 @@ const request = async <TResponse>(
         const responseBody = await readResponseBody(response);
 
         if (!response.ok) {
+            if (response.status === 429) {
+                throw new ApiError(
+                    'Masyadong maraming request. Subukan ulit sa ilang minuto.',
+                    {
+                        status: 429,
+                        code: 'rate_limited',
+                    }
+                );
+            }
+
             const errorInfo = extractErrorInformation(
                 responseBody,
                 `Server error (${response.status}).`

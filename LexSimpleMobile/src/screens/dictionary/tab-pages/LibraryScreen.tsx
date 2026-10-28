@@ -19,6 +19,7 @@ import defaultDictionary from '../../../data/legal_dictionary.json';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { explainLegalEntry, explanationErrorMessage, legalEntryKey, legalText } from '../../../services/legalDictionaryService';
+import { getApiIdentityHeaders } from '../../../services/installId';
 
 const PRIMARY = '#3478F6';
 const PRIMARY_SOFT = '#66A0FF';
@@ -282,6 +283,7 @@ export default function LibraryScreen({ navigation }: any) {
                     headers: {
                         Accept: 'application/json',
                         'ngrok-skip-browser-warning': 'true',
+                        ...(await getApiIdentityHeaders()),
                     },
                 }
             );
@@ -365,6 +367,7 @@ export default function LibraryScreen({ navigation }: any) {
                     headers: {
                         Accept: 'application/json',
                         'ngrok-skip-browser-warning': 'true',
+                        ...(await getApiIdentityHeaders()),
                     },
                 }
             );

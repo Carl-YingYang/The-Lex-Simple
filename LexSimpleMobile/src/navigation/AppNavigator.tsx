@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
@@ -21,9 +21,8 @@ import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
 import { navigationRef } from './RootNavigation';
-import { getLocalOwner } from '../services/localDataScope';
-import { AuthProvider, useAuth } from '../context/AuthContext';
-import LoginScreen from '../screens/auth/LoginScreen';
+import { migrateLegacyDataToGuest } from '../services/localDataScope';
+import { waitForScanHistoryWrites } from '../services/scanHistoryStorage';
 
 import ScanScreen from '../screens/home/tab-pages/ScanScreen';
 import LibraryScreen from '../screens/dictionary/tab-pages/LibraryScreen';
@@ -159,17 +158,42 @@ function MainTabs() {
 }
 
 function NavigationContent() {
-    const { phase, retry } = useAuth();
     const { colors, isDarkMode } = useTheme();
-    if (phase === 'loading') {
+    const [startupPhase, setStartupPhase] = useState<'loading' | 'ready' | 'error'>('loading');
+    const mountedRef = useRef(true);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    const runStartup = useCallback(async () => {
+        if (mountedRef.current) setStartupPhase('loading');
+        try {
+            await migrateLegacyDataToGuest();
+            await waitForScanHistoryWrites();
+            if (mountedRef.current) setStartupPhase('ready');
+        } catch (error) {
+            console.warn('[Startup] Unable to prepare local data', error);
+            if (mountedRef.current) setStartupPhase('error');
+        }
+    }, []);
+
+    useEffect(() => {
+        void runStartup();
+    }, [runStartup]);
+
+    if (startupPhase === 'loading') {
         return <View style={styles.prepare}><ActivityIndicator color={ACTIVE_COLOR} />
-            <Text style={styles.prepareText}>Inihahanda ang account at saved scans…</Text></View>;
+            <Text style={styles.prepareText}>Inihahanda ang saved scans…</Text></View>;
     }
-    if (phase === 'error') {
+    if (startupPhase === 'error') {
         return <View style={styles.prepare}><Text style={styles.prepareText}>Hindi mabuksan ang session o local data. Nananatili ang saved scans.</Text>
-            <TouchableOpacity onPress={() => void retry().catch(() => undefined)}><Text style={styles.retry}>Subukan muli</Text></TouchableOpacity></View>;
+            <TouchableOpacity onPress={() => void runStartup()}><Text style={styles.retry}>Subukan muli</Text></TouchableOpacity></View>;
     }
-    if (phase === 'login' || phase === 'recovery') return <LoginScreen />;
+
     const baseTheme = isDarkMode ? DarkTheme : DefaultTheme;
     const navigationTheme = {
         ...baseTheme,
@@ -186,7 +210,6 @@ function NavigationContent() {
     return (
         <BackgroundProcessProvider>
             <NavigationContainer
-                key={getLocalOwner()}
                 ref={navigationRef}
                 theme={navigationTheme}
             >
@@ -215,11 +238,9 @@ function NavigationContent() {
 
 export default function AppNavigator() {
     return (
-        <AuthProvider>
-            <ThemeProvider>
-                <NavigationContent />
-            </ThemeProvider>
-        </AuthProvider>
+        <ThemeProvider>
+            <NavigationContent />
+        </ThemeProvider>
     );
 }
 

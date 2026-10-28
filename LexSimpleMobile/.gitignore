@@ -30,8 +30,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# Env files
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -54,3 +56,14 @@ LexSimpleBackend/lex_metadata.db
 
 # Node modules (para sa Mobile)
 node_modules/
+
+# Backups at data
+LexSimpleBackend_Backup_*/
+*Backup*/
+LexSimpleBackend/*.db
+LexSimpleBackend/chroma_db/
+LexSimpleBackend/temp_uploads/
+LexSimpleBackend/knowledge_files/
+LexSimpleBackend/venv/
+LexSimpleBackend/.venv/
+*.log
