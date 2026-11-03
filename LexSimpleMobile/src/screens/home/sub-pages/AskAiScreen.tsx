@@ -1,3 +1,23 @@
+// ASK AI SCREEN VERSION: 9.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Chat/AI/storage logic 1:1 pa rin; UI lang ang binago, PLUS tinanggal
+// ang voice input ayon sa request ni user)
+// Spec: purple system (zero na ang asul/dilaw/gold/orange), 1.5px standard
+// borders, 2px lang sa CTA, 2–6px radius (squared), predominantly FLAT —
+// walang shadow sa chat bubbles (list items); hard shadow lang sa CTA at
+// modal (focal elements).
+// Pagbabago sa UI (v9.0.0):
+//   - TINANGGAL ang voice/mic input: mic button sa composer, mic modal,
+//     speech recognition events/handlers/state, at SpeechRecognitionSafe
+//     import — text input na lang ang paraan ng pag-compose.
+//   - Binura ang PRIMARY/PRIMARY_SOFT/DANGER constants — tokens lahat
+//     (T.brand / T.brandText / T.danger / T.overlay + BORDER/RADIUS).
+//   - User bubble: purple fill + ITIM na teksto (spec CTA rule), 1.5px ink
+//     border, 6px radius. Lexie bubble: card bg + 1.5px ink border.
+//     Error bubble: dangerSoft bg + danger border.
+//   - Send/delete buttons: 2px ink border + hard shadow (getNeoShadow
+//     'sm'), ITIM na icon/teksto sa purple fill.
+//   - Chips/inputs/modals: squared 4–6px, 1.5px ink outlines.
+//   - Uppercase meta labels (regenerate, loading, status, note, buttons).
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -18,19 +38,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import {
-    ExpoSpeechRecognitionModule,
-    useSpeechRecognitionEvent,
-} from '../../../services/SpeechRecognitionSafe';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
+import { getNeoShadow } from '../../../components/Neo';
 import { postEndpoint } from '../../../services/AiEngine';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS } from '../../../theme/tokens';
 import { localDataKey } from '../../../services/localDataScope';
-
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const DANGER = '#EF4444';
 
 interface Message {
     id: string;
@@ -114,7 +128,7 @@ const MessageBubble = ({
                             styles.lexieAvatar,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
@@ -141,13 +155,17 @@ const MessageBubble = ({
                         style={[
                             styles.bubble,
                             isUser
-                                ? styles.userBubble
+                                ? {
+                                      backgroundColor: T.brand,
+                                      borderColor: T.ink,
+                                  }
                                 : {
                                       backgroundColor: T.card,
-                                      borderColor: T.border,
+                                      borderColor: T.ink,
                                   },
                             item.isError && {
-                                borderColor: DANGER,
+                                borderColor: T.danger,
+                                backgroundColor: T.dangerSoft,
                             },
                         ]}
                     >
@@ -156,11 +174,9 @@ const MessageBubble = ({
                                 style={[
                                     styles.fileLabel,
                                     {
-                                        backgroundColor: isUser
-                                            ? 'rgba(255,255,255,0.14)'
-                                            : T.bg,
+                                        backgroundColor: T.bg,
                                         borderColor: isUser
-                                            ? 'rgba(255,255,255,0.24)'
+                                            ? T.ink
                                             : T.border,
                                     },
                                 ]}
@@ -168,15 +184,13 @@ const MessageBubble = ({
                                 <Ionicons
                                     name="document-text-outline"
                                     size={14}
-                                    color={isUser ? '#FFFFFF' : T.text}
+                                    color={T.text}
                                 />
                                 <Text
                                     style={[
                                         styles.fileLabelText,
                                         {
-                                            color: isUser
-                                                ? '#FFFFFF'
-                                                : T.text,
+                                            color: T.text,
                                         },
                                     ]}
                                     numberOfLines={1}
@@ -191,7 +205,7 @@ const MessageBubble = ({
                                 styles.messageText,
                                 {
                                     color: isUser
-                                        ? '#FFFFFF'
+                                        ? T.brandText
                                         : T.text,
                                 },
                             ]}
@@ -224,7 +238,7 @@ const MessageBubble = ({
                                 { color: T.subText },
                             ]}
                         >
-                            Subukan ulit
+                            SUBUKAN ULIT
                         </Text>
                     </TouchableOpacity>
                 )}
@@ -254,11 +268,8 @@ export default function AskAiScreen({ route }: any) {
     const [optionsModalVisible, setOptionsModalVisible] =
         useState(false);
     const [clearModalVisible, setClearModalVisible] = useState(false);
-    const [isMicModalVisible, setIsMicModalVisible] = useState(false);
-    const [isListening, setIsListening] = useState(false);
 
     const flatListRef = useRef<FlatList<Message>>(null);
-    const originalTextRef = useRef('');
     const isMountedRef = useRef(true);
     const requestInFlightRef = useRef(false);
 
@@ -281,51 +292,11 @@ export default function AskAiScreen({ route }: any) {
         });
     };
 
-    useSpeechRecognitionEvent('start', () => {
-        setIsListening(true);
-    });
-
-    useSpeechRecognitionEvent('end', () => {
-        setIsListening(false);
-    });
-
-    useSpeechRecognitionEvent('error', (event: any) => {
-        setIsListening(false);
-
-        if (event.error === 'client' || event.error === 'network') {
-            showAlert(
-                'Hindi gumana ang microphone',
-                'Subukang muli o i-type na lang ang mensahe.',
-                'error'
-            );
-        }
-    });
-
-    useSpeechRecognitionEvent('result', (event: any) => {
-        const transcript = event.results?.[0]?.transcript;
-
-        if (!transcript) {
-            return;
-        }
-
-        const baseText = originalTextRef.current;
-        const separator =
-            baseText.length > 0 && !baseText.endsWith(' ') ? ' ' : '';
-
-        setInputText(`${baseText}${separator}${transcript}`);
-    });
-
     useEffect(() => {
         isMountedRef.current = true;
 
         return () => {
             isMountedRef.current = false;
-
-            try {
-                ExpoSpeechRecognitionModule.stop();
-            } catch {
-                // Speech recognition may already be stopped.
-            }
         };
     }, []);
 
@@ -446,68 +417,6 @@ export default function AskAiScreen({ route }: any) {
         return () => showSubscription.remove();
     }, []);
 
-    const openMicModal = async (): Promise<void> => {
-        Keyboard.dismiss();
-        originalTextRef.current = inputText;
-
-        try {
-            const permission =
-                await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-
-            if (!permission?.granted) {
-                showAlert(
-                    'Kailangan ang microphone',
-                    'Payagan ang microphone access para magamit ang voice input.',
-                    'info'
-                );
-                return;
-            }
-
-            setIsMicModalVisible(true);
-            await ExpoSpeechRecognitionModule.start({
-                lang: 'fil-PH',
-                interimResults: true,
-            });
-        } catch (error: any) {
-            setIsListening(false);
-            setIsMicModalVisible(false);
-            showAlert(
-                'Hindi gumana ang microphone',
-                error?.message || 'I-type na lang muna ang mensahe.',
-                'error'
-            );
-        }
-    };
-
-    const closeMicModal = (): void => {
-        try {
-            ExpoSpeechRecognitionModule.stop();
-        } catch {
-            // Speech recognition may already be stopped.
-        }
-
-        setIsListening(false);
-        setIsMicModalVisible(false);
-    };
-
-    const toggleListening = async (): Promise<void> => {
-        try {
-            if (isListening) {
-                ExpoSpeechRecognitionModule.stop();
-                return;
-            }
-
-            originalTextRef.current = inputText;
-            await ExpoSpeechRecognitionModule.start({
-                lang: 'fil-PH',
-                interimResults: true,
-            });
-        } catch (error) {
-            console.error('[Lexie] Voice input failed:', error);
-            setIsListening(false);
-        }
-    };
-
     const buildRecentHistory = (
         history: Message[]
     ): Array<{ role: 'assistant' | 'user'; content: string }> =>
@@ -553,14 +462,6 @@ export default function AskAiScreen({ route }: any) {
 
         if (!userText && !hiddenData) {
             return;
-        }
-
-        try {
-            if (isListening) {
-                ExpoSpeechRecognitionModule.stop();
-            }
-        } catch {
-            // Speech recognition may already be stopped.
         }
 
         const baseDisplayHistory = options.displayHistory || messages;
@@ -711,12 +612,6 @@ export default function AskAiScreen({ route }: any) {
         });
     };
 
-    const handleSendFromMic = (): void => {
-        const voiceText = inputText;
-        closeMicModal();
-        void sendMessage({ text: voiceText });
-    };
-
     const openMessageOptions = (message: Message): void => {
         if (isLoading) {
             return;
@@ -812,7 +707,7 @@ export default function AskAiScreen({ route }: any) {
                                     styles.lexieAvatar,
                                     {
                                         backgroundColor: T.card,
-                                        borderColor: T.border,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                             >
@@ -827,13 +722,13 @@ export default function AskAiScreen({ route }: any) {
                                     styles.loadingBubble,
                                     {
                                         backgroundColor: T.card,
-                                        borderColor: T.border,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                             >
                                 <ActivityIndicator
                                     size="small"
-                                    color={PRIMARY_SOFT}
+                                    color={T.brand}
                                 />
                                 <Text
                                     style={[
@@ -841,7 +736,7 @@ export default function AskAiScreen({ route }: any) {
                                         { color: T.subText },
                                     ]}
                                 >
-                                    Tinitingnan ni Lexie...
+                                    TINITINGNAN NI LEXIE...
                                 </Text>
                             </View>
                         </View>
@@ -854,7 +749,7 @@ export default function AskAiScreen({ route }: any) {
                     styles.composerArea,
                     {
                         backgroundColor: T.bg,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
                 ]}
             >
@@ -872,7 +767,7 @@ export default function AskAiScreen({ route }: any) {
                                     styles.promptChip,
                                     {
                                         backgroundColor: T.card,
-                                        borderColor: T.border,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                                 onPress={() => setInputText(prompt)}
@@ -881,7 +776,7 @@ export default function AskAiScreen({ route }: any) {
                                 <Text
                                     style={[
                                         styles.promptText,
-                                        { color: T.subText },
+                                        { color: T.text },
                                     ]}
                                     numberOfLines={2}
                                 >
@@ -897,16 +792,21 @@ export default function AskAiScreen({ route }: any) {
                         style={[
                             styles.attachedFile,
                             {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
+                                backgroundColor: T.brandSoft,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
-                        <View style={styles.attachedFileIcon}>
+                        <View
+                            style={[
+                                styles.attachedFileIcon,
+                                { backgroundColor: T.brand },
+                            ]}
+                        >
                             <Ionicons
                                 name="document-text-outline"
                                 size={17}
-                                color="#FFFFFF"
+                                color={T.brandText}
                             />
                         </View>
                         <View style={styles.attachedFileCopy}>
@@ -922,10 +822,10 @@ export default function AskAiScreen({ route }: any) {
                             <Text
                                 style={[
                                     styles.attachedFileStatus,
-                                    { color: T.subText },
+                                    { color: T.brandDeep },
                                 ]}
                             >
-                                Handa nang itanong
+                                HANDA NANG ITANONG
                             </Text>
                         </View>
                         <TouchableOpacity
@@ -949,7 +849,7 @@ export default function AskAiScreen({ route }: any) {
                             styles.inputBox,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
@@ -969,25 +869,16 @@ export default function AskAiScreen({ route }: any) {
                             onFocus={scrollToBottom}
                             accessibilityLabel="Mensahe kay Lexie"
                         />
-
-                        <TouchableOpacity
-                            style={styles.inputIconButton}
-                            onPress={() => void openMicModal()}
-                            disabled={isLoading}
-                            accessibilityRole="button"
-                            accessibilityLabel="Gamitin ang microphone"
-                        >
-                            <Ionicons
-                                name="mic-outline"
-                                size={21}
-                                color={T.subText}
-                            />
-                        </TouchableOpacity>
                     </View>
 
                     <TouchableOpacity
                         style={[
                             styles.sendButton,
+                            {
+                                backgroundColor: T.brand,
+                                borderColor: T.ink,
+                            },
+                            getNeoShadow(T, 'sm'),
                             (!inputText.trim() && !attachedFile) ||
                             isLoading
                                 ? styles.sendButtonDisabled
@@ -1004,7 +895,7 @@ export default function AskAiScreen({ route }: any) {
                         <Ionicons
                             name="send"
                             size={18}
-                            color="#FFFFFF"
+                            color={T.brandText}
                         />
                     </TouchableOpacity>
                 </View>
@@ -1012,131 +903,9 @@ export default function AskAiScreen({ route }: any) {
                 <Text
                     style={[styles.composerNote, { color: T.subText }]}
                 >
-                    Para sa pag-unawa lamang, hindi legal advice.
+                    PARA SA PAG-UNAWA LAMANG, HINDI LEGAL ADVICE.
                 </Text>
             </View>
-
-            <Modal
-                visible={isMicModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={closeMicModal}
-            >
-                <View style={styles.modalBackdrop}>
-                    <View
-                        style={[
-                            styles.micModal,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <View style={styles.modalHandle} />
-                        <Text
-                            style={[
-                                styles.modalTitle,
-                                { color: T.text },
-                            ]}
-                        >
-                            Voice input
-                        </Text>
-                        <Text
-                            style={[
-                                styles.micStatus,
-                                { color: T.subText },
-                            ]}
-                        >
-                            {isListening
-                                ? 'Nakikinig si Lexie...'
-                                : 'Naka-pause'}
-                        </Text>
-
-                        <View
-                            style={[
-                                styles.transcriptBox,
-                                {
-                                    backgroundColor: T.bg,
-                                    borderColor: T.border,
-                                },
-                            ]}
-                        >
-                            <Text
-                                style={[
-                                    styles.transcriptText,
-                                    { color: T.text },
-                                ]}
-                                numberOfLines={5}
-                            >
-                                {inputText
-                                    .slice(originalTextRef.current.length)
-                                    .trim() ||
-                                    (isListening
-                                        ? 'Magsalita ngayon...'
-                                        : 'Wala pang narinig.')}
-                            </Text>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[
-                                styles.micButton,
-                                {
-                                    backgroundColor: isListening
-                                        ? DANGER
-                                        : PRIMARY,
-                                },
-                            ]}
-                            onPress={() => void toggleListening()}
-                            accessibilityRole="button"
-                        >
-                            <Ionicons
-                                name={
-                                    isListening
-                                        ? 'pause-outline'
-                                        : 'mic-outline'
-                                }
-                                size={27}
-                                color="#FFFFFF"
-                            />
-                        </TouchableOpacity>
-
-                        <View style={styles.modalButtonRow}>
-                            <TouchableOpacity
-                                style={[
-                                    styles.secondaryModalButton,
-                                    {
-                                        backgroundColor: T.bg,
-                                        borderColor: T.border,
-                                    },
-                                ]}
-                                onPress={closeMicModal}
-                            >
-                                <Text
-                                    style={[
-                                        styles.secondaryModalButtonText,
-                                        { color: T.text },
-                                    ]}
-                                >
-                                    Kanselahin
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[
-                                    styles.primaryModalButton,
-                                    !inputText.trim() &&
-                                        styles.disabledButton,
-                                ]}
-                                onPress={handleSendFromMic}
-                                disabled={!inputText.trim()}
-                            >
-                                <Text style={styles.primaryModalButtonText}>
-                                    Ipadala
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
 
             <Modal
                 visible={optionsModalVisible}
@@ -1145,7 +914,10 @@ export default function AskAiScreen({ route }: any) {
                 onRequestClose={() => setOptionsModalVisible(false)}
             >
                 <TouchableOpacity
-                    style={styles.modalBackdrop}
+                    style={[
+                        styles.modalBackdrop,
+                        { backgroundColor: T.overlay },
+                    ]}
                     activeOpacity={1}
                     onPress={() => setOptionsModalVisible(false)}
                 >
@@ -1155,8 +927,9 @@ export default function AskAiScreen({ route }: any) {
                                 styles.optionsModal,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
+                                getNeoShadow(T, 'sm'),
                             ]}
                         >
                             <Text
@@ -1165,7 +938,7 @@ export default function AskAiScreen({ route }: any) {
                                     { color: T.text },
                                 ]}
                             >
-                                Mensahe
+                                MENSAHE
                             </Text>
                             <TouchableOpacity
                                 style={styles.optionButton}
@@ -1174,10 +947,15 @@ export default function AskAiScreen({ route }: any) {
                                 <Ionicons
                                     name="trash-outline"
                                     size={20}
-                                    color={DANGER}
+                                    color={T.danger}
                                 />
-                                <Text style={styles.deleteOptionText}>
-                                    Burahin ang mensahe
+                                <Text
+                                    style={[
+                                        styles.deleteOptionText,
+                                        { color: T.danger },
+                                    ]}
+                                >
+                                    BURAHIN ANG MENSAHE
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -1200,7 +978,7 @@ export default function AskAiScreen({ route }: any) {
                                         { color: T.text },
                                     ]}
                                 >
-                                    Kanselahin
+                                    KANSELAHIN
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -1215,7 +993,10 @@ export default function AskAiScreen({ route }: any) {
                 onRequestClose={() => setClearModalVisible(false)}
             >
                 <TouchableOpacity
-                    style={styles.modalBackdrop}
+                    style={[
+                        styles.modalBackdrop,
+                        { backgroundColor: T.overlay },
+                    ]}
                     activeOpacity={1}
                     onPress={() => setClearModalVisible(false)}
                 >
@@ -1225,18 +1006,19 @@ export default function AskAiScreen({ route }: any) {
                                 styles.confirmModal,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
+                                getNeoShadow(T, 'sm'),
                             ]}
                         >
-                            <View style={styles.modalHandle} />
+                            <View style={[styles.modalHandle, { backgroundColor: T.border }]} />
                             <Text
                                 style={[
                                     styles.modalTitle,
                                     { color: T.text },
                                 ]}
                             >
-                                Burahin ang conversation?
+                                BURAHIN ANG CONVERSATION?
                             </Text>
                             <Text
                                 style={[
@@ -1252,7 +1034,7 @@ export default function AskAiScreen({ route }: any) {
                                         styles.secondaryModalButton,
                                         {
                                             backgroundColor: T.bg,
-                                            borderColor: T.border,
+                                            borderColor: T.ink,
                                         },
                                     ]}
                                     onPress={() =>
@@ -1265,15 +1047,27 @@ export default function AskAiScreen({ route }: any) {
                                             { color: T.text },
                                         ]}
                                     >
-                                        Kanselahin
+                                        KANSELAHIN
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                    style={styles.deleteModalButton}
+                                    style={[
+                                        styles.deleteModalButton,
+                                        {
+                                            backgroundColor: T.danger,
+                                            borderColor: T.ink,
+                                        },
+                                        getNeoShadow(T, 'sm'),
+                                    ]}
                                     onPress={() => void confirmClearChat()}
                                 >
-                                    <Text style={styles.deleteModalButtonText}>
-                                        Burahin
+                                    <Text
+                                        style={[
+                                            styles.deleteModalButtonText,
+                                            { color: T.brandText },
+                                        ]}
+                                    >
+                                        BURAHIN
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -1348,8 +1142,8 @@ const styles = StyleSheet.create({
     lexieAvatar: {
         width: 30,
         height: 30,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         marginRight: 8,
         alignItems: 'center',
         justifyContent: 'center',
@@ -1363,20 +1157,16 @@ const styles = StyleSheet.create({
         maxWidth: '84%',
     },
     bubble: {
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 12,
         paddingVertical: 10,
-    },
-    userBubble: {
-        backgroundColor: PRIMARY,
-        borderColor: PRIMARY,
     },
     fileLabel: {
         maxWidth: 230,
         minHeight: 28,
-        borderRadius: 5,
-        borderWidth: 1,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 7,
         marginBottom: 7,
         flexDirection: 'row',
@@ -1404,8 +1194,9 @@ const styles = StyleSheet.create({
         gap: 5,
     },
     regenerateText: {
-        fontSize: 11,
-        fontWeight: '700',
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 0.8,
     },
     loadingRow: {
         marginBottom: 14,
@@ -1414,19 +1205,20 @@ const styles = StyleSheet.create({
     },
     loadingBubble: {
         minHeight: 42,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
     },
     loadingText: {
-        fontSize: 11,
-        fontWeight: '700',
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 0.8,
     },
     composerArea: {
-        borderTopWidth: 1,
+        borderTopWidth: BORDER.thin,
         paddingTop: 9,
         paddingBottom: Platform.OS === 'ios' ? 18 : 10,
     },
@@ -1438,8 +1230,8 @@ const styles = StyleSheet.create({
     promptChip: {
         maxWidth: 210,
         minHeight: 38,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 11,
         paddingVertical: 7,
         justifyContent: 'center',
@@ -1447,12 +1239,12 @@ const styles = StyleSheet.create({
     promptText: {
         fontSize: 11,
         lineHeight: 15,
-        fontWeight: '700',
+        fontWeight: '800',
     },
     attachedFile: {
         minHeight: 52,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         marginHorizontal: 16,
         marginBottom: 8,
         paddingHorizontal: 9,
@@ -1462,8 +1254,7 @@ const styles = StyleSheet.create({
     attachedFileIcon: {
         width: 32,
         height: 32,
-        borderRadius: 6,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1479,7 +1270,8 @@ const styles = StyleSheet.create({
     attachedFileStatus: {
         marginTop: 2,
         fontSize: 9,
-        fontWeight: '700',
+        fontWeight: '800',
+        letterSpacing: 0.8,
     },
     removeFileButton: {
         width: 38,
@@ -1498,9 +1290,10 @@ const styles = StyleSheet.create({
         minWidth: 0,
         minHeight: 46,
         maxHeight: 112,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         paddingLeft: 11,
+        paddingRight: 11,
         flexDirection: 'row',
         alignItems: 'flex-end',
     },
@@ -1513,17 +1306,11 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 19,
     },
-    inputIconButton: {
-        width: 42,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
     sendButton: {
         width: 46,
         height: 46,
-        borderRadius: 7,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1535,79 +1322,41 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         fontSize: 9,
         lineHeight: 12,
+        letterSpacing: 0.6,
         textAlign: 'center',
     },
     modalBackdrop: {
         flex: 1,
         padding: 20,
-        backgroundColor: 'rgba(0,0,0,0.60)',
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    micModal: {
-        width: '100%',
-        maxWidth: 380,
-        borderRadius: 8,
-        borderWidth: 1,
-        padding: 18,
-        alignItems: 'center',
     },
     optionsModal: {
         width: '100%',
         maxWidth: 380,
-        borderRadius: 8,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
         padding: 16,
     },
     confirmModal: {
         width: '100%',
         maxWidth: 380,
-        borderRadius: 8,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
         padding: 18,
     },
     modalHandle: {
         width: 34,
         height: 3,
-        borderRadius: 2,
-        backgroundColor: '#64748B',
-        opacity: 0.45,
+        borderRadius: RADIUS.sm,
         marginBottom: 14,
         alignSelf: 'center',
     },
     modalTitle: {
         fontSize: 16,
         fontWeight: '900',
+        letterSpacing: 0.5,
         textAlign: 'center',
-    },
-    micStatus: {
-        marginTop: 4,
-        fontSize: 11,
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    transcriptBox: {
-        width: '100%',
-        minHeight: 82,
-        borderRadius: 7,
-        borderWidth: 1,
-        padding: 11,
-        marginTop: 14,
-        marginBottom: 14,
-        justifyContent: 'center',
-    },
-    transcriptText: {
-        fontSize: 13,
-        lineHeight: 20,
-        textAlign: 'center',
-    },
-    micButton: {
-        width: 58,
-        height: 58,
-        borderRadius: 29,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
     },
     modalButtonRow: {
         width: '100%',
@@ -1618,8 +1367,8 @@ const styles = StyleSheet.create({
     secondaryModalButton: {
         flex: 1,
         minHeight: 44,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 10,
@@ -1627,23 +1376,7 @@ const styles = StyleSheet.create({
     secondaryModalButtonText: {
         fontSize: 12,
         fontWeight: '900',
-    },
-    primaryModalButton: {
-        flex: 1,
-        minHeight: 44,
-        borderRadius: 6,
-        backgroundColor: PRIMARY,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 10,
-    },
-    primaryModalButtonText: {
-        color: '#FFFFFF',
-        fontSize: 12,
-        fontWeight: '900',
-    },
-    disabledButton: {
-        opacity: 0.45,
+        letterSpacing: 0.5,
     },
     optionButton: {
         minHeight: 48,
@@ -1659,7 +1392,6 @@ const styles = StyleSheet.create({
         fontWeight: '800',
     },
     deleteOptionText: {
-        color: DANGER,
         fontSize: 13,
         fontWeight: '800',
     },
@@ -1672,15 +1404,15 @@ const styles = StyleSheet.create({
     deleteModalButton: {
         flex: 1,
         minHeight: 44,
-        borderRadius: 6,
-        backgroundColor: DANGER,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 10,
     },
     deleteModalButtonText: {
-        color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '900',
+        letterSpacing: 0.5,
     },
 });

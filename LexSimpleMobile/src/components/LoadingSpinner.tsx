@@ -7,10 +7,16 @@ import {
 } from 'react-native';
 
 import { useTheme } from '../theme/ThemeContext';
+import { BORDER, RADIUS } from '../theme/tokens';
 
-// LOADING SPINNER VERSION: 1.0.0
-// Minimal native loading state without timers or custom animations.
-const PRIMARY_SOFT = '#66A0FF';
+// LOADING SPINNER VERSION: 2.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Minimal native loading state — walang timers o custom animations,
+// behavior 1:1 pa rin.)
+// Pagbabago sa UI (v2.0.0):
+//   - Binura ang PRIMARY_SOFT constant (asul — bawal sa purple spec) —
+//     spinner = T.brand na (theme-aware: kumikinang sa dark mode).
+//   - Indicator box: 1.5px ink outline + squared 6px radius (dating 1px
+//     hairline border at 10px radius).
 
 interface LoadingSpinnerProps {
     message?: string;
@@ -45,13 +51,13 @@ export default function LoadingSpinner({
                     styles.indicatorBox,
                     {
                         backgroundColor: T.card,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
                 ]}
             >
                 <ActivityIndicator
                     size="small"
-                    color={PRIMARY_SOFT}
+                    color={T.brand}
                     accessibilityLabel="Naglo-load"
                 />
             </View>
@@ -79,8 +85,8 @@ const styles = StyleSheet.create({
     indicatorBox: {
         width: 48,
         height: 48,
-        borderWidth: 1,
-        borderRadius: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         alignItems: 'center',
         justifyContent: 'center',
     },

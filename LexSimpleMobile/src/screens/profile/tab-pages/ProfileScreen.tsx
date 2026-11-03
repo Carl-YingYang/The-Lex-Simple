@@ -7,6 +7,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -15,20 +16,25 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
+import { NeoButton, NeoCard, NeoIconButton, NeoSectionHeader, getNeoShadow } from '../../../components/Neo';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
 import { getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
 import { getApiIdentityHeaders } from '../../../services/installId';
 
-// PROFILE SCREEN VERSION: 5.0.0
-// Uses the built-in map placeholder until a Google Maps API key is configured.
+// PROFILE SCREEN VERSION: 6.1.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang nagbago; walang binagong logic/state/network)
+// Spec: purple system, 1.5px standard borders, 2px sa CTA/hero,
+// 2–6px radius (squared), predominantly FLAT — 2px hard shadow lang
+// sa mga focal element (hero card, modals, CTA buttons).
 
 const APP_FEATURES = [
   'General Feedback',
@@ -52,42 +58,67 @@ const DEFAULT_PROFILE = {
   province: '',
 };
 
+/**
+ * Hard-shadow press helper ("sink into paper") — para sa mga focal
+ * element na may 2px hard shadow (hal. Submit CTA). Flat surfaces
+ * ay simple lang dim press.
+ */
+function makeSink(colors: ThemeColors) {
+  return (pressed: boolean, level: 'sm' | 'md' | 'lg'): ViewStyle => {
+    if (!pressed) return getNeoShadow(colors, level);
+    const offset = SHADOW[level].ios.shadowOffset;
+    return {
+      elevation: 0,
+      transform: [
+        { translateX: offset.width },
+        { translateY: offset.height },
+      ],
+    };
+  };
+}
+
 type MenuItemProps = {
   title: string;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
-  iconColor: string;
-  iconBg: string;
   onPress: () => void;
 };
 
-function MenuItem({ title, description, icon, iconColor, iconBg, onPress }: MenuItemProps) {
+function MenuItem({ title, description, icon, onPress }: MenuItemProps) {
   const { colors: T } = useTheme();
 
   return (
-    <TouchableOpacity
-      style={[styles.menuItem, { backgroundColor: T.card, borderColor: T.border }]}
-      activeOpacity={0.72}
+    <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityHint={description}
+      style={styles.menuItemWrapper}
     >
-      <View style={[styles.menuIcon, { backgroundColor: iconBg }]}> 
-        <Ionicons name={icon} size={19} color={iconColor} />
-      </View>
+      {({ pressed }) => (
+        <View
+          style={[
+            styles.menuItem,
+            { backgroundColor: T.card, borderColor: T.ink },
+            pressed ? styles.dimmed : null,
+          ]}
+        >
+          {/* Vivid purple circular badge + itim na outline icon (spec) */}
+          <View style={[styles.menuIcon, { backgroundColor: T.brandVivid, borderColor: T.ink }]}>
+            <Ionicons name={icon} size={20} color={T.brandText} />
+          </View>
 
-      <View style={styles.menuCopy}>
-        <Text style={[styles.menuTitle, { color: T.text }]}>{title}</Text>
-        <Text style={[styles.menuDescription, { color: T.subText }]} numberOfLines={2}>
-          {description}
-        </Text>
-      </View>
+          <View style={styles.menuCopy}>
+            <Text style={[styles.menuTitle, { color: T.text }]}>{title}</Text>
+            <Text style={[styles.menuDescription, { color: T.subText }]} numberOfLines={2}>
+              {description}
+            </Text>
+          </View>
 
-      <View style={[styles.menuChevron, { backgroundColor: T.bg, borderColor: T.border }]}> 
-        <Ionicons name="chevron-forward" size={15} color={T.subText} />
-      </View>
-    </TouchableOpacity>
+          <Ionicons name="chevron-forward" size={16} color={T.text} />
+        </View>
+      )}
+    </Pressable>
   );
 }
 
@@ -120,6 +151,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const { showAlert, AlertRender } = useCustomAlert();
   const { colors: T } = useTheme();
+  const sink = makeSink(T);
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
   const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
   const hasCustomLocation = Boolean(city.trim() && province.trim());
@@ -335,7 +367,7 @@ export default function ProfileScreen({ navigation }: any) {
   };
 
   const renderMap = (large = false) => (
-    <View style={[styles.mapFallback, large && styles.largeMapFallback, { backgroundColor: T.card }]}> 
+    <View style={[styles.mapFallback, large && styles.largeMapFallback, { backgroundColor: T.card }]}>
       {mapImageUrl && !mapLoadFailed ? (
         <Image
           source={{ uri: mapImageUrl }}
@@ -357,8 +389,8 @@ export default function ProfileScreen({ navigation }: any) {
       {hasCustomLocation && (
         <>
           <View style={styles.pinShadow} />
-          <View style={styles.pinBubble}>
-            <Ionicons name="location" size={large ? 27 : 22} color="#FFFFFF" />
+          <View style={[styles.pinBubble, { backgroundColor: T.brand, borderColor: T.ink }]}>
+            <Ionicons name="location" size={large ? 27 : 22} color={T.card} />
           </View>
         </>
       )}
@@ -373,175 +405,191 @@ export default function ProfileScreen({ navigation }: any) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.profileCard, { backgroundColor: T.card, borderColor: T.border }]}> 
+        {/* HERO — Primary Purple focal card (spec: purple surface + 2px outline + 2px shadow) */}
+        <View
+          style={[
+            styles.profileCard,
+            { backgroundColor: T.brand, borderColor: T.ink },
+            getNeoShadow(T, 'sm'),
+          ]}
+        >
           <TouchableOpacity
-            style={styles.coverButton}
+            style={[styles.coverButton, { borderBottomColor: T.ink }]}
             activeOpacity={0.9}
             onPress={() => setIsLocationVisible(true)}
             accessibilityRole="button"
             accessibilityLabel={`View location: ${locationLabel}`}
           >
             {renderMap(false)}
-            <View style={styles.locationWatermark}>
-              <Ionicons name="location-outline" size={13} color="#FFFFFF" />
+            <View style={[styles.locationWatermark, { backgroundColor: T.card, borderColor: T.ink }]}>
+              <Ionicons name="location-outline" size={13} color={T.text} />
               <View style={styles.locationCopy}>
-                <Text style={styles.locationCity} numberOfLines={1}>{city || 'Philippines'}</Text>
-                <Text style={styles.locationProvince} numberOfLines={1}>{province || 'Tap to add city and province'}</Text>
+                <Text style={[styles.locationCity, { color: T.text }]} numberOfLines={1}>{city || 'Philippines'}</Text>
+                <Text style={[styles.locationProvince, { color: T.subText }]} numberOfLines={1}>{province || 'Tap to add city and province'}</Text>
               </View>
             </View>
-            <View style={styles.mapHint}>
-              <Ionicons name="expand-outline" size={13} color="#FFFFFF" />
+            <View style={[styles.mapHint, { backgroundColor: T.ink }]}>
+              <Ionicons name="expand-outline" size={13} color={T.bg} />
             </View>
           </TouchableOpacity>
 
           <View style={styles.profileBody}>
-            <TouchableOpacity style={[styles.avatarShell, { borderColor: T.card }]} onPress={pickImage} activeOpacity={0.82}>
+            <TouchableOpacity
+              style={[styles.avatarShell, { backgroundColor: T.card, borderColor: T.ink }]}
+              onPress={pickImage}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel="Change profile photo"
+            >
               {avatarUri ? (
                 <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
               ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: T.bg, borderColor: T.border }]}> 
-                  <Image source={require('../../../../assets/icons/profile.png')} style={styles.profileIcon} resizeMode="contain" />
+                <View style={styles.avatarPlaceholder}>
+                  <Image source={require('../../../../assets/icons/profile.png')} style={[styles.profileIcon, { tintColor: T.subText }]} resizeMode="contain" />
                 </View>
               )}
-              <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={11} color="#FFFFFF" />
+              <View style={[styles.cameraBadge, { backgroundColor: T.ink, borderColor: T.card }]}>
+                <Ionicons name="camera" size={11} color={T.bg} />
               </View>
             </TouchableOpacity>
 
             <View style={styles.identityArea}>
-              <Text style={[styles.profileName, { color: T.text }]} numberOfLines={1}>{name}</Text>
-              <Text style={[styles.profileEmail, { color: T.subText }]} numberOfLines={1}>{email}</Text>
-              <TouchableOpacity
-                style={[styles.editProfileButton, { backgroundColor: T.bg, borderColor: T.border }]}
+              <Text style={[styles.profileName, { color: T.bg }]} numberOfLines={1}>{name}</Text>
+              <Text style={[styles.profileEmail, { color: T.bg }]} numberOfLines={1}>{email}</Text>
+
+              {/* EDIT PROFILE — mini split-button (spec: main section + black arrow square) */}
+              <Pressable
+                style={styles.editProfilePress}
                 onPress={openEditModal}
-                activeOpacity={0.72}
+                accessibilityRole="button"
+                accessibilityLabel="Edit profile"
               >
-                <Ionicons name="pencil-outline" size={14} color={COLORS.primaryLight} />
-                <Text style={styles.editProfileText}>Edit profile</Text>
-              </TouchableOpacity>
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.editProfileButton,
+                      { borderColor: T.ink },
+                      pressed ? styles.dimmed : null,
+                    ]}
+                  >
+                    <View style={[styles.editProfileMain, { backgroundColor: T.card }]}>
+                      <Ionicons name="pencil-outline" size={13} color={T.text} />
+                      <Text style={[styles.editProfileText, { color: T.text }]}>Edit profile</Text>
+                    </View>
+                    <View style={[styles.editProfileArrow, { backgroundColor: T.ink }]}>
+                      <Ionicons name="arrow-forward" size={13} color={T.bg} />
+                    </View>
+                  </View>
+                )}
+              </Pressable>
             </View>
           </View>
         </View>
 
-        <View style={[styles.statsCard, { backgroundColor: T.card, borderColor: T.border }]}> 
-          <View style={styles.statsIconBox}>
-            <Image source={require('../../../../assets/icons/files.png')} style={styles.statsIcon} resizeMode="contain" />
+        {/* STATS — flat white card, 1.5px outline, itim na malaking numero (spec) */}
+        <NeoCard variant="flat" padding={false} style={styles.statsCard}>
+          <View style={styles.statsIconWrap}>
+            <Image source={require('../../../../assets/icons/files.png')} style={[styles.statsIcon, { tintColor: T.text }]} resizeMode="contain" />
           </View>
           <View style={styles.statsCopy}>
             <Text style={[styles.statsTitle, { color: T.text }]}>Documents analyzed</Text>
             <Text style={[styles.statsDescription, { color: T.subText }]}>Saved privately in your local scan history.</Text>
           </View>
-          <Text style={styles.statsCount}>{totalScanned}</Text>
-        </View>
+          <Text style={[styles.statsCount, { color: T.text }]}>{totalScanned}</Text>
+        </NeoCard>
 
-        <Text style={[styles.sectionLabel, { color: T.subText }]}>GENERAL</Text>
+        <NeoSectionHeader title="General" marker={false} style={styles.sectionGap} />
         <MenuItem
           title="Legal assistance guides"
           description="Find clear next steps for PAO, IBP, and private legal help."
           icon="briefcase-outline"
-          iconColor={COLORS.success}
-          iconBg="rgba(16, 185, 129, 0.12)"
           onPress={() => navigation.navigate('LegalAidScreen')}
         />
         <MenuItem
           title="About Lex-Simple"
           description="Read about the app, its purpose, features, and developers."
           icon="information-circle-outline"
-          iconColor={COLORS.primaryLight}
-          iconBg="rgba(167, 139, 250, 0.12)"
           onPress={() => navigation.navigate('AboutScreen')}
         />
-        <Text style={[styles.sectionLabel, styles.supportLabel, { color: T.subText }]}>SUPPORT</Text>
+
+        <NeoSectionHeader title="Support" marker={false} style={[styles.sectionGap, styles.supportGap]} />
         <MenuItem
           title="Send feedback"
           description="Report a bug or suggest an improvement to the Lex-Simple team."
           icon="chatbubble-ellipses-outline"
-          iconColor={COLORS.warning}
-          iconBg="rgba(245, 158, 11, 0.12)"
           onPress={openFeedbackModal}
         />
       </ScrollView>
 
       <Modal visible={isLocationVisible} transparent animationType="fade" onRequestClose={() => setIsLocationVisible(false)} statusBarTranslucent>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { backgroundColor: T.overlay }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsLocationVisible(false)} />
-          <View style={[styles.locationModal, { backgroundColor: T.card, borderColor: T.border }]}> 
+          <View style={[styles.locationModal, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderCopy}>
                 <Text style={[styles.modalTitle, { color: T.text }]}>Profile location</Text>
                 <Text style={[styles.modalSubtitle, { color: T.subText }]} numberOfLines={1}>{locationLabel}</Text>
               </View>
-              <TouchableOpacity style={[styles.closeButton, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => setIsLocationVisible(false)}>
-                <Ionicons name="close" size={17} color={T.text} />
-              </TouchableOpacity>
+              <NeoIconButton icon="close" size={34} onPress={() => setIsLocationVisible(false)} accessibilityLabel="Close" />
             </View>
 
-            <View style={[styles.locationMapFrame, { borderColor: T.border }]}>{renderMap(true)}</View>
-            <Text style={[styles.locationPrivacy, { color: T.subText }]}> 
+            <View style={[styles.locationMapFrame, { borderColor: T.ink }]}>{renderMap(true)}</View>
+            <Text style={[styles.locationPrivacy, { color: T.subText }]}>
               {hasCustomLocation
                 ? 'Only your city and province are shown—not your exact address.'
                 : 'Philippines is shown by default. Add a city and province from Edit profile when you are ready.'}
             </Text>
 
-            <TouchableOpacity style={styles.primaryFullButton} onPress={openGoogleMaps} activeOpacity={0.78}>
-              <Ionicons name="map-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.primaryFullButtonText}>Open in Google Maps</Text>
-            </TouchableOpacity>
+            <NeoButton label="Open in Google Maps" variant="accent" size="md" icon="map-outline" onPress={openGoogleMaps} />
           </View>
         </View>
       </Modal>
 
       <Modal visible={isEditing} transparent animationType="fade" onRequestClose={() => setIsEditing(false)} statusBarTranslucent>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { backgroundColor: T.overlay }]}>
           <KeyboardAvoidingView style={styles.keyboardArea} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled" bounces={false}>
-                <View style={[styles.formModal, { backgroundColor: T.card, borderColor: T.border }]}> 
+                <View style={[styles.formModal, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
                   <View style={styles.modalHeader}>
                     <View style={styles.modalHeaderCopy}>
                       <Text style={[styles.modalTitle, { color: T.text }]}>Edit profile</Text>
                       <Text style={[styles.modalSubtitle, { color: T.subText }]}>Update your public profile details.</Text>
                     </View>
-                    <TouchableOpacity style={[styles.closeButton, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => setIsEditing(false)}>
-                      <Ionicons name="close" size={17} color={T.text} />
-                    </TouchableOpacity>
+                    <NeoIconButton icon="close" size={34} onPress={() => setIsEditing(false)} accessibilityLabel="Close" />
                   </View>
 
-                  <TouchableOpacity style={styles.editAvatarButton} onPress={pickImage} activeOpacity={0.8}>
+                  <TouchableOpacity style={styles.editAvatarButton} onPress={pickImage} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Change photo">
                     {avatarUri ? (
-                      <Image source={{ uri: avatarUri }} style={styles.editAvatarImage} />
+                      <Image source={{ uri: avatarUri }} style={[styles.editAvatarImage, { borderColor: T.ink }]} />
                     ) : (
-                      <View style={[styles.editAvatarPlaceholder, { backgroundColor: T.bg, borderColor: T.border }]}> 
-                        <Ionicons name="person-outline" size={26} color={COLORS.primaryLight} />
+                      <View style={[styles.editAvatarPlaceholder, { backgroundColor: T.bg, borderColor: T.ink }]}>
+                        <Ionicons name="person-outline" size={26} color={T.subText} />
                       </View>
                     )}
-                    <Text style={styles.changePhotoText}>Change photo</Text>
+                    <Text style={[styles.changePhotoText, { color: T.brand }]}>Change photo</Text>
                   </TouchableOpacity>
 
                   <Text style={[styles.inputLabel, { color: T.subText }]}>FULL NAME</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
+                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
 
                   <Text style={[styles.inputLabel, { color: T.subText }]}>EMAIL ADDRESS</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
+                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
 
                   <View style={styles.twoColumnRow}>
                     <View style={styles.halfField}>
                       <Text style={[styles.inputLabel, { color: T.subText }]}>CITY</Text>
-                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editCity} onChangeText={setEditCity} autoCorrect={false} returnKeyType="next" />
+                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editCity} onChangeText={setEditCity} autoCorrect={false} returnKeyType="next" />
                     </View>
                     <View style={styles.halfField}>
                       <Text style={[styles.inputLabel, { color: T.subText }]}>PROVINCE</Text>
-                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.border, color: T.text }]} value={editProvince} onChangeText={setEditProvince} autoCorrect={false} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
+                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editProvince} onChangeText={setEditProvince} autoCorrect={false} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
                     </View>
                   </View>
 
                   <View style={styles.actionRow}>
-                    <TouchableOpacity style={[styles.secondaryButton, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => setIsEditing(false)}>
-                      <Text style={[styles.secondaryButtonText, { color: T.text }]}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.primaryButton} onPress={saveProfileData}>
-                      <Text style={styles.primaryButtonText}>Save changes</Text>
-                    </TouchableOpacity>
+                    <NeoButton label="Cancel" variant="secondary" size="md" style={styles.flexOne} onPress={() => setIsEditing(false)} />
+                    <NeoButton label="Save changes" variant="accent" size="md" style={styles.flexOne} onPress={saveProfileData} />
                   </View>
                 </View>
               </ScrollView>
@@ -552,36 +600,46 @@ export default function ProfileScreen({ navigation }: any) {
 
       <Modal visible={isFeedbackVisible} transparent animationType="fade" onRequestClose={() => { if (!isSubmittingFeedback) { setIsFeedbackVisible(false); setShareContact(false); } }} statusBarTranslucent>
         <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setIsDropdownOpen(false); }}>
-          <View style={styles.feedbackOverlay}>
+          <View style={[styles.feedbackOverlay, { backgroundColor: T.overlay }]}>
             <KeyboardAvoidingView behavior="padding" style={styles.feedbackKeyboardArea}>
               <ScrollView contentContainerStyle={styles.feedbackScrollContent} keyboardShouldPersistTaps="handled" bounces={false}>
                 <TouchableWithoutFeedback>
-                  <View style={[styles.feedbackCard, { backgroundColor: T.card, borderColor: T.border }]}> 
+                  <View style={[styles.feedbackCard, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
                     <View style={styles.feedbackHeader}>
                       <Text style={[styles.feedbackTitle, { color: T.text }]}>Send Feedback</Text>
-                      <TouchableOpacity disabled={isSubmittingFeedback} onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }} style={[styles.feedbackCloseButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]}> 
-                        <Ionicons name="close" size={16} color={T.text} />
-                      </TouchableOpacity>
+                      <NeoIconButton
+                        icon="close"
+                        size={34}
+                        disabled={isSubmittingFeedback}
+                        onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}
+                        accessibilityLabel="Close"
+                      />
                     </View>
 
                     <Text style={[styles.feedbackDescription, { color: T.subText }]}>Let us know what you think! Your feedback helps us improve the Lex-Simple experience.</Text>
 
                     <Text style={[styles.feedbackLabel, { color: T.subText }]}>Category</Text>
                     <View style={styles.feedbackCategoryRow}>
-                      {['Suggestion', 'Bug Report', 'Other'].map((category) => (
-                        <TouchableOpacity
-                          key={category}
-                          style={[styles.feedbackCategoryButton, { borderColor: feedbackCategory === category ? COLORS.primaryLight : T.border, backgroundColor: feedbackCategory === category ? 'rgba(167, 139, 250, 0.1)' : T.bg }]}
-                          onPress={() => setFeedbackCategory(category)}
-                        >
-                          <Text style={{ color: feedbackCategory === category ? COLORS.primaryLight : T.text, fontSize: 12, fontWeight: 'bold' }}>{category}</Text>
-                        </TouchableOpacity>
-                      ))}
+                      {['Suggestion', 'Bug Report', 'Other'].map((category) => {
+                        const selected = feedbackCategory === category;
+                        return (
+                          <TouchableOpacity
+                            key={category}
+                            style={[styles.feedbackCategoryButton, {
+                              borderColor: selected ? T.brand : T.ink,
+                              backgroundColor: selected ? T.brandSoft : T.bg,
+                            }]}
+                            onPress={() => setFeedbackCategory(category)}
+                          >
+                            <Text style={{ color: selected ? T.brandDeep : T.text, fontSize: 12, fontWeight: selected ? '800' : '700', textTransform: 'uppercase' }}>{category}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
 
                     <Text style={[styles.feedbackLabel, { color: T.subText }]}>Related Feature</Text>
                     <TouchableOpacity
-                      style={[styles.feedbackInput, styles.feedbackDropdownTrigger, { backgroundColor: T.bg, borderColor: isDropdownOpen ? COLORS.primaryLight : T.border }]}
+                      style={[styles.feedbackInput, styles.feedbackDropdownTrigger, { backgroundColor: T.bg, borderColor: isDropdownOpen ? T.brand : T.ink }]}
                       activeOpacity={0.8}
                       onPress={() => setIsDropdownOpen(!isDropdownOpen)}
                     >
@@ -590,25 +648,28 @@ export default function ProfileScreen({ navigation }: any) {
                     </TouchableOpacity>
 
                     {isDropdownOpen && (
-                      <View style={[styles.feedbackDropdownList, { backgroundColor: T.bg, borderColor: T.border }]}> 
+                      <View style={[styles.feedbackDropdownList, { backgroundColor: T.bg, borderColor: T.ink }]}>
                         <ScrollView nestedScrollEnabled style={{ maxHeight: 120 }} keyboardShouldPersistTaps="handled">
-                          {APP_FEATURES.map((feature) => (
-                            <TouchableOpacity
-                              key={feature}
-                              style={[styles.feedbackDropdownOption, { borderBottomColor: T.border }]}
-                              onPress={() => { setFeedbackFeature(feature); setIsDropdownOpen(false); }}
-                            >
-                              <Text style={{ flex: 1, color: feedbackFeature === feature ? COLORS.primaryLight : T.text, fontSize: 14, fontWeight: feedbackFeature === feature ? 'bold' : 'normal' }}>{feature}</Text>
-                              {feedbackFeature === feature && <Ionicons name="checkmark" size={14} color={COLORS.primaryLight} />}
-                            </TouchableOpacity>
-                          ))}
+                          {APP_FEATURES.map((feature) => {
+                            const selected = feedbackFeature === feature;
+                            return (
+                              <TouchableOpacity
+                                key={feature}
+                                style={[styles.feedbackDropdownOption, { borderBottomColor: T.border }]}
+                                onPress={() => { setFeedbackFeature(feature); setIsDropdownOpen(false); }}
+                              >
+                                <Text style={{ flex: 1, color: selected ? T.brand : T.text, fontSize: 14, fontWeight: selected ? '800' : '400' }}>{feature}</Text>
+                                {selected && <Ionicons name="checkmark" size={14} color={T.brand} />}
+                              </TouchableOpacity>
+                            );
+                          })}
                         </ScrollView>
                       </View>
                     )}
 
                     <Text style={[styles.feedbackLabel, { color: T.subText }]}>Your Message</Text>
                     <TextInput
-                      style={[styles.feedbackInput, styles.feedbackMessageInput, { backgroundColor: T.bg, color: T.text, borderColor: T.border }]}
+                      style={[styles.feedbackInput, styles.feedbackMessageInput, { backgroundColor: T.bg, color: T.text, borderColor: T.ink }]}
                       value={feedbackMessage}
                       onChangeText={setFeedbackMessage}
                       placeholder="Tell us what's on your mind..."
@@ -624,19 +685,44 @@ export default function ProfileScreen({ navigation }: any) {
                         value={shareContact}
                         onValueChange={setShareContact}
                         disabled={isSubmittingFeedback}
-                        trackColor={{ false: T.border, true: COLORS.primaryLight }}
-                        thumbColor="#FFFFFF"
+                        trackColor={{ false: T.border, true: T.brand }}
+                        thumbColor={T.card}
                       />
                       <Text style={[styles.shareContactLabel, { color: T.subText }]}>Isama ang pangalan at email ko (opsyonal) para masagot ninyo ako.</Text>
                     </View>
 
                     <View style={styles.feedbackActions}>
-                      <TouchableOpacity disabled={isSubmittingFeedback} style={[styles.feedbackCancelButton, isSubmittingFeedback && styles.feedbackDisabled, { backgroundColor: T.bg, borderColor: T.border }]} onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}>
-                        <Text style={{ color: T.text, fontWeight: 'bold' }}>Cancel</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.feedbackSubmitButton, isSubmittingFeedback && styles.feedbackDisabled]} onPress={submitFeedback} disabled={isSubmittingFeedback}>
-                        {isSubmittingFeedback ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>Submit</Text>}
-                      </TouchableOpacity>
+                      <NeoButton
+                        label="Cancel"
+                        variant="secondary"
+                        size="md"
+                        disabled={isSubmittingFeedback}
+                        style={styles.flexOne}
+                        onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}
+                      />
+                      <Pressable
+                        onPress={submitFeedback}
+                        disabled={isSubmittingFeedback}
+                        style={styles.flexOne}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: isSubmittingFeedback }}
+                      >
+                        {({ pressed }) => (
+                          <View
+                            style={[
+                              styles.submitButton,
+                              { backgroundColor: T.brandVivid, borderColor: T.ink },
+                              isSubmittingFeedback ? styles.feedbackDisabled : sink(pressed, 'sm'),
+                            ]}
+                          >
+                            {isSubmittingFeedback ? (
+                              <ActivityIndicator size="small" color={T.brandText} />
+                            ) : (
+                              <Text style={[styles.submitButtonText, { color: T.brandText }]}>Submit</Text>
+                            )}
+                          </View>
+                        )}
+                      </Pressable>
                     </View>
                   </View>
                 </TouchableWithoutFeedback>
@@ -653,9 +739,11 @@ export default function ProfileScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 34 },
-  profileCard: { borderWidth: 1, borderRadius: 8, overflow: 'hidden', marginBottom: 12 },
-  coverButton: { height: 118, overflow: 'hidden', position: 'relative' },
+  scrollContent: { paddingHorizontal: SPACING.lg, paddingTop: 14, paddingBottom: 34 },
+
+  // --- HERO (Primary Purple, 2px ink border, 2px hard shadow — focal) ---
+  profileCard: { borderWidth: BORDER.thick, borderRadius: RADIUS.lg, overflow: 'hidden', marginBottom: 14 },
+  coverButton: { height: 118, overflow: 'hidden', position: 'relative', borderBottomWidth: BORDER.thick },
   mapFallback: { flex: 1, overflow: 'hidden', position: 'relative' },
   largeMapFallback: { minHeight: 230 },
   mapTint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(7, 10, 18, 0.24)' },
@@ -667,85 +755,95 @@ const styles = StyleSheet.create({
   blockOne: { width: 78, height: 44, top: 9, left: 26 },
   blockTwo: { width: 92, height: 54, right: 23, bottom: 9 },
   pinShadow: { position: 'absolute', width: 22, height: 8, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.32)', alignSelf: 'center', top: '58%' },
-  pinBubble: { position: 'absolute', alignSelf: 'center', top: '31%', width: 38, height: 38, borderRadius: 19, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.88)' },
-  locationWatermark: { position: 'absolute', left: 12, bottom: 10, maxWidth: '72%', flexDirection: 'row', alignItems: 'center', paddingVertical: 7, paddingHorizontal: 9, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.68)' },
+  pinBubble: { position: 'absolute', alignSelf: 'center', top: '31%', width: 38, height: 38, borderRadius: 19, borderWidth: BORDER.thick, alignItems: 'center', justifyContent: 'center' },
+  locationWatermark: { position: 'absolute', left: 12, bottom: 10, maxWidth: '72%', flexDirection: 'row', alignItems: 'center', paddingVertical: 7, paddingHorizontal: 9, borderRadius: RADIUS.sm, borderWidth: BORDER.thin },
   locationCopy: { marginLeft: 6, flexShrink: 1 },
-  locationCity: { color: '#FFFFFF', fontSize: 12, lineHeight: 14, fontWeight: '800' },
-  locationProvince: { color: 'rgba(255,255,255,0.72)', fontSize: 9, lineHeight: 11, fontWeight: '600' },
-  mapHint: { position: 'absolute', right: 10, top: 10, width: 28, height: 28, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.58)', alignItems: 'center', justifyContent: 'center' },
-  profileBody: { minHeight: 108, flexDirection: 'row', paddingHorizontal: 14, paddingBottom: 14 },
-  avatarShell: { width: 82, height: 82, borderRadius: 41, borderWidth: 4, marginTop: -31, backgroundColor: '#111827', position: 'relative' },
-  avatarImage: { width: '100%', height: '100%', borderRadius: 37 },
-  avatarPlaceholder: { width: '100%', height: '100%', borderRadius: 37, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profileIcon: { width: 34, height: 34, tintColor: COLORS.primaryLight },
-  cameraBadge: { position: 'absolute', right: -1, bottom: -1, width: 25, height: 25, borderRadius: 7, backgroundColor: COLORS.primary, borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  identityArea: { flex: 1, minWidth: 0, marginLeft: 13, paddingTop: 10 },
-  profileName: { fontSize: 18, lineHeight: 22, fontWeight: '900', marginBottom: 2 },
-  profileEmail: { fontSize: 11, lineHeight: 15, marginBottom: 9 },
-  editProfileButton: { alignSelf: 'flex-start', minHeight: 32, borderRadius: 6, borderWidth: 1, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center' },
-  editProfileText: { color: COLORS.primaryLight, fontSize: 11, fontWeight: '800', marginLeft: 6 },
-  statsCard: { minHeight: 76, borderWidth: 1, borderRadius: 8, flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 22 },
-  statsIconBox: { width: 38, height: 38, borderRadius: 7, backgroundColor: 'rgba(52,120,246,0.14)', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  statsIcon: { width: 19, height: 19, tintColor: COLORS.primaryLight },
+  locationCity: { fontSize: 11, lineHeight: 14, fontWeight: '800' },
+  locationProvince: { fontSize: 9, lineHeight: 11, fontWeight: '600' },
+  mapHint: { position: 'absolute', right: 10, top: 10, width: 28, height: 28, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' },
+  profileBody: { minHeight: 104, flexDirection: 'row', paddingHorizontal: 14, paddingBottom: 14 },
+  avatarShell: { width: 84, height: 84, borderRadius: 42, borderWidth: BORDER.thick, marginTop: -34, position: 'relative' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 40 },
+  avatarPlaceholder: { width: '100%', height: '100%', borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
+  profileIcon: { width: 36, height: 36 },
+  cameraBadge: { position: 'absolute', right: -1, bottom: -1, width: 26, height: 26, borderRadius: 13, borderWidth: BORDER.thick, alignItems: 'center', justifyContent: 'center' },
+  identityArea: { flex: 1, minWidth: 0, marginLeft: 13, paddingTop: 8 },
+  profileName: { fontSize: 20, lineHeight: 25, fontWeight: '900', marginBottom: 2 },
+  profileEmail: { fontSize: 12, lineHeight: 16, marginBottom: 10, opacity: 0.85 },
+
+  // EDIT PROFILE — mini split-button (main + black arrow square)
+  editProfilePress: { alignSelf: 'flex-start' },
+  editProfileButton: { flexDirection: 'row', alignItems: 'stretch', borderWidth: BORDER.thick, borderRadius: RADIUS.md, overflow: 'hidden' },
+  editProfileMain: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9 },
+  editProfileText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  editProfileArrow: { width: 32, alignItems: 'center', justifyContent: 'center' },
+
+  // --- STATS (flat, 1.5px outline, walang filled icon bg — spec) ---
+  statsCard: { flexDirection: 'row', alignItems: 'center', padding: 14, marginBottom: 16 },
+  statsIconWrap: { width: 30, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  statsIcon: { width: 22, height: 22 },
   statsCopy: { flex: 1, minWidth: 0, marginRight: 12 },
-  statsTitle: { fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 2 },
-  statsDescription: { fontSize: 10, lineHeight: 15, maxWidth: 220 },
-  statsCount: { minWidth: 38, textAlign: 'center', color: COLORS.primaryLight, fontSize: 27, fontWeight: '900' },
-  sectionLabel: { fontSize: 10, lineHeight: 14, fontWeight: '900', letterSpacing: 1, marginLeft: 2, marginBottom: 9 },
-  supportLabel: { marginTop: 13 },
-  menuItem: { minHeight: 78, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
-  menuIcon: { width: 38, height: 38, borderRadius: 7, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+  statsTitle: { fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 2 },
+  statsDescription: { fontSize: 11, lineHeight: 15 },
+  statsCount: { minWidth: 40, textAlign: 'center', fontSize: 28, fontWeight: '900' },
+
+  // --- SECTIONS ---
+  sectionGap: { marginBottom: 10 },
+  supportGap: { marginTop: 20 },
+
+  // --- MENU ITEMS (flat white cards + vivid purple circular badges) ---
+  menuItemWrapper: { marginBottom: 10 },
+  menuItem: { minHeight: 74, borderWidth: BORDER.thin, borderRadius: RADIUS.lg, paddingHorizontal: 12, paddingVertical: 12, flexDirection: 'row', alignItems: 'center' },
+  menuIcon: { width: 42, height: 42, borderRadius: 21, borderWidth: BORDER.thin, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   menuCopy: { flex: 1, minWidth: 0, paddingRight: 10 },
-  menuTitle: { fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 3 },
-  menuDescription: { fontSize: 11, lineHeight: 16, maxWidth: 245 },
-  menuChevron: { width: 28, height: 28, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.84)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  menuTitle: { fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 3 },
+  menuDescription: { fontSize: 11, lineHeight: 16 },
+
+  dimmed: { opacity: 0.7 },
+
+  // --- MODALS (2px outline + 2px hard shadow — focal surfaces) ---
+  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   keyboardArea: { flex: 1, width: '100%' },
   modalScrollContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 24 },
-  locationModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: 1, borderRadius: 8, padding: 16 },
-  formModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: 1, borderRadius: 8, padding: 18 },
+  locationModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: BORDER.thick, borderRadius: RADIUS.lg, padding: 16 },
+  formModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: BORDER.thick, borderRadius: RADIUS.lg, padding: 18 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   modalHeaderCopy: { flex: 1, minWidth: 0, marginRight: 12 },
-  modalTitle: { fontSize: 18, lineHeight: 22, fontWeight: '900', marginBottom: 3 },
+  modalTitle: { fontSize: 17, lineHeight: 22, fontWeight: '900', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 3 },
   modalSubtitle: { fontSize: 11, lineHeight: 16 },
-  closeButton: { width: 34, height: 34, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  locationMapFrame: { height: 230, overflow: 'hidden', borderRadius: 7, borderWidth: 1, marginBottom: 10 },
+  locationMapFrame: { height: 230, overflow: 'hidden', borderRadius: RADIUS.md, borderWidth: BORDER.thin, marginBottom: 10 },
   locationPrivacy: { fontSize: 10, lineHeight: 15, marginBottom: 15 },
-  primaryFullButton: { minHeight: 46, borderRadius: 6, backgroundColor: COLORS.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  primaryFullButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', marginLeft: 8 },
   editAvatarButton: { alignSelf: 'center', alignItems: 'center', marginBottom: 18 },
-  editAvatarImage: { width: 70, height: 70, borderRadius: 35, marginBottom: 7 },
-  editAvatarPlaceholder: { width: 70, height: 70, borderRadius: 35, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
-  changePhotoText: { color: COLORS.primaryLight, fontSize: 11, fontWeight: '800' },
-  inputLabel: { fontSize: 9, lineHeight: 13, fontWeight: '900', letterSpacing: 0.7, marginLeft: 1, marginBottom: 6 },
-  input: { minHeight: 44, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, marginBottom: 14 },
+  editAvatarImage: { width: 70, height: 70, borderRadius: 35, borderWidth: BORDER.thin, marginBottom: 7 },
+  editAvatarPlaceholder: { width: 70, height: 70, borderRadius: 35, borderWidth: BORDER.thin, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
+  changePhotoText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  inputLabel: { fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.7, marginLeft: 1, marginBottom: 6 },
+  input: { minHeight: 46, borderWidth: BORDER.thin, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, marginBottom: 14 },
   twoColumnRow: { flexDirection: 'row', marginHorizontal: -4 },
   halfField: { flex: 1, marginHorizontal: 4 },
-  actionRow: { flexDirection: 'row', marginHorizontal: -4, marginTop: 4 },
-  secondaryButton: { flex: 1, minHeight: 44, marginHorizontal: 4, borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  secondaryButtonText: { fontSize: 12, fontWeight: '800' },
-  primaryButton: { flex: 1, minHeight: 44, marginHorizontal: 4, borderRadius: 6, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  feedbackOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  flexOne: { flex: 1 },
+
+  // --- FEEDBACK MODAL ---
+  feedbackOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   feedbackKeyboardArea: { flex: 1, justifyContent: 'center', width: '100%' },
   feedbackScrollContent: { flexGrow: 1, justifyContent: 'center', width: '100%', paddingVertical: 16 },
-  feedbackCard: { width: '100%', maxWidth: 400, alignSelf: 'center', borderRadius: 8, padding: 20, borderWidth: 1 },
+  feedbackCard: { width: '100%', maxWidth: 400, alignSelf: 'center', borderRadius: RADIUS.lg, padding: 20, borderWidth: BORDER.thick },
   feedbackHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  feedbackTitle: { fontSize: 18, fontWeight: 'bold' },
-  feedbackCloseButton: { width: 30, height: 30, borderRadius: 6, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  feedbackTitle: { fontSize: 17, lineHeight: 22, fontWeight: '900', letterSpacing: 0.3, textTransform: 'uppercase' },
   feedbackDescription: { fontSize: 12, lineHeight: 18, marginBottom: 16 },
-  feedbackLabel: { fontSize: 11, fontWeight: 'bold', marginBottom: 6, marginLeft: 2 },
-  feedbackInput: { minHeight: 44, borderRadius: 6, padding: 12, fontSize: 14, borderWidth: 1, marginBottom: 14 },
+  feedbackLabel: { fontSize: 11, fontWeight: '800', marginBottom: 6, marginLeft: 2, letterSpacing: 0.5, textTransform: 'uppercase' },
+  feedbackInput: { minHeight: 44, borderRadius: RADIUS.md, padding: 12, fontSize: 14, borderWidth: BORDER.thin, marginBottom: 14 },
   feedbackCategoryRow: { flexDirection: 'row', justifyContent: 'space-between', marginHorizontal: -3, marginBottom: 16 },
-  feedbackCategoryButton: { flex: 1, minHeight: 42, paddingHorizontal: 5, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 3 },
+  feedbackCategoryButton: { flex: 1, minHeight: 42, paddingHorizontal: 5, borderRadius: RADIUS.md, borderWidth: BORDER.thick, alignItems: 'center', justifyContent: 'center', marginHorizontal: 3 },
   feedbackDropdownTrigger: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  feedbackDropdownList: { borderRadius: 6, marginTop: -7, marginBottom: 14, borderWidth: 1, overflow: 'hidden' },
+  feedbackDropdownList: { borderRadius: RADIUS.md, marginTop: -7, marginBottom: 14, borderWidth: BORDER.thin, overflow: 'hidden' },
   feedbackDropdownOption: { minHeight: 43, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1 },
   feedbackMessageInput: { height: 100, textAlignVertical: 'top', marginBottom: 20 },
   shareContactRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   shareContactLabel: { flex: 1, fontSize: 12, lineHeight: 17, marginLeft: 10 },
-  feedbackActions: { flexDirection: 'row', marginHorizontal: -5 },
-  feedbackCancelButton: { flex: 1, minHeight: 44, marginHorizontal: 5, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  feedbackSubmitButton: { flex: 1, minHeight: 44, marginHorizontal: 5, borderRadius: 6, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+  feedbackActions: { flexDirection: 'row', gap: 10 },
+  submitButton: { flex: 1, minHeight: 48, borderRadius: RADIUS.md, borderWidth: BORDER.thick, alignItems: 'center', justifyContent: 'center' },
+  submitButtonText: { fontSize: 14, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
   feedbackDisabled: { opacity: 0.55 },
 });

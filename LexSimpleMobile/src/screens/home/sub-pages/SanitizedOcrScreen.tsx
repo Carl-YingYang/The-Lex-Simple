@@ -13,16 +13,30 @@ import { Ionicons } from '@expo/vector-icons';
 
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS } from '../../../theme/tokens';
 
-// SANITIZED OCR SCREEN VERSION: 6.2.7
-// UI-only build: no additional native module or Android rebuild required.
+// SANITIZED OCR SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang binago; copy/cleanup/logic 1:1 pa rin. UI-only build:
+// walang karagdagang native module o Android rebuild na kailangan.)
+// Spec: purple system (zero na ang asul/berde/dilaw/gold/orange), 1.5px
+// standard borders, 2–6px radius (squared), predominantly FLAT — walang
+// hard shadow sa buong screen (hindi ito CTA/modal; outline ang nagdadala
+// ng hierarchy at accent lang ang purple).
+// Pagbabago sa UI (v7.0.0):
+//   - Binura ang PRIMARY/PRIMARY_SOFT/SUCCESS/WARNING constants — tokens
+//     lahat (T.brand / T.brandSoft / T.brandDeep / T.brandLight +
+//     BORDER/RADIUS).
+//   - Summary card, stats row, copy button, privacy note, document paper,
+//     empty state: 1.5px ink outlines + squared 3–6px radius.
+//   - Copy button: idle = ink outline + purple accent; kapag nakopya =
+//     brandSoft fill + brand border + brandDeep na teksto (dating berde).
+//   - Privacy note: lavender na may brand border (dating amber/dilaw na
+//     BAWAL na sa purple spec); [REDACTED] = brandDeep.
+//   - "SA PHONE" badge: squared chip na (dating pill), neutral na gray.
+//   - Stat labels: uppercase + 0.8 letterSpacing (meta label spec).
 LogBox.ignoreLogs([
     'Clipboard has been extracted from react-native core',
 ]);
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const SUCCESS = '#10B981';
-const WARNING = '#F59E0B';
 
 type RouteParams = {
     sanitizedText?: unknown;
@@ -152,17 +166,22 @@ export default function SanitizedOcrScreen({ route }: any) {
                         styles.summaryCard,
                         {
                             backgroundColor: T.card,
-                            borderColor: T.border,
+                            borderColor: T.ink,
                         },
                     ]}
                 >
                     <View style={styles.summaryTopRow}>
                         <View style={styles.summaryIdentity}>
-                            <View style={styles.shieldBox}>
+                            <View
+                                style={[
+                                    styles.shieldBox,
+                                    { backgroundColor: T.brandSoft },
+                                ]}
+                            >
                                 <Ionicons
                                     name="shield-checkmark-outline"
                                     size={23}
-                                    color={SUCCESS}
+                                    color={T.brand}
                                 />
                             </View>
                             <View style={styles.summaryCopy}>
@@ -192,11 +211,11 @@ export default function SanitizedOcrScreen({ route }: any) {
                                 styles.copyButton,
                                 {
                                     backgroundColor: copied
-                                        ? 'rgba(16,185,129,0.12)'
+                                        ? T.brandSoft
                                         : T.bg,
                                     borderColor: copied
-                                        ? SUCCESS
-                                        : T.border,
+                                        ? T.brand
+                                        : T.ink,
                                     opacity: hasText ? 1 : 0.45,
                                 },
                             ]}
@@ -217,15 +236,15 @@ export default function SanitizedOcrScreen({ route }: any) {
                                         : 'copy-outline'
                                 }
                                 size={17}
-                                color={copied ? SUCCESS : PRIMARY_SOFT}
+                                color={copied ? T.brandDeep : T.brand}
                             />
                             <Text
                                 style={[
                                     styles.copyButtonText,
                                     {
                                         color: copied
-                                            ? SUCCESS
-                                            : PRIMARY_SOFT,
+                                            ? T.brandDeep
+                                            : T.brand,
                                     },
                                 ]}
                             >
@@ -240,7 +259,7 @@ export default function SanitizedOcrScreen({ route }: any) {
                                 styles.statsRow,
                                 {
                                     backgroundColor: T.bg,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
@@ -320,17 +339,15 @@ export default function SanitizedOcrScreen({ route }: any) {
                     style={[
                         styles.privacyNote,
                         {
-                            backgroundColor: isDarkMode
-                                ? 'rgba(245,158,11,0.09)'
-                                : 'rgba(245,158,11,0.07)',
-                            borderColor: 'rgba(245,158,11,0.32)',
+                            backgroundColor: T.brandSoft,
+                            borderColor: T.brand,
                         },
                     ]}
                 >
                     <Ionicons
                         name="lock-closed-outline"
                         size={19}
-                        color={WARNING}
+                        color={T.brand}
                     />
                     <Text
                         style={[
@@ -340,7 +357,14 @@ export default function SanitizedOcrScreen({ route }: any) {
                     >
                         Ang mga natukoy na pangalan, contact details, ID,
                         at address ay pinapalitan ng{' '}
-                        <Text style={styles.redactedText}>[REDACTED]</Text>.
+                        <Text
+                            style={[
+                                styles.redactedText,
+                                { color: T.brandDeep },
+                            ]}
+                        >
+                            [REDACTED]
+                        </Text>.
                         Suriin pa rin ang text bago ito ibahagi.
                     </Text>
                 </View>
@@ -351,7 +375,7 @@ export default function SanitizedOcrScreen({ route }: any) {
                             <Ionicons
                                 name="document-text-outline"
                                 size={18}
-                                color={PRIMARY_SOFT}
+                                color={T.brand}
                             />
                             <Text
                                 style={[
@@ -368,16 +392,21 @@ export default function SanitizedOcrScreen({ route }: any) {
                                     styles.offlineBadge,
                                     {
                                         backgroundColor: T.card,
-                                        borderColor: T.border,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                             >
                                 <Ionicons
                                     name="phone-portrait-outline"
                                     size={12}
-                                    color={WARNING}
+                                    color={T.subText}
                                 />
-                                <Text style={styles.offlineBadgeText}>
+                                <Text
+                                    style={[
+                                        styles.offlineBadgeText,
+                                        { color: T.subText },
+                                    ]}
+                                >
                                     SA PHONE
                                 </Text>
                             </View>
@@ -390,7 +419,7 @@ export default function SanitizedOcrScreen({ route }: any) {
                                 styles.documentPaper,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
@@ -400,7 +429,7 @@ export default function SanitizedOcrScreen({ route }: any) {
                                     { color: T.text },
                                 ]}
                                 selectable
-                                selectionColor={PRIMARY_SOFT}
+                                selectionColor={T.brandLight}
                             >
                                 {sanitizedText}
                             </Text>
@@ -411,7 +440,7 @@ export default function SanitizedOcrScreen({ route }: any) {
                                 styles.emptyState,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
@@ -459,8 +488,8 @@ const styles = StyleSheet.create({
         paddingBottom: 34,
     },
     summaryCard: {
-        borderWidth: 1,
-        borderRadius: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         padding: 14,
     },
     summaryTopRow: {
@@ -478,8 +507,7 @@ const styles = StyleSheet.create({
     shieldBox: {
         width: 42,
         height: 42,
-        borderRadius: 9,
-        backgroundColor: 'rgba(16,185,129,0.12)',
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -500,8 +528,8 @@ const styles = StyleSheet.create({
     },
     copyButton: {
         minHeight: 40,
-        borderWidth: 1,
-        borderRadius: 8,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 10,
         flexDirection: 'row',
         alignItems: 'center',
@@ -515,8 +543,8 @@ const styles = StyleSheet.create({
     statsRow: {
         minHeight: 62,
         marginTop: 14,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderRadius: 8,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingVertical: 9,
         flexDirection: 'row',
         alignItems: 'center',
@@ -536,7 +564,9 @@ const styles = StyleSheet.create({
         marginTop: 2,
         fontSize: 9,
         lineHeight: 12,
-        fontWeight: '700',
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
         textAlign: 'center',
     },
     statDivider: {
@@ -545,8 +575,8 @@ const styles = StyleSheet.create({
     },
     privacyNote: {
         marginTop: 12,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 13,
         paddingVertical: 12,
         flexDirection: 'row',
@@ -559,7 +589,6 @@ const styles = StyleSheet.create({
         lineHeight: 17,
     },
     redactedText: {
-        color: WARNING,
         fontWeight: '900',
     },
     documentSection: {
@@ -587,24 +616,23 @@ const styles = StyleSheet.create({
     },
     offlineBadge: {
         minHeight: 26,
-        borderWidth: 1,
-        borderRadius: 13,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
         paddingHorizontal: 8,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
     },
     offlineBadgeText: {
-        color: WARNING,
         fontSize: 8,
         lineHeight: 11,
         fontWeight: '900',
-        letterSpacing: 0.3,
+        letterSpacing: 0.8,
     },
     documentPaper: {
         minHeight: 210,
-        borderWidth: 1,
-        borderRadius: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 16,
         paddingVertical: 16,
     },
@@ -615,8 +643,8 @@ const styles = StyleSheet.create({
     },
     emptyState: {
         minHeight: 240,
-        borderWidth: 1,
-        borderRadius: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 24,
         alignItems: 'center',
         justifyContent: 'center',
@@ -624,7 +652,7 @@ const styles = StyleSheet.create({
     emptyIconBox: {
         width: 54,
         height: 54,
-        borderRadius: 11,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
     },

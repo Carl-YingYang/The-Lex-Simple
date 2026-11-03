@@ -13,8 +13,21 @@ import { markScanNeedsRetry } from '../services/scanHistoryStorage';
 
 import { navigate } from '../navigation/RootNavigation';
 
-// BACKGROUND PROCESS CONTEXT VERSION: 6.2.6
+// BACKGROUND PROCESS CONTEXT VERSION: 6.2.7
 // One cancellable in-app process with honest progress and history recovery.
+// 6.2.7: stale-process watchdog — kapag hindi na-settle ang task (hal.
+// nabitin na network call o storage write na hindi sumagot sa abort),
+// sapilitang sinasara ang process pagkatapos ng PROCESS_WATCHDOG_MS na
+// walang anumang aktibidad (walang progress report at walang pag-settle).
+// Garantiya: hindi na mananatiling "isProcessing" ang UI magpakailanman,
+// kaya auto-mawawala rin ang floating waiting indicator.
+// 6.2.6 at mas luma: walang watchdog — hang ga task = stuck na UI.
+
+// 6 minutong katahimikan = nabitin ang task. Mas mahaba ito sa 5-minitong
+// timeout ng bawat AI API call (ANALYSIS_TIMEOUT_MS) kaya hindi nito
+// maaaring i-abort ang legit na tumatakbong analysis — sa pagitan ng mga
+// progress report, laging may bounded na await (API call na may timeout).
+const PROCESS_WATCHDOG_MS = 6 * 60 * 1000;
 
 type ProgressReporter = (value: number) => void;
 
@@ -79,7 +92,9 @@ const getSafeErrorMessage = (error: unknown): string => {
     if (
         error instanceof Error &&
         error.message.trim().length > 0 &&
-        error.message.length <= 180
+        // 240 na (dating 180): kasya na ang buong paliwanag ng backend sa
+        // failure dialog (hal. 183-char na unsupported_document message).
+        error.message.length <= 240
     ) {
         return error.message;
     }
@@ -117,6 +132,7 @@ export const BackgroundProcessProvider = ({
     const activeFileIdRef = useRef<string | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
     const operationIdRef = useRef(0);
+    const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         return () => {
@@ -126,13 +142,25 @@ export const BackgroundProcessProvider = ({
             abortControllerRef.current = null;
             activeFileIdRef.current = null;
             isProcessingRef.current = false;
+            if (watchdogRef.current !== null) {
+                clearTimeout(watchdogRef.current);
+                watchdogRef.current = null;
+            }
         };
+    }, []);
+
+    const clearWatchdog = useCallback((): void => {
+        if (watchdogRef.current !== null) {
+            clearTimeout(watchdogRef.current);
+            watchdogRef.current = null;
+        }
     }, []);
 
     const resetProcessState = useCallback((): void => {
         isProcessingRef.current = false;
         activeFileIdRef.current = null;
         abortControllerRef.current = null;
+        clearWatchdog();
 
         if (!isMountedRef.current) {
             return;
@@ -142,7 +170,41 @@ export const BackgroundProcessProvider = ({
         setProcessRoute('');
         setActiveFileId(null);
         setProgress(0);
-    }, []);
+    }, [clearWatchdog]);
+
+    // Stale-process watchdog: binubuhay muli sa bawat aktibidad
+    // (pag-simula ng process at bawat progress report). Kapag umabot sa
+    // PROCESS_WATCHDOG_MS na walang aktibidad at hindi pa rin nag-settle
+    // ang task, itinuturing nang nabitin ito — sapilitang sinasara
+    // (abort + reset + history restore) para hindi mangulubot ang UI.
+    const armWatchdog = useCallback((): void => {
+        if (!isMountedRef.current || !isProcessingRef.current) {
+            return;
+        }
+
+        clearWatchdog();
+        watchdogRef.current = setTimeout(() => {
+            watchdogRef.current = null;
+
+            if (!isMountedRef.current || !isProcessingRef.current) {
+                return;
+            }
+
+            const fileIdToRestore = activeFileIdRef.current;
+
+            console.warn(
+                '[BackgroundProcess] Walang aktibidad sa process — sapilitang pagsasara (watchdog).'
+            );
+
+            // Pareho ng cancelProcess: i-invalidate muna ang operation
+            // bago i-abort, para hindi makalusot ang late na settle.
+            operationIdRef.current += 1;
+            abortControllerRef.current?.abort();
+            resetProcessState();
+
+            void restoreHistoryItemToUnscanned(fileIdToRestore);
+        }, PROCESS_WATCHDOG_MS);
+    }, [clearWatchdog, resetProcessState]);
 
     const updateProgress = useCallback((value: number): void => {
         if (!isMountedRef.current || !isProcessingRef.current) {
@@ -150,7 +212,8 @@ export const BackgroundProcessProvider = ({
         }
 
         setProgress(clampProgress(value));
-    }, []);
+        armWatchdog();
+    }, [armWatchdog]);
 
     const cancelProcess = useCallback((): void => {
         if (!isProcessingRef.current) {
@@ -203,6 +266,8 @@ export const BackgroundProcessProvider = ({
             setActiveFileId(normalizedFileId);
             setProgress(0);
         }
+
+        armWatchdog();
 
         const reportProgress: ProgressReporter = (value) => {
             if (
@@ -266,7 +331,7 @@ export const BackgroundProcessProvider = ({
                 resetProcessState();
             }
         }
-    }, [resetProcessState, updateProgress]);
+    }, [armWatchdog, resetProcessState, updateProgress]);
 
     const contextValue = useMemo<BackgroundProcessContextValue>(() => ({
         isProcessing,

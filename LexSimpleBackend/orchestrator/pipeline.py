@@ -55,35 +55,6 @@ SOURCE_CODE_PATTERNS = (
     r"src[/\\]screens[/\\]",
 )
 
-# At least one structural signal is required. Generic words such as "legal",
-# "contract", or "clause" are deliberately excluded because an article,
-# tutorial, or app screen can mention them without being a legal document.
-LEGAL_STRUCTURE_PATTERNS = (
-    r"\b(?:this\s+)?agreement\s+(?:is\s+)?(?:made|entered|executed)\b",
-    r"\bby\s+and\s+between\b",
-    r"\bhereinafter\s+(?:referred\s+to\s+as|called)\b",
-    r"\bwhereas\b",
-    r"\b(?:party|parties)\s+(?:agrees?|shall|must|represents?|warrants?)\b",
-    r"\b(?:borrower|lender|lessor|lessee|tenant|landlord|buyer|seller)\b",
-    r"\b(?:shall|must)\s+(?:pay|provide|deliver|return|maintain|not|be)\b",
-    r"\b(?:section|article|clause)\s+\d+(?:\.\d+)*\b",
-    r"\bterms?\s+and\s+conditions\b",
-    r"\byou\s+agree\s+to\b",
-    r"\b(?:effective|commencement|termination|expiration)\s+date\b",
-    r"\b(?:signed|executed)\s+(?:this|on|by)\b",
-    r"\bin\s+witness\s+whereof\b",
-    r"\bnotary\s+public\b",
-    r"\b(?:republic\s+of\s+the\s+philippines|regional\s+trial\s+court|municipal\s+trial\s+court)\b",
-    r"\b(?:plaintiff|defendant|petitioner|respondent|accused)\b",
-    r"\bcase\s*(?:no\.?|number)\s*[:\-]?\s*[A-Za-z0-9-]+",
-    r"\b(?:ordered|adjudged|decreed)\b",
-    r"\b(?:affidavit|deponent|subscribed\s+and\s+sworn)\b",
-    r"\b(?:promissory\s+note|promise\s+to\s+pay|principal\s+sum|interest\s+rate|due\s+date)\b",
-    r"\b(?:authorize|authorization)\s+[A-Za-zÀ-ÖØ-öø-ÿ]+\s+to\b",
-    r"\b(?:kasunduan|kontrata)\s+(?:na|sa|ng|para)\b",
-    r"\b(?:nagpapaupa|umuupa|nagpapautang|umutang)\b",
-)
-
 
 @dataclass
 class ProcessRequest:
@@ -424,23 +395,12 @@ class Orchestrator:
                 document_status="unreadable",
             )
 
-        legal_structure_count = sum(
-            bool(re.search(pattern, lowered, re.IGNORECASE))
-            for pattern in LEGAL_STRUCTURE_PATTERNS
-        )
-
-        if legal_structure_count == 0:
-            return _error_payload(
-                code="unsupported_document",
-                message=(
-                    "Nababasa ang text pero walang sapat na legal-document "
-                    "structure. Hindi ito bibigyan ng safety score. I-scan "
-                    "ang mismong kontrata, kasunduan, court document, o "
-                    "katulad na legal record."
-                ),
-                document_status="not_legal_document",
-            )
-
+        # GENERAL-DOCUMENT MODE (v7.1.0): hindi na hinihingi ang
+        # legal-document structure. Lahat ng readable na teksto na
+        # nakapasa sa mga naunang gates (haba, word count, letter ratio,
+        # hindi code/app/browser screen) ay tutuloy na sa LLM para
+        # i-summarize at bigyan ng findings — kontrata man o ordinaryong
+        # dokumento.
         return None
 
     def _make_cache_key(self, sanitized_text: str) -> str:

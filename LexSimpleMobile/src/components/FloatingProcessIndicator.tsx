@@ -1,5 +1,6 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    Animated,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -8,13 +9,28 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
+import { navigationRef } from '../navigation/RootNavigation';
 import { useBackgroundProcess } from '../context/BackgroundProcessContext';
 import { useTheme } from '../theme/ThemeContext';
+import { BORDER, RADIUS } from '../theme/tokens';
+import { getNeoShadow } from './Neo';
 
-// FLOATING PROCESS INDICATOR VERSION: 1.0.0
-// Compact, non-animated access point for the active in-app process.
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
+// FLOATING PROCESS INDICATOR VERSION: 3.0.0 — PURPLE NEO-BRUTALISM SPEC
+// Compact background-waiting indicator (maliit na umiikot na bilog).
+// 3.0.0 (UI lang — walang bagong cancel/navigation logic):
+// - REDESIGN: malaking card ay tanggal na — maliit na bilog na lang na
+//   may paikot na ring (Animated rotate loop) sa baba-kanan ng screen.
+//   Ito ang "waiting on background" na anyo: hindi hadlang sa content.
+// - AUTO-DISMISS: kapag tapos na o na-cancel ang processing
+//   (isProcessing = false), agad na mawawala ito — walang kailangang
+//   gawin ang user. Kasabwat nito ang stale-process watchdog ng
+//   BackgroundProcessContext (v6.2.7) para kahit nabitin ang task,
+//   mawawala pa rin.
+// - I-tap ang bilog = balik sa proseso. X badge = Itigil ang analysis
+//   (EXISTING na cancelProcess ng context — iisang cancel path).
+// - % chip sa ilalim kapag may na-rereport nang porsyento.
+// - Hindi lumilitaw kapag nasa process screen na mismo ang user
+//   (BatchEditScreen/ConvertScreen) — doon may sariling processing UI.
 
 const clampProgress = (value: unknown): number => {
     const numericValue = Number(value);
@@ -31,11 +47,63 @@ export default function FloatingProcessIndicator() {
         isProcessing,
         processRoute,
         progress,
+        cancelProcess,
     } = useBackgroundProcess();
     const { colors: T } = useTheme();
     const navigation = useNavigation<any>();
     const safeProgress = clampProgress(progress);
     const canOpenProcess = processRoute.trim().length > 0;
+    const [activeRouteName, setActiveRouteName] = useState('');
+
+    // Subaybay sa kasalukuyang root route — para alam ng floating
+    // indicator kung ang user ay nasa process screen na mismo (huwag
+    // ipakita doon; may sariling loading UI ang process screen).
+    useEffect(() => {
+        const syncActiveRoute = (): void => {
+            const state = navigationRef.getState();
+
+            if (state) {
+                const activeRoute = state.routes[state.index];
+                setActiveRouteName(activeRoute?.name ?? '');
+            } else {
+                setActiveRouteName('');
+            }
+        };
+
+        syncActiveRoute();
+        const unsubscribe = navigationRef.addListener(
+            'state',
+            syncActiveRoute
+        );
+        return unsubscribe;
+    }, []);
+
+    const isVisible =
+        isProcessing && activeRouteName !== processRoute.trim();
+
+    // Paikot na ring — gumagalaw lang habang nakikita (tipid sa GPU/
+    // JS frame at walang ghost animation pagkatapos mawala).
+    const spinValue = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        if (!isVisible) {
+            spinValue.setValue(0);
+            return;
+        }
+
+        const spinLoop = Animated.loop(
+            Animated.timing(spinValue, {
+                toValue: 1,
+                duration: 850,
+                useNativeDriver: true,
+            })
+        );
+        spinLoop.start();
+        return () => spinLoop.stop();
+    }, [isVisible, spinValue]);
+    const spinRotation = spinValue.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
 
     const handlePress = useCallback((): void => {
         if (!canOpenProcess) {
@@ -45,7 +113,13 @@ export default function FloatingProcessIndicator() {
         navigation.navigate(processRoute);
     }, [canOpenProcess, navigation, processRoute]);
 
-    if (!isProcessing) {
+    // Iisang cancel path — ang context cancelProcess mismo (1:1 sa
+    // "Itigil ang Analysis" ng process screen; walang bagong logic).
+    const handleStopProcess = useCallback((): void => {
+        cancelProcess();
+    }, [cancelProcess]);
+
+    if (!isVisible) {
         return null;
     }
 
@@ -54,98 +128,95 @@ export default function FloatingProcessIndicator() {
             pointerEvents="box-none"
             style={styles.wrapper}
         >
-            <TouchableOpacity
+            <View
                 testID="floating-process-indicator-v1"
                 style={[
-                    styles.card,
+                    styles.badge,
                     {
                         backgroundColor: T.card,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
-                    !canOpenProcess && styles.cardDisabled,
+                    getNeoShadow(T, 'sm'),
                 ]}
-                onPress={handlePress}
-                disabled={!canOpenProcess}
-                activeOpacity={0.84}
-                accessibilityRole="button"
-                accessibilityLabel="Bumalik sa kasalukuyang document analysis"
-                accessibilityHint={
-                    canOpenProcess
-                        ? 'Binubuksan ang screen ng kasalukuyang proseso.'
-                        : undefined
-                }
             >
-                <View
+                <TouchableOpacity
+                    style={styles.spinHit}
+                    onPress={handlePress}
+                    disabled={!canOpenProcess}
+                    activeOpacity={0.84}
+                    accessibilityRole="button"
+                    accessibilityLabel="Bumalik sa kasalukuyang document analysis"
+                    accessibilityHint={
+                        canOpenProcess
+                            ? 'Binubuksan ang screen ng kasalukuyang proseso.'
+                            : undefined
+                    }
+                >
+                    <Animated.View
+                        style={[
+                            styles.ring,
+                            {
+                                borderColor: T.border,
+                                borderTopColor: T.brand,
+                            },
+                            !canOpenProcess && styles.dimmed,
+                            {
+                                transform: [
+                                    { rotate: spinRotation },
+                                ],
+                            },
+                        ]}
+                    />
+                </TouchableOpacity>
+
+                {/* STOP — maliit na black square + puting X (split-CTA
+                    arrow square pattern). Isang tap = cancelProcess. */}
+                <TouchableOpacity
+                    testID="floating-process-indicator-stop"
                     style={[
-                        styles.iconBox,
-                        { backgroundColor: `${PRIMARY}18` },
+                        styles.stopBadge,
+                        { backgroundColor: T.ink },
                     ]}
+                    onPress={handleStopProcess}
+                    hitSlop={{
+                        top: 8,
+                        bottom: 8,
+                        left: 8,
+                        right: 8,
+                    }}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel="Itigil ang kasalukuyang analysis"
+                    accessibilityHint="Inihinto ang pagsusuri at tinatanggal ang floating indicator."
                 >
                     <Ionicons
-                        name="document-text-outline"
-                        size={20}
-                        color={PRIMARY_SOFT}
+                        name="close"
+                        size={11}
+                        color={T.card}
                     />
-                </View>
+                </TouchableOpacity>
 
-                <View style={styles.content}>
-                    <View style={styles.titleRow}>
+                {safeProgress > 0 && (
+                    <View
+                        style={[
+                            styles.percentChip,
+                            {
+                                backgroundColor: T.brand,
+                                borderColor: T.ink,
+                            },
+                        ]}
+                    >
                         <Text
-                            numberOfLines={1}
                             style={[
-                                styles.title,
-                                { color: T.text },
+                                styles.percentText,
+                                { color: T.brandText },
                             ]}
                         >
-                            Sinusuri ang dokumento
+                            {safeProgress}%
                         </Text>
-
-                        {safeProgress > 0 && (
-                            <Text
-                                style={[
-                                    styles.progressValue,
-                                    { color: T.subText },
-                                ]}
-                            >
-                                {safeProgress}%
-                            </Text>
-                        )}
                     </View>
-
-                    <Text
-                        numberOfLines={1}
-                        style={[
-                            styles.subtitle,
-                            { color: T.subText },
-                        ]}
-                    >
-                        I-tap para bumalik sa proseso
-                    </Text>
-
-                    <View
-                        accessible
-                        accessibilityRole="progressbar"
-                        accessibilityLabel="Progreso ng pagsusuri"
-                        accessibilityValue={{
-                            min: 0,
-                            max: 100,
-                            now: safeProgress,
-                            text: `${safeProgress} porsyento`,
-                        }}
-                        style={[
-                            styles.progressTrack,
-                            { backgroundColor: T.border },
-                        ]}
-                    >
-                        <View
-                            style={[
-                                styles.progressFill,
-                                { width: `${safeProgress}%` },
-                            ]}
-                        />
-                    </View>
-                </View>
-            </TouchableOpacity>
+                )}
+            </View>
         </View>
     );
 }
@@ -153,73 +224,61 @@ export default function FloatingProcessIndicator() {
 const styles = StyleSheet.create({
     wrapper: {
         position: 'absolute',
-        left: 14,
-        right: 14,
-        bottom: 88,
+        right: 16,
+        bottom: 96,
         zIndex: 1000,
         elevation: 8,
-        alignItems: 'center',
+        alignItems: 'flex-end',
     },
-    card: {
-        width: '100%',
-        maxWidth: 410,
-        minHeight: 64,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderWidth: 1,
-        borderRadius: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    cardDisabled: {
-        opacity: 0.72,
-    },
-    iconBox: {
-        width: 40,
-        height: 40,
-        borderRadius: 9,
+    badge: {
+        width: 54,
+        height: 54,
+        borderWidth: BORDER.thin,
+        borderRadius: 27,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    content: {
-        flex: 1,
-        minWidth: 0,
-        marginLeft: 11,
-    },
-    titleRow: {
-        flexDirection: 'row',
+    spinHit: {
+        width: 54,
+        height: 54,
+        borderRadius: 27,
         alignItems: 'center',
+        justifyContent: 'center',
     },
-    title: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 13,
-        lineHeight: 18,
-        fontWeight: '900',
+    ring: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        borderWidth: 3.5,
     },
-    progressValue: {
-        marginLeft: 10,
-        fontSize: 11,
-        lineHeight: 16,
+    dimmed: {
+        opacity: 0.5,
+    },
+    stopBadge: {
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        width: 20,
+        height: 20,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    percentChip: {
+        position: 'absolute',
+        bottom: -8,
+        left: 4,
+        right: 4,
+        paddingVertical: 1,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    percentText: {
+        fontSize: 9,
+        lineHeight: 12,
         fontWeight: '900',
         fontVariant: ['tabular-nums'],
-    },
-    subtitle: {
-        marginTop: 1,
-        fontSize: 10,
-        lineHeight: 15,
-        fontWeight: '500',
-    },
-    progressTrack: {
-        width: '100%',
-        height: 3,
-        marginTop: 7,
-        borderRadius: 2,
-        overflow: 'hidden',
-    },
-    progressFill: {
-        height: '100%',
-        borderRadius: 2,
-        backgroundColor: PRIMARY,
     },
 });

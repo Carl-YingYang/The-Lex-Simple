@@ -14,6 +14,8 @@ import * as ImagePicker from 'expo-image-picker';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { getNeoShadow } from '../../../components/Neo';
+import { BORDER, RADIUS } from '../../../theme/tokens';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 import {
     appendToScanSession,
@@ -24,12 +26,23 @@ import { saveScanDraft } from '../../../services/scanHistoryStorage';
 import { isScanPage } from '../../../types/ScanPage';
 import type { ScanPage } from '../../../types/ScanPage';
 
-// UPLOAD IMAGE SCREEN VERSION: 6.2.6
-// Multi-image gallery picker with recoverable permission and error states.
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const WARNING = '#F59E0B';
-const DANGER = '#EF4444';
+// UPLOAD IMAGE SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Multi-image gallery picker with recoverable permission and error
+// states. UI lang ang binago; permission/picker/session/navigation logic
+// 1:1 pa rin.)
+// Spec: purple system (zero na ang asul/dilaw/gold/orange), 1.5px standard
+// borders, 2px lang sa CTA, 2–6px radius (squared), predominantly FLAT —
+// hard shadow lang sa primary CTA (focal element).
+// Pagbabago sa UI (v7.0.0):
+//   - Binura ang PRIMARY/PRIMARY_SOFT/WARNING/DANGER constants — tokens
+//     lahat (T.brand / T.brandText / T.danger + BORDER/RADIUS).
+//   - Primary CTA ("Buksan ang Settings" / "Subukan ulit"): purple fill +
+//     ITIM na icon/teksto (spec CTA rule), 2px ink border + hard shadow
+//     (getNeoShadow 'sm') — dating puting teksto sa asul, borderless.
+//   - Secondary button ("Bumalik"): 1.5px ink outline, squared 4px.
+//   - State icon box: 1.5px ink outline + squared 4px (dating 1px border
+//     at 12px radius); spinner = purple, permission icon = purple
+//     (blocked semantics), error icon = danger token na.
 const MAX_SELECTION = 20;
 
 type PickerState = 'opening' | 'permission-denied' | 'error';
@@ -276,13 +289,13 @@ export default function UploadImageScreen({ route, navigation }: any) {
                                 styles.stateIconBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             <ActivityIndicator
                                 size="small"
-                                color={PRIMARY_SOFT}
+                                color={T.brand}
                             />
                         </View>
                         <Text
@@ -310,7 +323,7 @@ export default function UploadImageScreen({ route, navigation }: any) {
                                 styles.stateIconBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
@@ -322,7 +335,7 @@ export default function UploadImageScreen({ route, navigation }: any) {
                                 }
                                 size={29}
                                 color={
-                                    permissionDenied ? WARNING : DANGER
+                                    permissionDenied ? T.brand : T.danger
                                 }
                             />
                         </View>
@@ -348,7 +361,14 @@ export default function UploadImageScreen({ route, navigation }: any) {
                         </Text>
 
                         <TouchableOpacity
-                            style={styles.primaryButton}
+                            style={[
+                                styles.primaryButton,
+                                {
+                                    backgroundColor: T.brand,
+                                    borderColor: T.ink,
+                                },
+                                getNeoShadow(T, 'sm'),
+                            ]}
                             onPress={
                                 permissionDenied
                                     ? () => void openAppSettings()
@@ -364,9 +384,14 @@ export default function UploadImageScreen({ route, navigation }: any) {
                                         : 'refresh-outline'
                                 }
                                 size={18}
-                                color="#FFFFFF"
+                                color={T.brandText}
                             />
-                            <Text style={styles.primaryButtonText}>
+                            <Text
+                                style={[
+                                    styles.primaryButtonText,
+                                    { color: T.brandText },
+                                ]}
+                            >
                                 {permissionDenied
                                     ? 'Buksan ang Settings'
                                     : 'Subukan ulit'}
@@ -376,7 +401,7 @@ export default function UploadImageScreen({ route, navigation }: any) {
                         <TouchableOpacity
                             style={[
                                 styles.secondaryButton,
-                                { borderColor: T.border },
+                                { borderColor: T.ink },
                             ]}
                             onPress={safeGoBack}
                             activeOpacity={0.78}
@@ -413,8 +438,8 @@ const styles = StyleSheet.create({
     stateIconBox: {
         width: 58,
         height: 58,
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -436,8 +461,8 @@ const styles = StyleSheet.create({
         minWidth: 190,
         minHeight: 46,
         marginTop: 21,
-        borderRadius: 9,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
@@ -445,7 +470,6 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     primaryButtonText: {
-        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '900',
     },
@@ -453,8 +477,8 @@ const styles = StyleSheet.create({
         minWidth: 190,
         minHeight: 44,
         marginTop: 9,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',

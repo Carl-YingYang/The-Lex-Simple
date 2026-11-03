@@ -1,3 +1,21 @@
+// SCAN SCREEN VERSION: 7.0.2 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang nagbago; walang binagong logic/state/network)
+// 7.0.2: ang "Legal Literacy Tool" popup ay in-screen neo modal na
+// (hindi na dumadaan sa CustomAlert) — kaya visible na ngayon ang
+// purple spec dito: 2px ink outline, hard shadow, purple CTA na itim
+// ang text. Same pa rin ang text at action; walang binagong logic.
+// 7.0.1: inalis ang lokal na mount ng FloatingProcessIndicator —
+// may global mount na sa AppNavigator, at ang dalawang sabay na
+// instance ang dahilan ng dobleng floating card sa Scan tab.
+// Spec: purple system (walang blue/dilaw/gold), 1.5px standard borders,
+// 2px sa CTA/informational CTA, 2–6px radius (squared), predominantly
+// FLAT — hard shadow lang sa rename modal (focal surface).
+// Header: unified ScreenLayout app bar (ALL-CAPS title + ink/purple
+// square pair). Theme toggle ang nasa right slot; ang info button ay
+// sumanib sa disclaimer row (pareho ng action — showLegalInfo).
+// Status colors: analyzing = purple (progreso per spec), scanned =
+// success green (feedback), iba = muted gray.
+
 import React, {
     useCallback,
     useMemo,
@@ -10,6 +28,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    Pressable,
     StatusBar,
     StyleSheet,
     Text,
@@ -17,6 +36,7 @@ import {
     TouchableOpacity,
     useWindowDimensions,
     View,
+    type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,16 +51,30 @@ import {
 import type { ScanHistoryItem } from '../../../services/scanHistoryStorage';
 
 import { useCustomAlert } from '../../../components/CustomAlert';
-import FloatingProcessIndicator from '../../../components/FloatingProcessIndicator';
+import { NeoButton, NeoIconButton, getNeoShadow } from '../../../components/Neo';
+import ScreenLayout from '../../../components/ScreenLayout';
 import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
 
-
-// SCAN SCREEN VERSION: 6.2.9
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const SUCCESS = '#10B981';
-const WARNING = '#F59E0B';
+/**
+ * Hard-shadow press helper ("sink into paper") — pareho ng helper ng
+ * ProfileScreen. Para lang sa focal element na may 2px hard shadow
+ * (dito: I-save button ng rename modal).
+ */
+function makeSink(colors: ThemeColors) {
+    return (pressed: boolean, level: 'sm' | 'md' | 'lg'): ViewStyle => {
+        if (!pressed) return getNeoShadow(colors, level);
+        const offset = SHADOW[level].ios.shadowOffset;
+        return {
+            elevation: 0,
+            transform: [
+                { translateX: offset.width },
+                { translateY: offset.height },
+            ],
+        };
+    };
+}
 
 type HistoryFilter = 'all' | 'scanned' | 'unscanned';
 
@@ -91,7 +125,7 @@ const SourceOption = ({
         >
             <Ionicons
                 name={icon}
-                size={21}
+                size={18}
                 color={accent}
             />
         </View>
@@ -168,8 +202,12 @@ export default function ScanScreen({ navigation }: any) {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [imagePreview, setImagePreview] = useState<ImagePreview>(null);
     const [previewPage, setPreviewPage] = useState(0);
+    // v7.0.2 — Legal Literacy Tool popup: in-screen modal na ngayon
+    // (hindi CustomAlert) para masunod ang purple neo-brutalism spec.
+    const [legalInfoVisible, setLegalInfoVisible] = useState(false);
     const lastLongPressedIdRef = useRef<string | null>(null);
     const isSelecting = selectedIds.size > 0;
+    const sink = makeSink(T);
 
     const loadHistory = useCallback(async (): Promise<void> => {
         try {
@@ -268,12 +306,9 @@ export default function ScanScreen({ navigation }: any) {
     };
 
     const showLegalInfo = (): void => {
-        showAlert(
-            'Legal Literacy Tool',
-            'Tumutulong ang Lex-Simple na ipaliwanag ang legal text. Hindi ito kapalit ng payo mula sa lisensyadong abogado.',
-            'info',
-            [{ text: 'Naintindihan ko' }]
-        );
+        // v7.0.2 — in-screen modal na ang rendering (tingnan ang LEGAL
+        // LITERACY MODAL sa JSX); same pa rin ang text at flow.
+        setLegalInfoVisible(true);
     };
 
     const handleCardPress = (item: ScanHistoryItem): void => {
@@ -493,7 +528,7 @@ export default function ScanScreen({ navigation }: any) {
                     styles.historyCard,
                     {
                         backgroundColor: T.card,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
                 ]}
             >
@@ -524,17 +559,17 @@ export default function ScanScreen({ navigation }: any) {
                                 styles.previewBox,
                                 {
                                     backgroundColor: T.bg,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             {selectedIds.has(item.id) ? (
-                                <Ionicons name="checkmark-circle" size={28} color={PRIMARY} />
+                                <Ionicons name="checkmark-circle" size={28} color={T.brand} />
                             ) : item.type === 'document' || !previewUri ? (
                                 <Ionicons
                                     name="document-text-outline"
                                     size={27}
-                                    color={PRIMARY_SOFT}
+                                    color={T.brand}
                                 />
                             ) : (
                                 <Image
@@ -618,9 +653,9 @@ export default function ScanScreen({ navigation }: any) {
                                     size={14}
                                     color={
                                         isAnalyzing
-                                            ? WARNING
+                                            ? T.brand
                                             : item.status === 'scanned'
-                                              ? SUCCESS
+                                              ? T.success
                                               : T.subText
                                     }
                                 />
@@ -629,9 +664,9 @@ export default function ScanScreen({ navigation }: any) {
                                         styles.historyStatusText,
                                         {
                                             color: isAnalyzing
-                                                ? WARNING
+                                                ? T.brand
                                                 : item.status === 'scanned'
-                                                  ? SUCCESS
+                                                  ? T.success
                                                   : T.subText,
                                         },
                                     ]}
@@ -672,86 +707,41 @@ export default function ScanScreen({ navigation }: any) {
 
     const ListHeader = (
         <View>
-            <View style={styles.header}>
-                <View style={styles.headerCopy}>
-                    <Text
-                        style={[
-                            styles.screenTitle,
-                            { color: T.text },
-                        ]}
-                    >
-                        Lex-Simple
-                    </Text>
-                </View>
-
-                <View style={styles.headerActions}>
-                    <TouchableOpacity
-                        style={[
-                            styles.headerButton,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                        onPress={toggleTheme}
-                        accessibilityRole="button"
-                        accessibilityLabel="Palitan ang theme"
-                    >
-                        <Ionicons
-                            name={
-                                isDarkMode
-                                    ? 'moon-outline'
-                                    : 'sunny-outline'
-                            }
-                            size={20}
-                            color={T.text}
-                        />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[
-                            styles.headerButton,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                        onPress={showLegalInfo}
-                        accessibilityRole="button"
-                        accessibilityLabel="Impormasyon tungkol sa Lex-Simple"
-                    >
-                        <Ionicons
-                            name="information-circle-outline"
-                            size={21}
-                            color={T.text}
-                        />
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            <View
+            {/* DISCLAIMER — pale lavender (spec: informational surfaces).
+                Pinagsama rito ang dating info button ng header (pareho ng
+                action: showLegalInfo). */}
+            <TouchableOpacity
                 style={[
                     styles.disclaimer,
                     {
-                        backgroundColor: T.card,
-                        borderColor: T.border,
+                        backgroundColor: T.brandSoft,
+                        borderColor: T.ink,
                     },
                 ]}
+                onPress={showLegalInfo}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Impormasyon tungkol sa Lex-Simple"
             >
                 <Ionicons
                     name="information-circle-outline"
                     size={19}
-                    color={PRIMARY_SOFT}
+                    color={T.brand}
                 />
                 <Text
                     style={[
                         styles.disclaimerText,
-                        { color: T.subText },
+                        { color: T.brandDeep },
                     ]}
                 >
                     Hindi ito legal advice o kapalit ng abogado.
                 </Text>
-            </View>
+                <Ionicons
+                    name="chevron-forward"
+                    size={15}
+                    color={T.brand}
+                />
+            </TouchableOpacity>
 
             <Text
                 style={[styles.sourceHeading, { color: T.text }]}
@@ -759,15 +749,17 @@ export default function ScanScreen({ navigation }: any) {
                 Saan manggagaling ang document?
             </Text>
 
+            {/* SOURCE OPTIONS — purple icon badges (spec: circular purple
+                icon chips), flat white cards, 1.5px ink outlines */}
             <View style={styles.sourceRow}>
                 <SourceOption
                     icon="camera-outline"
                     title="Camera"
-                    accent={PRIMARY_SOFT}
+                    accent={T.brand}
                     backgroundColor={T.card}
-                    borderColor={T.border}
+                    borderColor={T.ink}
                     textColor={T.text}
-                    iconBackgroundColor={T.bg}
+                    iconBackgroundColor={T.brandSoft}
                     onPress={() =>
                         navigation.navigate('ScannerScreen')
                     }
@@ -775,11 +767,11 @@ export default function ScanScreen({ navigation }: any) {
                 <SourceOption
                     icon="images-outline"
                     title="Gallery"
-                    accent="#8B5CF6"
+                    accent={T.brandVivid}
                     backgroundColor={T.card}
-                    borderColor={T.border}
+                    borderColor={T.ink}
                     textColor={T.text}
-                    iconBackgroundColor={T.bg}
+                    iconBackgroundColor={T.brandSoft}
                     onPress={() =>
                         navigation.navigate('UploadImageScreen')
                     }
@@ -787,23 +779,24 @@ export default function ScanScreen({ navigation }: any) {
                 <SourceOption
                     icon="document-attach-outline"
                     title="PDF / Word"
-                    accent={SUCCESS}
+                    accent={T.brandDeep}
                     backgroundColor={T.card}
-                    borderColor={T.border}
+                    borderColor={T.ink}
                     textColor={T.text}
-                    iconBackgroundColor={T.bg}
+                    iconBackgroundColor={T.brandSoft}
                     onPress={() =>
                         navigation.navigate('ConvertScreen')
                     }
                 />
             </View>
 
+            {/* ASK AI — informational CTA: 2px outline + lavender fill */}
             <TouchableOpacity
                 style={[
                     styles.askAiButton,
                     {
-                        backgroundColor: T.card,
-                        borderColor: T.border,
+                        backgroundColor: T.brandSoft,
+                        borderColor: T.ink,
                     },
                 ]}
                 onPress={() => navigation.navigate('AskAiScreen')}
@@ -814,10 +807,10 @@ export default function ScanScreen({ navigation }: any) {
                 <Ionicons
                     name="chatbubble-ellipses-outline"
                     size={20}
-                    color={WARNING}
+                    color={T.brand}
                 />
                 <Text
-                    style={[styles.askAiText, { color: T.text }]}
+                    style={[styles.askAiText, { color: T.brandDeep }]}
                 >
                     Magtanong sa Lexie AI
                 </Text>
@@ -841,7 +834,7 @@ export default function ScanScreen({ navigation }: any) {
                         {isSelecting ? 'Pumili ng files' : 'Recent Files'}
                     </Text>
                     {!isSelecting && (
-                        <Text style={{ color: T.subText, fontSize: 11, marginTop: 3 }}>
+                        <Text style={[styles.recentHint, { color: T.subText }]}>
                             Pindutin nang matagal para pumili ng files
                         </Text>
                     )}
@@ -856,24 +849,25 @@ export default function ScanScreen({ navigation }: any) {
                                         (activeFileId === null && item.processingState === 'analyzing'))
                                 )).map((item) => item.id)
                             ))}
-                            style={[styles.selectionHeaderButton, { borderColor: T.border }]}
+                            style={[styles.selectionHeaderButton, { borderColor: T.ink, backgroundColor: T.card }]}
                             accessibilityRole="button"
                             accessibilityLabel="Piliin lahat ng nakikitang file"
                         >
-                            <Text style={{ color: PRIMARY_SOFT, fontWeight: '800' }}>Piliin lahat</Text>
+                            <Text style={[styles.selectionHeaderText, { color: T.brand }]}>Piliin lahat</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={() => setSelectedIds(new Set())}
-                            style={[styles.selectionHeaderButton, { borderColor: T.border }]}
+                            style={[styles.selectionHeaderButton, { borderColor: T.ink, backgroundColor: T.card }]}
                             accessibilityRole="button"
                             accessibilityLabel="Tapusin ang pagpili"
                         >
-                            <Text style={{ color: T.text, fontWeight: '800' }}>Tapos</Text>
+                            <Text style={[styles.selectionHeaderText, { color: T.text }]}>Tapos</Text>
                         </TouchableOpacity>
                     </View>
                 )}
             </View>
 
+            {/* FILTER CHIPS — selected: purple fill + black text (spec) */}
             <View style={styles.filterRow}>
                 {(
                     [
@@ -891,11 +885,9 @@ export default function ScanScreen({ navigation }: any) {
                                 styles.filterButton,
                                 {
                                     backgroundColor: selected
-                                        ? PRIMARY
+                                        ? T.brand
                                         : T.card,
-                                    borderColor: selected
-                                        ? PRIMARY
-                                        : T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                             onPress={() => {
@@ -903,13 +895,15 @@ export default function ScanScreen({ navigation }: any) {
                                 setVisibleCount(15);
                                 setSelectedIds(new Set());
                             }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
                         >
                             <Text
                                 style={[
                                     styles.filterText,
                                     {
                                         color: selected
-                                            ? '#FFFFFF'
+                                            ? T.brandText
                                             : T.subText,
                                     },
                                 ]}
@@ -924,366 +918,414 @@ export default function ScanScreen({ navigation }: any) {
     );
 
     return (
-        <SafeAreaView
-            style={[styles.safeArea, { backgroundColor: T.bg }]}
-            edges={['top']}
+        <ScreenLayout
+            title="Lex-Simple"
+            showBackButton={false}
+            noPadding
+            rightIcon={isDarkMode ? 'moon-outline' : 'sunny-outline'}
+            rightIconColor={T.text}
+            onRightPress={toggleTheme}
         >
-            <StatusBar
-                barStyle={
-                    isDarkMode
-                        ? 'light-content'
-                        : 'dark-content'
-                }
-                backgroundColor={T.bg}
-            />
-
-            <FloatingProcessIndicator />
-
-            <FlatList
-                data={visibleHistory}
-                keyExtractor={(item) => item.id}
-                renderItem={renderHistoryItem}
-                initialNumToRender={8}
-                maxToRenderPerBatch={6}
-                windowSize={5}
-                onEndReachedThreshold={0.35}
-                onEndReached={() => {
-                    if (visibleCount < filteredHistory.length) {
-                        setVisibleCount((count) => count + 15);
-                    }
-                }}
-                ListHeaderComponent={ListHeader}
-                ListEmptyComponent={
-                    <View
-                        style={[
-                            styles.emptyState,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <Ionicons
-                            name="folder-open-outline"
-                            size={34}
-                            color={T.subText}
-                        />
-                        <Text
+            <View style={[styles.safeArea, { backgroundColor: T.bg }]}>
+                <FlatList
+                    data={visibleHistory}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderHistoryItem}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={6}
+                    windowSize={5}
+                    onEndReachedThreshold={0.35}
+                    onEndReached={() => {
+                        if (visibleCount < filteredHistory.length) {
+                            setVisibleCount((count) => count + 15);
+                        }
+                    }}
+                    ListHeaderComponent={ListHeader}
+                    ListEmptyComponent={
+                        <View
                             style={[
-                                styles.emptyTitle,
-                                { color: T.text },
+                                styles.emptyState,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
                             ]}
                         >
-                            Walang file dito
-                        </Text>
-                        <Text
-                            style={[
-                                styles.emptyText,
-                                { color: T.subText },
-                            ]}
-                        >
-                            Mag-scan o mag-upload ng document para magsimula.
-                        </Text>
-                    </View>
-                }
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-            />
-            {isSelecting && (
-                <View style={[styles.selectionBar, { backgroundColor: T.card, borderColor: T.border }]}>
-                    <Text style={{ color: T.text, fontWeight: '800' }}>
-                        {selectedIds.size} napili
-                    </Text>
-                    <TouchableOpacity
-                        onPress={confirmDeleteSelected}
-                        style={styles.selectionDelete}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Burahin ang ${selectedIds.size} napiling file`}
-                    >
-                        <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
-                        <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Burahin</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            <Modal
-                visible={renameModalVisible}
-                transparent
-                animationType="none"
-                onRequestClose={closeRenameModal}
-                statusBarTranslucent
-            >
-                <KeyboardAvoidingView
-                    style={styles.modalBackdrop}
-                    behavior={
-                        Platform.OS === 'ios' ? 'padding' : 'height'
-                    }
-                >
-                    <View
-                        style={[
-                            styles.renamePanel,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <View style={styles.renameHeader}>
+                            <Ionicons
+                                name="folder-open-outline"
+                                size={34}
+                                color={T.brand}
+                            />
                             <Text
                                 style={[
-                                    styles.renameTitle,
+                                    styles.emptyTitle,
                                     { color: T.text },
                                 ]}
                             >
-                                Palitan ang Pangalan
+                                Walang file dito
                             </Text>
-                            <TouchableOpacity
-                                style={styles.compactIconButton}
-                                onPress={closeRenameModal}
+                            <Text
+                                style={[
+                                    styles.emptyText,
+                                    { color: T.subText },
+                                ]}
                             >
-                                <Ionicons
-                                    name="close"
-                                    size={21}
-                                    color={T.subText}
-                                />
-                            </TouchableOpacity>
+                                Mag-scan o mag-upload ng document para magsimula.
+                            </Text>
                         </View>
+                    }
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                />
+                {isSelecting && (
+                    <View style={[styles.selectionBar, { backgroundColor: T.card, borderTopColor: T.ink }]}>
+                        <Text style={[styles.selectionCount, { color: T.text }]}>
+                            {selectedIds.size} napili
+                        </Text>
+                        <TouchableOpacity
+                            onPress={confirmDeleteSelected}
+                            style={[styles.selectionDelete, { backgroundColor: T.danger }]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Burahin ang ${selectedIds.size} napiling file`}
+                        >
+                            <Ionicons name="trash-outline" size={18} color={T.card} />
+                            <Text style={[styles.selectionDeleteText, { color: T.card }]}>Burahin</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
 
-                        <Text
+                {/* RENAME MODAL — focal surface: 2px outline + 2px hard shadow */}
+                <Modal
+                    visible={renameModalVisible}
+                    transparent
+                    animationType="none"
+                    onRequestClose={closeRenameModal}
+                    statusBarTranslucent
+                >
+                    <KeyboardAvoidingView
+                        style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}
+                        behavior={
+                            Platform.OS === 'ios' ? 'padding' : 'height'
+                        }
+                    >
+                        <View
                             style={[
-                                styles.inputLabel,
-                                { color: T.subText },
+                                styles.renamePanel,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
+                                getNeoShadow(T, 'sm'),
                             ]}
                         >
-                            Pangalan ng file
-                        </Text>
-                        <TextInput
-                            style={[
-                                styles.renameInput,
-                                {
-                                    backgroundColor: T.bg,
-                                    borderColor: T.border,
-                                    color: T.text,
-                                },
-                            ]}
-                            value={newTitle}
-                            onChangeText={setNewTitle}
-                            placeholder="Halimbawa: Lease Agreement"
-                            placeholderTextColor={T.subText}
-                            maxLength={80}
-                            autoFocus
-                            returnKeyType="done"
-                            onSubmitEditing={() =>
-                                void saveRenamedTitle()
-                            }
-                        />
-
-                        <View style={styles.renameActions}>
-                            <TouchableOpacity
-                                style={[
-                                    styles.renameCancelButton,
-                                    {
-                                        backgroundColor: T.bg,
-                                        borderColor: T.border,
-                                    },
-                                ]}
-                                onPress={closeRenameModal}
-                            >
+                            <View style={styles.renameHeader}>
                                 <Text
                                     style={[
-                                        styles.renameCancelText,
+                                        styles.renameTitle,
                                         { color: T.text },
                                     ]}
                                 >
-                                    Kanselahin
+                                    Palitan ang Pangalan
                                 </Text>
-                            </TouchableOpacity>
+                                <NeoIconButton
+                                    icon="close"
+                                    size={34}
+                                    iconSize={19}
+                                    onPress={closeRenameModal}
+                                    accessibilityLabel="Isara"
+                                />
+                            </View>
 
-                            <TouchableOpacity
+                            <Text
                                 style={[
-                                    styles.renameSaveButton,
-                                    !newTitle.trim() &&
-                                        styles.disabledButton,
+                                    styles.inputLabel,
+                                    { color: T.subText },
                                 ]}
-                                onPress={() =>
+                            >
+                                Pangalan ng file
+                            </Text>
+                            <TextInput
+                                style={[
+                                    styles.renameInput,
+                                    {
+                                        backgroundColor: T.bg,
+                                        borderColor: T.ink,
+                                        color: T.text,
+                                    },
+                                ]}
+                                value={newTitle}
+                                onChangeText={setNewTitle}
+                                placeholder="Halimbawa: Lease Agreement"
+                                placeholderTextColor={T.subText}
+                                maxLength={80}
+                                autoFocus
+                                returnKeyType="done"
+                                onSubmitEditing={() =>
                                     void saveRenamedTitle()
                                 }
-                                disabled={!newTitle.trim()}
-                            >
-                                <Text style={styles.renameSaveText}>
-                                    I-save
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
+                            />
 
-            <Modal
-                visible={imagePreview !== null}
-                animationType="fade"
-                onRequestClose={closeImagePreview}
-            >
-                <SafeAreaView style={styles.imageViewer} edges={['top', 'bottom']}>
-                    <StatusBar barStyle="light-content" backgroundColor="#080B10" />
-                    <View style={styles.imageViewerHeader}>
-                        <TouchableOpacity
-                            style={styles.imageViewerClose}
-                            onPress={closeImagePreview}
-                            accessibilityRole="button"
-                            accessibilityLabel="Isara ang larawan"
-                        >
-                            <Ionicons name="close" size={25} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <View style={styles.imageViewerHeading}>
-                            <Text style={styles.imageViewerTitle} numberOfLines={1}>
-                                {imagePreview?.title}
-                            </Text>
-                            <Text style={styles.imageViewerCount}>
-                                {previewPage + 1} / {imagePreview?.images.length ?? 0}
-                            </Text>
+                            <View style={styles.renameActions}>
+                                <NeoButton
+                                    label="Kanselahin"
+                                    variant="secondary"
+                                    size="md"
+                                    style={styles.flexOne}
+                                    onPress={closeRenameModal}
+                                />
+
+                                <Pressable
+                                    onPress={() => void saveRenamedTitle()}
+                                    disabled={!newTitle.trim()}
+                                    style={styles.flexOne}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ disabled: !newTitle.trim() }}
+                                >
+                                    {({ pressed }) => (
+                                        <View
+                                            style={[
+                                                styles.renameSaveButton,
+                                                { backgroundColor: T.brandVivid, borderColor: T.ink },
+                                                !newTitle.trim()
+                                                    ? styles.disabledButton
+                                                    : sink(pressed, 'sm'),
+                                            ]}
+                                        >
+                                            <Text style={[styles.renameSaveText, { color: T.brandText }]}>
+                                                I-save
+                                            </Text>
+                                        </View>
+                                    )}
+                                </Pressable>
+                            </View>
                         </View>
-                    </View>
-                    {imagePreview && (
-                        <FlatList
-                            data={imagePreview.images}
-                            horizontal
-                            pagingEnabled
-                            initialNumToRender={1}
-                            maxToRenderPerBatch={2}
-                            windowSize={3}
-                            showsHorizontalScrollIndicator={false}
-                            keyExtractor={(uri, index) => `${uri}-${index}`}
-                            getItemLayout={(_, index) => ({
-                                length: previewWidth,
-                                offset: previewWidth * index,
-                                index,
-                            })}
-                            onMomentumScrollEnd={({ nativeEvent }) => {
-                                const nextPage = Math.round(
-                                    nativeEvent.contentOffset.x / previewWidth
-                                );
-                                setPreviewPage(Math.max(0, Math.min(
-                                    nextPage,
-                                    imagePreview.images.length - 1
-                                )));
-                            }}
-                            renderItem={({ item: uri, index }) => (
-                                <View style={[styles.imageViewerPage, { width: previewWidth }]}>
-                                    <Image
-                                        source={{ uri }}
-                                        style={styles.imageViewerImage}
-                                        resizeMode="contain"
-                                        accessibilityLabel={`Larawan ng pahina ${index + 1}`}
+                    </KeyboardAvoidingView>
+                </Modal>
+
+                {/* IMAGE VIEWER — full-screen media viewer; dark chrome ay
+                    sadyang ganoon (hindi themed ang photo viewer) */}
+                <Modal
+                    visible={imagePreview !== null}
+                    animationType="fade"
+                    onRequestClose={closeImagePreview}
+                >
+                    <SafeAreaView style={styles.imageViewer} edges={['top', 'bottom']}>
+                        <StatusBar barStyle="light-content" backgroundColor="#080B10" />
+                        <View style={styles.imageViewerHeader}>
+                            <TouchableOpacity
+                                style={styles.imageViewerClose}
+                                onPress={closeImagePreview}
+                                accessibilityRole="button"
+                                accessibilityLabel="Isara ang larawan"
+                            >
+                                <Ionicons name="close" size={25} color="#FFFFFF" />
+                            </TouchableOpacity>
+                            <View style={styles.imageViewerHeading}>
+                                <Text style={styles.imageViewerTitle} numberOfLines={1}>
+                                    {imagePreview?.title}
+                                </Text>
+                                <Text style={styles.imageViewerCount}>
+                                    {previewPage + 1} / {imagePreview?.images.length ?? 0}
+                                </Text>
+                            </View>
+                        </View>
+                        {imagePreview && (
+                            <FlatList
+                                data={imagePreview.images}
+                                horizontal
+                                pagingEnabled
+                                initialNumToRender={1}
+                                maxToRenderPerBatch={2}
+                                windowSize={3}
+                                showsHorizontalScrollIndicator={false}
+                                keyExtractor={(uri, index) => `${uri}-${index}`}
+                                getItemLayout={(_, index) => ({
+                                    length: previewWidth,
+                                    offset: previewWidth * index,
+                                    index,
+                                })}
+                                onMomentumScrollEnd={({ nativeEvent }) => {
+                                    const nextPage = Math.round(
+                                        nativeEvent.contentOffset.x / previewWidth
+                                    );
+                                    setPreviewPage(Math.max(0, Math.min(
+                                        nextPage,
+                                        imagePreview.images.length - 1
+                                    )));
+                                }}
+                                renderItem={({ item: uri, index }) => (
+                                    <View style={[styles.imageViewerPage, { width: previewWidth }]}>
+                                        <Image
+                                            source={{ uri }}
+                                            style={styles.imageViewerImage}
+                                            resizeMode="contain"
+                                            accessibilityLabel={`Larawan ng pahina ${index + 1}`}
+                                        />
+                                    </View>
+                                )}
+                                style={styles.imageViewerList}
+                            />
+                        )}
+                        {imagePreview && imagePreview.images.length > 1 && (
+                            <Text style={styles.imageViewerHint}>
+                                I-swipe para makita ang ibang pahina
+                            </Text>
+                        )}
+                    </SafeAreaView>
+                </Modal>
+
+                {/* LEGAL LITERACY MODAL — v7.0.2: focal surface na
+                    in-screen (hindi CustomAlert): 2px ink outline +
+                    2px hard shadow + purple CTA na itim ang text. */}
+                <Modal
+                    visible={legalInfoVisible}
+                    transparent
+                    animationType="fade"
+                    statusBarTranslucent
+                    onRequestClose={() => setLegalInfoVisible(false)}
+                >
+                    <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
+                        <Pressable
+                            style={StyleSheet.absoluteFill}
+                            onPress={() => setLegalInfoVisible(false)}
+                        />
+                        <View
+                            style={[
+                                styles.legalInfoPanel,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
+                                getNeoShadow(T, 'sm'),
+                            ]}
+                        >
+                            <View style={styles.legalInfoHeader}>
+                                <View
+                                    style={[
+                                        styles.legalInfoIconBox,
+                                        {
+                                            backgroundColor: T.brandSoft,
+                                            borderColor: T.ink,
+                                        },
+                                    ]}
+                                >
+                                    <Ionicons
+                                        name="book-outline"
+                                        size={19}
+                                        color={T.brandDeep}
                                     />
                                 </View>
-                            )}
-                            style={styles.imageViewerList}
-                        />
-                    )}
-                    {imagePreview && imagePreview.images.length > 1 && (
-                        <Text style={styles.imageViewerHint}>
-                            I-swipe para makita ang ibang pahina
-                        </Text>
-                    )}
-                </SafeAreaView>
-            </Modal>
+                                <View style={styles.legalInfoHeading}>
+                                    <Text style={[styles.legalInfoEyebrow, { color: T.subText }]}>
+                                        LEX-SIMPLE
+                                    </Text>
+                                    <Text style={[styles.legalInfoTitle, { color: T.text }]}>
+                                        Legal Literacy Tool
+                                    </Text>
+                                </View>
+                                <NeoIconButton
+                                    icon="close"
+                                    size={34}
+                                    iconSize={19}
+                                    onPress={() => setLegalInfoVisible(false)}
+                                    accessibilityLabel="Isara"
+                                />
+                            </View>
+                            <Text style={[styles.legalInfoBody, { color: T.subText }]}>
+                                Tumutulong ang Lex-Simple na ipaliwanag ang
+                                legal text. Hindi ito kapalit ng payo mula sa
+                                lisensyadong abogado.
+                            </Text>
+                            <Pressable
+                                onPress={() => setLegalInfoVisible(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Naintindihan ko"
+                            >
+                                {({ pressed }) => (
+                                    <View
+                                        style={[
+                                            styles.legalInfoCta,
+                                            {
+                                                backgroundColor: T.brand,
+                                                borderColor: T.ink,
+                                            },
+                                            sink(pressed, 'sm'),
+                                        ]}
+                                    >
+                                        <Ionicons
+                                            name="checkmark-circle-outline"
+                                            size={17}
+                                            color={T.brandText}
+                                        />
+                                        <Text style={[styles.legalInfoCtaText, { color: T.brandText }]}>
+                                            Naintindihan ko
+                                        </Text>
+                                    </View>
+                                )}
+                            </Pressable>
+                        </View>
+                    </View>
+                </Modal>
 
-            <AlertRender />
-        </SafeAreaView>
+                <AlertRender />
+            </View>
+        </ScreenLayout>
     );
 }
 
 const styles = StyleSheet.create({
-    selectionBar: {
-        minHeight: 64,
-        paddingHorizontal: 18,
-        borderTopWidth: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    selectionDelete: {
-        minHeight: 42,
-        paddingHorizontal: 15,
-        borderRadius: 6,
-        backgroundColor: '#DC2626',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
+    // --- LAYOUT ---
     safeArea: {
         flex: 1,
     },
     listContent: {
-        paddingHorizontal: 16,
+        paddingHorizontal: SPACING.lg,
         paddingTop: 12,
         paddingBottom: 40,
     },
-    header: {
-        minHeight: 58,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 14,
-    },
-    headerCopy: {
+    flexOne: {
         flex: 1,
     },
-    screenTitle: {
-        fontSize: 25,
-        fontWeight: '900',
-        letterSpacing: -0.4,
-    },
-    headerActions: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    headerButton: {
-        width: 42,
-        height: 42,
-        borderRadius: 7,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-    },
+
+    // --- DISCLAIMER (pale lavender — spec: informational surfaces) ---
     disclaimer: {
         minHeight: 44,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 12,
         paddingVertical: 8,
         flexDirection: 'row',
         alignItems: 'center',
+        gap: 9,
         marginBottom: 14,
     },
     disclaimerText: {
         flex: 1,
-        marginLeft: 10,
         fontSize: 11,
         lineHeight: 15,
+        fontWeight: '600',
     },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: '900',
-        letterSpacing: -0.2,
-    },
+
+    // --- SOURCE OPTIONS (flat white cards + circular purple icon chips) ---
     sourceHeading: {
-        fontSize: 14,
+        fontSize: 16,
+        lineHeight: 21,
         fontWeight: '900',
+        letterSpacing: 0.3,
         marginBottom: 10,
+        textTransform: 'uppercase',
     },
     sourceRow: {
         flexDirection: 'row',
-        gap: 8,
+        gap: SPACING.sm,
     },
     sourceOption: {
         flex: 1,
         minWidth: 0,
         minHeight: 76,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 6,
@@ -1292,8 +1334,8 @@ const styles = StyleSheet.create({
     sourceOptionIcon: {
         width: 34,
         height: 34,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: 17,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1303,25 +1345,44 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         textAlign: 'center',
         marginTop: 5,
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
     },
+
+    // --- ASK AI (informational CTA: 2px outline + lavender fill) ---
     askAiButton: {
         minHeight: 46,
-        marginTop: 8,
-        borderRadius: 6,
-        borderWidth: 1,
+        marginTop: SPACING.sm,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: SPACING.sm,
         paddingHorizontal: 12,
     },
     askAiText: {
         fontSize: 12,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     divider: {
         height: 1,
         marginVertical: 18,
+    },
+
+    // --- RECENT FILES HEADER + SELECTION ACTIONS ---
+    sectionTitle: {
+        fontSize: 18,
+        lineHeight: 23,
+        fontWeight: '900',
+        letterSpacing: 0.2,
+        textTransform: 'uppercase',
+    },
+    recentHint: {
+        fontSize: 11,
+        marginTop: 3,
     },
     selectionHeaderActions: {
         flexDirection: 'row',
@@ -1331,9 +1392,13 @@ const styles = StyleSheet.create({
     selectionHeaderButton: {
         minHeight: 40,
         justifyContent: 'center',
-        borderWidth: 1,
-        borderRadius: 6,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
         paddingHorizontal: 9,
+    },
+    selectionHeaderText: {
+        fontSize: 12,
+        fontWeight: '800',
     },
     recentHeader: {
         minHeight: 34,
@@ -1342,6 +1407,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginBottom: 8,
     },
+
+    // --- FILTER CHIPS (selected: purple fill + black text — spec) ---
     filterRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -1351,19 +1418,23 @@ const styles = StyleSheet.create({
     filterButton: {
         minHeight: 36,
         paddingHorizontal: 12,
-        borderRadius: 6,
-        borderWidth: 1,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
     filterText: {
         fontSize: 11,
         fontWeight: '800',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
+
+    // --- HISTORY CARD (flat — list item, 1.5px ink outline, walang shadow) ---
     historyCard: {
         minHeight: 114,
-        borderWidth: 1,
-        borderRadius: 7,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         marginBottom: 10,
         position: 'relative',
         overflow: 'hidden',
@@ -1381,12 +1452,260 @@ const styles = StyleSheet.create({
     previewBox: {
         width: 66,
         height: 88,
-        borderRadius: 5,
-        borderWidth: 1,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
     },
+    previewImage: {
+        width: '100%',
+        height: '100%',
+    },
+    pageCountBadge: {
+        position: 'absolute',
+        right: 4,
+        bottom: 4,
+        minWidth: 22,
+        height: 20,
+        paddingHorizontal: 5,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+    },
+    pageCountText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '900',
+    },
+    historyContent: {
+        flex: 1,
+        minWidth: 0,
+    },
+    historyTitle: {
+        fontSize: 14,
+        lineHeight: 18,
+        fontWeight: '900',
+        paddingRight: 2,
+    },
+    metaRow: {
+        minHeight: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 2,
+        marginBottom: 6,
+    },
+    metaText: {
+        flex: 1,
+        minWidth: 0,
+        fontSize: 10,
+        marginLeft: 5,
+    },
+    historyStatusRow: {
+        minHeight: 26,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    historyStatusLabel: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+    },
+    historyStatusText: {
+        fontSize: 10,
+        fontWeight: '800',
+    },
+    historyMenuButton: {
+        position: 'absolute',
+        top: 8,
+        right: 7,
+        width: 34,
+        height: 34,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    // --- EMPTY STATE (flat white card, 1.5px ink outline) ---
+    emptyState: {
+        minHeight: 170,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyTitle: {
+        fontSize: 15,
+        fontWeight: '900',
+        marginTop: 12,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    emptyText: {
+        maxWidth: 270,
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: 'center',
+        marginTop: 5,
+    },
+
+    // --- SELECTION BAR (bottom bar: 2px ink rule sa taas — mirror ng app bar) ---
+    selectionBar: {
+        minHeight: 64,
+        paddingHorizontal: 18,
+        borderTopWidth: BORDER.thick,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    selectionCount: {
+        fontWeight: '800',
+    },
+    selectionDelete: {
+        minHeight: 42,
+        paddingHorizontal: 15,
+        borderRadius: RADIUS.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    selectionDeleteText: {
+        fontWeight: '800',
+        fontSize: 13,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+    },
+
+    // --- RENAME MODAL (focal: 2px outline + 2px hard shadow) ---
+
+    // --- LEGAL INFO MODAL (v7.0.2 — focal surface: 2px ink outline +
+    //     hard shadow; in-screen modal, hindi CustomAlert) ---
+    legalInfoPanel: {
+        width: '100%',
+        maxWidth: 400,
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
+        padding: 18,
+    },
+    legalInfoHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 11,
+        marginBottom: 13,
+    },
+    legalInfoIconBox: {
+        width: 40,
+        height: 40,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    legalInfoHeading: {
+        flex: 1,
+        minWidth: 0,
+    },
+    legalInfoEyebrow: {
+        fontSize: 9,
+        lineHeight: 13,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+    },
+    legalInfoTitle: {
+        marginTop: 2,
+        fontSize: 15,
+        lineHeight: 20,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
+    },
+    legalInfoBody: {
+        fontSize: 13,
+        lineHeight: 20,
+        marginBottom: 16,
+    },
+    legalInfoCta: {
+        minHeight: 46,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    legalInfoCtaText: {
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    modalBackdrop: {
+        flex: 1,
+        paddingHorizontal: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    renamePanel: {
+        width: '100%',
+        maxWidth: 390,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
+        padding: 18,
+    },
+    renameHeader: {
+        minHeight: 38,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    renameTitle: {
+        fontSize: 18,
+        lineHeight: 23,
+        fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    inputLabel: {
+        fontSize: 10,
+        lineHeight: 13,
+        fontWeight: '900',
+        letterSpacing: 0.7,
+        marginBottom: 7,
+        textTransform: 'uppercase',
+    },
+    renameInput: {
+        minHeight: 48,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
+        paddingHorizontal: 13,
+        paddingVertical: 10,
+        fontSize: 14,
+    },
+    renameActions: {
+        flexDirection: 'row',
+        gap: 9,
+        marginTop: 16,
+    },
+    renameSaveButton: {
+        minHeight: 46,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    renameSaveText: {
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+    },
+    disabledButton: {
+        opacity: 0.45,
+    },
+
+    // --- IMAGE VIEWER (full-screen media viewer — dark chrome, hindi themed) ---
     imageViewer: {
         flex: 1,
         backgroundColor: '#080B10',
@@ -1436,171 +1755,5 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontSize: 12,
         paddingVertical: 15,
-    },
-    previewImage: {
-        width: '100%',
-        height: '100%',
-    },
-    pageCountBadge: {
-        position: 'absolute',
-        right: 4,
-        bottom: 4,
-        minWidth: 22,
-        height: 20,
-        paddingHorizontal: 5,
-        borderRadius: 4,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.82)',
-    },
-    pageCountText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '900',
-    },
-    historyContent: {
-        flex: 1,
-        minWidth: 0,
-    },
-    historyTitle: {
-        fontSize: 14,
-        lineHeight: 18,
-        fontWeight: '900',
-        paddingRight: 2,
-    },
-    compactIconButton: {
-        width: 34,
-        height: 34,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    metaRow: {
-        minHeight: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 2,
-        marginBottom: 6,
-    },
-    metaText: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 10,
-        marginLeft: 5,
-    },
-    historyStatusRow: {
-        minHeight: 26,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    historyStatusLabel: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 5,
-    },
-    historyStatusText: {
-        fontSize: 10,
-        fontWeight: '800',
-    },
-    historyMenuButton: {
-        position: 'absolute',
-        top: 8,
-        right: 7,
-        width: 34,
-        height: 34,
-        borderRadius: 5,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    emptyState: {
-        minHeight: 170,
-        borderRadius: 7,
-        borderWidth: 1,
-        paddingHorizontal: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    emptyTitle: {
-        fontSize: 15,
-        fontWeight: '900',
-        marginTop: 12,
-    },
-    emptyText: {
-        maxWidth: 270,
-        fontSize: 12,
-        lineHeight: 18,
-        textAlign: 'center',
-        marginTop: 5,
-    },
-    modalBackdrop: {
-        flex: 1,
-        paddingHorizontal: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.82)',
-    },
-    renamePanel: {
-        width: '100%',
-        maxWidth: 390,
-        borderRadius: 8,
-        borderWidth: 1,
-        padding: 18,
-    },
-    renameHeader: {
-        minHeight: 38,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
-    renameTitle: {
-        fontSize: 18,
-        fontWeight: '900',
-    },
-    inputLabel: {
-        fontSize: 11,
-        fontWeight: '800',
-        marginBottom: 7,
-    },
-    renameInput: {
-        minHeight: 48,
-        borderRadius: 6,
-        borderWidth: 1,
-        paddingHorizontal: 13,
-        paddingVertical: 10,
-        fontSize: 14,
-    },
-    renameActions: {
-        flexDirection: 'row',
-        gap: 9,
-        marginTop: 16,
-    },
-    renameCancelButton: {
-        flex: 1,
-        minHeight: 46,
-        borderRadius: 6,
-        borderWidth: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    renameCancelText: {
-        fontSize: 13,
-        fontWeight: '800',
-    },
-    renameSaveButton: {
-        flex: 1,
-        minHeight: 46,
-        borderRadius: 6,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: PRIMARY,
-    },
-    disabledButton: {
-        opacity: 0.45,
-    },
-    renameSaveText: {
-        color: '#FFFFFF',
-        fontSize: 13,
-        fontWeight: '900',
     },
 });

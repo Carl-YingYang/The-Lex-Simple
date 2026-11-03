@@ -40,20 +40,28 @@ import type { ScanPage } from '../../../types/ScanPage';
 import { saveScanDraft } from '../../../services/scanHistoryStorage';
 import { createScanThumbnail } from '../../../services/scanFileStorage';
 
-// SCANNER SCREEN VERSION: 6.2.6
+// SCANNER SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang nagbago; walang binagong logic/state/permission flow)
+// Camera chrome: sadyang madilim (media surface — hindi themed, tulad
+// ng document canvas ng BatchEdit at image viewer ng Scan tab).
+// Purple system: primary #7C3AED + light accent #C4B5FD; WALANG blue
+// at dilaw. Flash-on state = purple tint (hindi dilaw); ang 'warning'
+// quality tone = muted gray na may warning icon (spec: bawal
+// dilaw/gold/orange). Geometry: 2–6px radius (squared); circular LANG
+// ang shutter, page badge, at permission icon chip. Flat chrome —
+// walang shadows sa madilim na surface.
 const COLORS = {
     black: '#000000',
     background: '#090B10',
     surface: '#121720',
     elevated: '#1A2130',
     border: '#2C3647',
-    primary: '#3478F6',
-    primaryLight: '#66A0FF',
+    primary: '#7C3AED',
+    primaryLight: '#C4B5FD',
     text: '#FFFFFF',
     subText: '#C5CDDA',
     muted: '#8994A6',
     success: '#22C55E',
-    warning: '#FBBF24',
     danger: '#EF4444',
 };
 type ExistingRouteData = {
@@ -203,7 +211,7 @@ export default function ScannerScreen({
         qualityTone === 'good'
             ? COLORS.success
             : qualityTone === 'warning'
-              ? COLORS.warning
+              ? COLORS.muted
               : qualityTone === 'error'
                 ? COLORS.danger
                 : COLORS.primaryLight;
@@ -918,7 +926,7 @@ export default function ScannerScreen({
                         size={21}
                         color={
                             isFlashOn
-                                ? COLORS.warning
+                                ? COLORS.primaryLight
                                 : COLORS.text
                         }
                     />
@@ -1187,9 +1195,9 @@ const styles = StyleSheet.create({
         marginTop: 3,
     },
     flashButtonOn: {
-        backgroundColor: 'rgba(251, 191, 36, 0.18)',
+        backgroundColor: 'rgba(139, 92, 246, 0.22)',
         borderWidth: 1,
-        borderColor: 'rgba(251, 191, 36, 0.42)',
+        borderColor: 'rgba(139, 92, 246, 0.55)',
     },
     cameraContent: {
         flex: 1,
@@ -1213,29 +1221,29 @@ const styles = StyleSheet.create({
     topLeftCorner: {
         top: -2,
         left: -2,
-        borderTopWidth: 4,
-        borderLeftWidth: 4,
+        borderTopWidth: 3,
+        borderLeftWidth: 3,
         borderTopLeftRadius: 5,
     },
     topRightCorner: {
         top: -2,
         right: -2,
-        borderTopWidth: 4,
-        borderRightWidth: 4,
+        borderTopWidth: 3,
+        borderRightWidth: 3,
         borderTopRightRadius: 5,
     },
     bottomLeftCorner: {
         bottom: -2,
         left: -2,
-        borderBottomWidth: 4,
-        borderLeftWidth: 4,
+        borderBottomWidth: 3,
+        borderLeftWidth: 3,
         borderBottomLeftRadius: 5,
     },
     bottomRightCorner: {
         right: -2,
         bottom: -2,
-        borderRightWidth: 4,
-        borderBottomWidth: 4,
+        borderRightWidth: 3,
+        borderBottomWidth: 3,
         borderBottomRightRadius: 5,
     },
     statusPill: {
@@ -1272,7 +1280,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#080A0F',
         borderWidth: 1,
         borderColor: COLORS.border,
-        borderRadius: 8,
+        borderRadius: 6,
         overflow: 'hidden',
     },
     pagesSection: {
@@ -1312,7 +1320,7 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         overflow: 'hidden',
         backgroundColor: COLORS.elevated,
-        borderWidth: 2,
+        borderWidth: 1.5,
         borderColor: COLORS.border,
     },
     thumbnailImage: {
@@ -1435,7 +1443,7 @@ const styles = StyleSheet.create({
     savingCard: {
         width: '100%',
         maxWidth: 330,
-        borderRadius: 8,
+        borderRadius: 6,
         padding: 24,
         alignItems: 'center',
         backgroundColor: COLORS.surface,
@@ -1479,7 +1487,7 @@ const styles = StyleSheet.create({
     permissionBackButton: {
         alignSelf: 'flex-start',
         minHeight: 50,
-        borderRadius: 13,
+        borderRadius: 6,
         paddingHorizontal: 14,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1504,12 +1512,12 @@ const styles = StyleSheet.create({
     permissionIconBox: {
         width: 94,
         height: 94,
-        borderRadius: 28,
+        borderRadius: 47,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(52, 120, 246, 0.15)',
+        backgroundColor: 'rgba(124, 58, 237, 0.18)',
         borderWidth: 1,
-        borderColor: 'rgba(52, 120, 246, 0.32)',
+        borderColor: 'rgba(139, 92, 246, 0.38)',
         marginBottom: 24,
     },
     permissionTitle: {
@@ -1529,7 +1537,7 @@ const styles = StyleSheet.create({
     largePrimaryButton: {
         width: '100%',
         minHeight: 58,
-        borderRadius: 15,
+        borderRadius: 6,
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1545,7 +1553,7 @@ const styles = StyleSheet.create({
     largeSecondaryButton: {
         width: '100%',
         minHeight: 58,
-        borderRadius: 15,
+        borderRadius: 6,
         paddingHorizontal: 18,
         marginTop: 12,
         flexDirection: 'row',

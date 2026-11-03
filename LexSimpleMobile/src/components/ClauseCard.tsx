@@ -1,10 +1,27 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme/globalStyles';
 import { useTheme } from '../theme/ThemeContext';
+import { getNeoShadow } from './Neo';
+import { BORDER, RADIUS } from '../theme/tokens';
 
-// CLAUSE CARD VERSION: 6.3.18
+// CLAUSE CARD VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Card ng clause analysis sa Result/OfflineDetail. UI lang ang binago;
+// props API, dynamic prompts, truncation, at navigation callbacks 1:1 pa
+// rin. Ang themeConfig.mainColor ay galing na sa tokens ng parent screen
+// — dynamic accent na ligtas gamitin.)
+// Spec: purple system (zero na ang asul/dilaw/gold/orange), 1.5px standard
+// borders, 2px lang sa CTA, 2–6px radius (squared), predominantly FLAT —
+// hard shadow lang sa primary CTA (focal element).
+// Pagbabago sa UI (v7.0.0):
+//   - Binura ang COLORS.* — tokens lahat (T.brand + BORDER/RADIUS).
+//   - CTA ("Buksan sa Lex Insight"): purple fill + ITIM na icon/teksto
+//     (spec CTA rule), 2px ink border + hard shadow (getNeoShadow 'sm') —
+//     dating puting teksto sa asul, 1px border.
+//   - Cards/boxes/chips: 1.5px ink outline (dating 1px hairline), squared
+//     3–6px radius (dating 6–10px).
+//   - Meta labels (Explanation / Original Clause / Ask AI header / AI
+//     estimate tag): weight 800, letterSpacing 0.8.
 const ConfidenceIcon = require('../../assets/icons/confidence_chart.png');
 const LibraryIcon = require('../../assets/icons/library.png');
 const MessageAiIcon = require('../../assets/icons/message_ai.png');
@@ -47,7 +64,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
   }, [item.title]);
 
   return (
-    <View style={[styles.card, { backgroundColor: T.card, borderColor: T.border }]}>
+    <View style={[styles.card, { backgroundColor: T.card, borderColor: T.ink }]}>
       {/* HEADER */}
       <View style={styles.header}>
         <Ionicons name="alert-circle" size={20} color={themeConfig.mainColor} />
@@ -55,7 +72,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
       </View>
 
       {confidence && (
-        <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.border }]}>
+        <View style={[styles.tagContainer, { backgroundColor: T.bg, borderColor: T.ink }]}>
           <Image source={ConfidenceIcon} style={styles.tagIcon} resizeMode="contain" />
           <Text style={[styles.tagText, { color: T.text }]}>AI estimate: {confidence}</Text>
         </View>
@@ -71,18 +88,18 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
       </View>
 
       <Text style={[styles.label, { color: T.subText }]}>Original Clause (OCR)</Text>
-      <View style={[styles.snippetBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+      <View style={[styles.snippetBox, { backgroundColor: T.bg, borderColor: T.ink }]}>
         <Text style={[styles.snippetText, { color: T.subText }]}>"{displaySnippet}"</Text>
         {shouldTruncate && (
           <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={styles.expandBtn}>
-            <Text style={[styles.expandBtnText, { color: COLORS.primaryLight }]}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
+            <Text style={[styles.expandBtnText, { color: T.brand }]}>{isExpanded ? 'Show Less' : 'Read More'}</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {hasRelatedContext && (
         <TouchableOpacity
-          style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.border }]}
+          style={[styles.basisBtn, { backgroundColor: T.bg, borderColor: T.ink }]}
           onPress={() => onShowLegalBasis(item)}
           accessibilityRole="button"
         >
@@ -101,20 +118,25 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
             <TouchableOpacity
               key={i}
               onPress={() => onAskAiDeepDive(item, prompt, dynamicPrompts)}
-              style={[styles.promptChip, { backgroundColor: T.bg, borderColor: T.border }]}
+              style={[styles.promptChip, { backgroundColor: T.bg, borderColor: T.ink }]}
             >
               <Text style={[styles.promptText, { color: T.text }]}>{prompt}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
 
-        {/* 🚀 CUSTOM ICON: DISCUSS IN ASK AI (TINT COLOR WHITE) */}
+        {/* CUSTOM ICON: DISCUSS IN ASK AI (tint = brandText na, kasama ng
+            itim na teksto sa loob ng purple fill) */}
         <TouchableOpacity
-          style={[styles.discussBtn, { borderColor: COLORS.primaryLight }]}
+          style={[
+            styles.discussBtn,
+            { backgroundColor: T.brand, borderColor: T.ink },
+            getNeoShadow(T, 'sm'),
+          ]}
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts)}
         >
-          <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: '#FFFFFF' }]} resizeMode="contain" />
-          <Text style={[styles.discussBtnText, { color: '#FFFFFF' }]}>Buksan sa Lex Insight</Text>
+          <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: T.brandText }]} resizeMode="contain" />
+          <Text style={[styles.discussBtnText, { color: T.brandText }]}>Buksan sa Lex Insight</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -123,10 +145,10 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 10,
+    borderRadius: RADIUS.lg,
     padding: 16,
     marginBottom: 16,
-    borderWidth: 1,
+    borderWidth: BORDER.thin,
   },
   header: {
     flexDirection: 'row',
@@ -145,8 +167,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
+    borderRadius: RADIUS.sm,
+    borderWidth: BORDER.thin,
     marginBottom: 16,
   },
   tagIcon: {
@@ -156,14 +178,15 @@ const styles = StyleSheet.create({
   },
   tagText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   label: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
     marginBottom: 6,
   },
   description: {
@@ -173,13 +196,14 @@ const styles = StyleSheet.create({
   },
   adviceBox: {
     padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: RADIUS.md,
+    borderWidth: BORDER.thin,
     marginBottom: 16,
   },
   adviceLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
+    letterSpacing: 0.8,
     marginBottom: 4,
     textTransform: 'uppercase',
   },
@@ -189,8 +213,8 @@ const styles = StyleSheet.create({
   },
   snippetBox: {
     padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: RADIUS.md,
+    borderWidth: BORDER.thin,
     marginBottom: 16,
   },
   snippetText: {
@@ -211,8 +235,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: RADIUS.md,
+    borderWidth: BORDER.thin,
     marginBottom: 20,
   },
   btnIcon: {
@@ -230,9 +254,9 @@ const styles = StyleSheet.create({
   },
   askAiLabel: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
     marginBottom: 12,
   },
   promptsScroll: {
@@ -241,8 +265,8 @@ const styles = StyleSheet.create({
   promptChip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: RADIUS.sm,
+    borderWidth: BORDER.thin,
     marginRight: 8,
   },
   promptText: {
@@ -254,9 +278,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    backgroundColor: COLORS.primary
+    borderRadius: RADIUS.md,
+    borderWidth: BORDER.thick,
   },
   discussBtnText: {
     fontSize: 14,

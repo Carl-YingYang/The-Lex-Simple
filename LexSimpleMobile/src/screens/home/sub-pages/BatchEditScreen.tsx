@@ -1,3 +1,34 @@
+// BATCH EDIT SCREEN VERSION: 7.0.3 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang nagbago; walang binagong logic/state/network)
+// 7.0.3: FIX sa Android crash na "Value for translateX cannot be cast
+// from String to double" — ang indeterminate sweep ng progress bar ay
+// dating percentage na translateX ('-130%'/'485%') na may
+// useNativeDriver: true, na hindi kayang i-parse ng Android native
+// animated (puro numero lang ang tinatanggap nito sa translateX).
+// Ngayon: pixel-based sweep — 76px na segment, sinusukat ng onLayout
+// ang totoong haba ng track. Pixels = lehitimong numero kaya native
+// driver pa rin (smooth kahit abala ang JS thread). Walang binagong
+// analysis/cancel/navigation logic.
+// 7.0.2: RESPONSIVE na progress bar sa loading screen — smooth animated
+// fill papunta sa totoong porsyento, at indeterminate sweep (gumagalaw
+// na segment) habang 0% pa ang analysis (sa single document, walang
+// per-document report hanggang matapos mismo ang analysis). Laging
+// nakikita ang progress card habang nag-aanalyze. Walang binagong
+// analysis/cancel/navigation logic.
+// 7.0.1: linisin ang AI processing view — lagging spinner, totoong
+// progress bar (mula sa BackgroundProcess context), bordered privacy
+// chip, at bordered danger cancel button. Walang binagong analysis/
+// cancel/navigation logic.
+// Spec: purple system (tanggal ang blue), 1.5px standard borders,
+// 2px sa CTA/app-bar rules, 2–6px radius (squared), predominantly FLAT —
+// hard shadow lang sa focal CTAs (Ipa-check sa AI, split CTAs) at sa
+// AI notice modal.
+// Editor chrome (header, toolbar, thumbnails, footer) = theme tokens
+// (sumusunod sa light/dark purple theme). Ang document canvas ay
+// sadyang madilim (media canvas — hindi themed, gaya ng image viewer).
+// CTA pattern: split-button (purple main + black arrow square na may
+// puting arrow) — spec signature.
+
 import React, {
     useEffect,
     useRef,
@@ -9,7 +40,9 @@ import {
     BackHandler,
     FlatList,
     Image,
+    type LayoutChangeEvent,
     Modal,
+    Pressable,
     StatusBar,
     StyleSheet,
     Text,
@@ -17,6 +50,7 @@ import {
     useWindowDimensions,
     View,
     ViewToken,
+    type ViewStyle,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +58,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
 import { useCustomAlert } from '../../../components/CustomAlert';
+import { NeoIconButton, getNeoShadow } from '../../../components/Neo';
+import { useBackgroundProcess } from '../../../context/BackgroundProcessContext';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
 import {
@@ -45,23 +81,41 @@ import {
     savePendingScan,
     saveScanDraft,
 } from '../../../services/scanHistoryStorage';
+import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
 
-// BATCH EDIT SCREEN VERSION: 6.2.7
-const COLORS = {
-    black: '#000000',
-    background: '#090B10',
-    surface: '#11151C',
-    elevated: '#181E28',
-    border: '#2A3240',
-    primary: '#3478F6',
-    primaryLight: '#66A0FF',
-    text: '#FFFFFF',
-    subText: '#B8C0CC',
-    muted: '#788395',
-    success: '#22C55E',
-    warning: '#F59E0B',
-    danger: '#EF4444',
+/**
+ * Hard-shadow press helper ("sink into paper") — pareho ng helper ng
+ * ProfileScreen. Para lang sa mga focal element na may 2px hard shadow
+ * (dito: split CTAs at notice proceed button).
+ */
+function makeSink(colors: ThemeColors) {
+    return (pressed: boolean, level: 'sm' | 'md' | 'lg'): ViewStyle => {
+        if (!pressed) return getNeoShadow(colors, level);
+        const offset = SHADOW[level].ios.shadowOffset;
+        return {
+            elevation: 0,
+            transform: [
+                { translateX: offset.width },
+                { translateY: offset.height },
+            ],
+        };
+    };
+}
+
+// MEDIA CANVAS — sadyang madilim (hindi themed) para eksaktong
+// pagtingin sa scan quality. Hindi ito brand color.
+const CANVAS = {
+    black: '#050609',
+    border: '#242A35',
 };
+
+// Haba ng gumagalaw na segment (sweep) ng indeterminate progress bar,
+// sa PIXELS — hindi porsyento. Bawal ang percentage na translateX sa
+// Android native animated ("Value for translateX cannot be cast from
+// String to double"), kaya pixels ang unit ng buong sweep animation.
+const PROGRESS_SWEEP_WIDTH = 76;
+
 const AI_NOTICE_KEY = '@lex_ai_notice_v1';
 const makeGroupResult = (ocrPages: OcrPageResult[]): BatchOcrResult => {
     const successfulPages = ocrPages.map((page, index) => ({
@@ -121,11 +175,87 @@ const getErrorMessage = (
     }
     return fallback;
 };
+
+/**
+ * SPLIT CTA — spec signature: purple main section + hiwalay na black
+ * square na may puting right-arrow. Focal element kaya may 2px hard
+ * shadow na bumabagsak kapag pinindot.
+ */
+function SplitCta({
+    label,
+    icon,
+    onPress,
+    disabled,
+    busy,
+    colors: T,
+    sink,
+    height = 52,
+    arrowIcon = 'arrow-forward',
+}: {
+    label: string;
+    icon?: React.ComponentProps<typeof Ionicons>['name'];
+    onPress: () => void;
+    disabled?: boolean;
+    busy?: boolean;
+    colors: ThemeColors;
+    sink: (pressed: boolean, level: 'sm' | 'md' | 'lg') => ViewStyle;
+    height?: number;
+    arrowIcon?: React.ComponentProps<typeof Ionicons>['name'];
+}) {
+    return (
+        <Pressable
+            onPress={onPress}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+            {({ pressed }) => (
+                <View
+                    style={[
+                        styles.splitCta,
+                        disabled
+                            ? styles.disabledButton
+                            : sink(pressed, 'sm'),
+                    ]}
+                >
+                    <View
+                        style={[
+                            styles.splitCtaMain,
+                            { backgroundColor: T.brand, height },
+                        ]}
+                    >
+                        {busy ? (
+                            <ActivityIndicator size="small" color={T.brandText} />
+                        ) : (
+                            <Ionicons
+                                name={icon ?? 'shield-checkmark-outline'}
+                                size={20}
+                                color={T.brandText}
+                            />
+                        )}
+                        <Text
+                            style={[styles.splitCtaText, { color: T.brandText }]}
+                            numberOfLines={1}
+                        >
+                            {label}
+                        </Text>
+                    </View>
+                    <View style={[styles.splitCtaArrow, { backgroundColor: T.ink, height }]}>
+                        <Ionicons name={arrowIcon} size={17} color={T.card} />
+                    </View>
+                </View>
+            )}
+        </Pressable>
+    );
+}
+
 export default function BatchEditScreen({
     route,
     navigation,
 }: any) {
     const { width: screenWidth } = useWindowDimensions();
+    const { colors: T, isDarkMode } = useTheme();
     const initialRoutePages = route?.params?.pages;
     const lastRoutePagesRef = useRef(initialRoutePages);
     const [pages, setPages] = useState<ScanPage[]>(() =>
@@ -157,7 +287,11 @@ export default function BatchEditScreen({
         triggerBackgroundProcess,
         cancelProcess,
     } = useBackgroundProcessScreen('BatchEditScreen');
+    // Totoong progress ng AI analysis (0–100) mula sa background process
+    // context — para sa determinate progress bar ng processing view.
+    const { progress: analysisProgress } = useBackgroundProcess();
     const { showAlert, AlertRender } = useCustomAlert();
+    const sink = makeSink(T);
     const processingPulse = useRef(new Animated.Value(0)).current;
     useEffect(() => {
         if (!isAiAnalyzing) {
@@ -189,6 +323,84 @@ export default function BatchEditScreen({
         inputRange: [0, 1],
         outputRange: [0.62, 1],
     });
+    // RESPONSIVE PROGRESS BAR — animated fill (smooth na gumagalaw
+    // papunta sa totoong porsyento) + indeterminate sweep habang 0% pa
+    // (single document: walang report hanggang matapos mismo ito).
+    const safeAnalysisProgress = Math.min(
+        100,
+        Math.max(0, Math.round(Number(analysisProgress) || 0))
+    );
+    const isProgressDeterminate = safeAnalysisProgress > 0;
+    const progressFillAnim = useRef(new Animated.Value(0)).current;
+    const progressSweepAnim = useRef(new Animated.Value(0)).current;
+    // PIXEL-BASED SWEEP — sinusukat ng onLayout ng track ang totoong
+    // haba nito sa pixels, tapos gumagalaw ang 76px na segment mula sa
+    // kaliwa (-76px, nakatago sa likod ng overflow: hidden na track)
+    // hanggang sa dulo ng track. Pixels (numero) ang gamit sa
+    // translateX — hindi '%'-string — kaya hindi na mag-crash ang
+    // Android, at native driver pa rin kaya smooth kahit abala ang JS
+    // thread sa analysis.
+    const [trackWidth, setTrackWidth] = useState(0);
+    const progressSweepRange = progressSweepAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [
+            -PROGRESS_SWEEP_WIDTH,
+            Math.max(trackWidth, 0),
+        ],
+    });
+    const handleTrackLayout = React.useCallback(
+        (event: LayoutChangeEvent): void => {
+            const measured = event.nativeEvent.layout.width;
+            setTrackWidth(
+                Number.isFinite(measured) ? measured : 0
+            );
+        },
+        []
+    );
+    useEffect(() => {
+        if (!isAiAnalyzing || !isProgressDeterminate) {
+            // Snap sa 0 sa indeterminate phase (bagong analysis = bagong
+            // simula; hindi dapat kita ang lumang 100% na pagbaba).
+            progressFillAnim.setValue(0);
+            return;
+        }
+        Animated.timing(progressFillAnim, {
+            toValue: safeAnalysisProgress,
+            duration: 380,
+            useNativeDriver: false,
+        }).start();
+    }, [
+        isAiAnalyzing,
+        isProgressDeterminate,
+        safeAnalysisProgress,
+        progressFillAnim,
+    ]);
+    useEffect(() => {
+        if (!isAiAnalyzing || isProgressDeterminate) {
+            progressSweepAnim.setValue(0);
+            return;
+        }
+        const sweepLoop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(progressSweepAnim, {
+                    toValue: 1,
+                    duration: 1150,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(progressSweepAnim, {
+                    toValue: 0,
+                    duration: 0,
+                    useNativeDriver: true,
+                }),
+            ])
+        );
+        sweepLoop.start();
+        return () => sweepLoop.stop();
+    }, [
+        isAiAnalyzing,
+        isProgressDeterminate,
+        progressSweepAnim,
+    ]);
     const currentPage = pages[currentIndex];
     const documentSource =
         route?.params?.source === 'gallery'
@@ -380,6 +592,7 @@ export default function BatchEditScreen({
             unreadPageCount: pages.length - readPages.length,
         });
     };
+
     const beginAiAnalysis = async (
         ocrResult: BatchOcrResult,
         starts: number[]
@@ -884,8 +1097,7 @@ export default function BatchEditScreen({
             <TouchableOpacity
                 style={[
                     styles.thumbnailButton,
-                    isSelected &&
-                        styles.thumbnailButtonSelected,
+                    isSelected && { borderColor: T.brand },
                 ]}
                 onPress={() => scrollToPage(index)}
                 disabled={isAiAnalyzing}
@@ -906,13 +1118,13 @@ export default function BatchEditScreen({
                     <View
                         style={[
                             styles.thumbnailStatus,
-                            styles.thumbnailSuccess,
+                            { backgroundColor: T.success },
                         ]}
                     >
                         <Ionicons
                             name="checkmark"
                             size={12}
-                            color={COLORS.text}
+                            color={T.card}
                         />
                     </View>
                 )}
@@ -920,13 +1132,13 @@ export default function BatchEditScreen({
                     <View
                         style={[
                             styles.thumbnailStatus,
-                            styles.thumbnailError,
+                            { backgroundColor: T.danger },
                         ]}
                     >
                         <Ionicons
                             name="alert"
                             size={12}
-                            color={COLORS.text}
+                            color={T.card}
                         />
                     </View>
                 )}
@@ -936,15 +1148,20 @@ export default function BatchEditScreen({
     if (isAiAnalyzing) {
         return (
             <SafeAreaView
-                style={styles.processingScreen}
+                style={[styles.processingScreen, { backgroundColor: T.bg }]}
                 edges={['top', 'bottom']}
             >
                 <StatusBar
-                    barStyle="light-content"
-                    backgroundColor={COLORS.background}
+                    barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+                    backgroundColor={T.bg}
                 />
-                <View style={styles.processingHeader}>
-                    <Text style={styles.processingHeaderTitle}>
+                <View style={[styles.processingHeader, { borderBottomColor: T.ink }]}>
+                    {/* Geometric brand accent — same pair ng ScreenLayout */}
+                    <View style={styles.titleMarker}>
+                        <View style={[styles.markerSquareInk, { backgroundColor: T.ink, borderColor: T.ink }]} />
+                        <View style={[styles.markerSquareBrand, { backgroundColor: T.brand, borderColor: T.ink }]} />
+                    </View>
+                    <Text style={[styles.processingHeaderTitle, { color: T.text }]}>
                         Sinusuri ang Document
                     </Text>
                 </View>
@@ -953,6 +1170,8 @@ export default function BatchEditScreen({
                         style={[
                             styles.processingIconBox,
                             {
+                                backgroundColor: T.brandSoft,
+                                borderColor: T.ink,
                                 transform: [
                                     { scale: processingPulseScale },
                                 ],
@@ -963,46 +1182,153 @@ export default function BatchEditScreen({
                         <Ionicons
                             name="document-text-outline"
                             size={30}
-                            color={COLORS.primaryLight}
+                            color={T.brand}
                         />
                     </Animated.View>
-                    <Text style={styles.processingTitle}>
+                    <Text style={[styles.processingTitle, { color: T.text }]}>
                         Sinusuri ang lahat ng pahina
                     </Text>
-                    <Text style={styles.processingMessage}>
+                    <Text style={[styles.processingMessage, { color: T.subText }]}>
                         Tinitingnan ang mga clause at posibleng panganib.
                     </Text>
-                    <View style={styles.processingInfoRow}>
+
+                    {/* Lagging spinner — halatang gumagawa pa rin ang app
+                        kahit wala pang na-rereport na porsyento */}
+                    <View
+                        pointerEvents="none"
+                        style={styles.processingSpinner}
+                    >
+                        <ActivityIndicator
+                            size="small"
+                            color={T.brand}
+                        />
+                    </View>
+
+                    {/* RESPONSIVE PROGRESS — laging nakikita habang
+                        nag-aanalyze: indeterminate sweep (gumagalaw na
+                        segment) habang 0% pa, tapos animated na fill
+                        papunta sa totoong porsyento kapag may report na */}
+                    <View
+                        accessible
+                        accessibilityRole="progressbar"
+                        accessibilityLabel="Progreso ng analysis"
+                        accessibilityValue={{
+                            min: 0,
+                            max: 100,
+                            now: safeAnalysisProgress,
+                            text: `${safeAnalysisProgress} porsyento`,
+                        }}
+                        style={[
+                            styles.processingProgressCard,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.ink,
+                            },
+                        ]}
+                    >
+                        <View style={styles.processingProgressHead}>
+                            <Text
+                                style={[
+                                    styles.processingProgressLabel,
+                                    { color: T.subText },
+                                ]}
+                            >
+                                Progreso ng analysis
+                            </Text>
+                            <Text
+                                style={[
+                                    styles.processingProgressValue,
+                                    { color: T.brand },
+                                ]}
+                            >
+                                {safeAnalysisProgress}%
+                            </Text>
+                        </View>
+                        <View
+                            onLayout={handleTrackLayout}
+                            style={[
+                                styles.processingProgressTrack,
+                                { backgroundColor: T.border },
+                            ]}
+                        >
+                            {isProgressDeterminate ? (
+                                <Animated.View
+                                    style={[
+                                        styles.processingProgressFill,
+                                        {
+                                            width: progressFillAnim.interpolate({
+                                                inputRange: [0, 100],
+                                                outputRange: ['0%', '100%'],
+                                            }),
+                                            backgroundColor: T.brand,
+                                        },
+                                    ]}
+                                />
+                            ) : (
+                                <Animated.View
+                                    style={[
+                                        styles.processingProgressSweep,
+                                        {
+                                            backgroundColor: T.brand,
+                                            transform: [
+                                                {
+                                                    translateX: progressSweepRange,
+                                                },
+                                            ],
+                                        },
+                                    ]}
+                                />
+                            )}
+                        </View>
+                    </View>
+
+                    {/* Privacy note — bordered chip na, hindi maluwag na
+                        nakakalat na teksto */}
+                    <View
+                        style={[
+                            styles.processingInfoRow,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.border,
+                            },
+                        ]}
+                    >
                         <Ionicons
                             name="shield-checkmark-outline"
                             size={14}
-                            color={COLORS.success}
+                            color={T.success}
                         />
-                        <Text style={styles.processingInfoText}>
+                        <Text style={[styles.processingInfoText, { color: T.subText }]}>
                             Nilinis na text lamang ang ipinadala. Hindi kasama ang larawan.
                         </Text>
                     </View>
                 </View>
                 <View style={styles.processingFooter}>
-                    <TouchableOpacity
-                        style={styles.backgroundButton}
+                    {/* SPLIT CTA — purple main + black arrow square (focal) */}
+                    <SplitCta
+                        label="Ipagpatuloy sa Background"
+                        icon="arrow-undo-outline"
+                        arrowIcon="arrow-redo-outline"
                         onPress={() =>
                             navigation.navigate('Main', {
                                 screen: 'Scan',
                             })
                         }
-                        accessibilityRole="button"
-                    >
-                        <Text style={styles.backgroundButtonText}>
-                            Ipagpatuloy sa Background
-                        </Text>
-                    </TouchableOpacity>
+                        colors={T}
+                        sink={sink}
+                    />
+                    {/* Destructive secondary — bordered danger outline,
+                        hindi na bare na pulang teksto */}
                     <TouchableOpacity
-                        style={styles.processingCancelButton}
+                        style={[
+                            styles.processingCancelButton,
+                            { borderColor: T.danger },
+                        ]}
                         onPress={cancelProcess}
+                        activeOpacity={0.7}
                         accessibilityRole="button"
                     >
-                        <Text style={styles.processingCancelText}>
+                        <Text style={[styles.processingCancelText, { color: T.danger }]}>
                             Itigil ang Analysis
                         </Text>
                     </TouchableOpacity>
@@ -1013,35 +1339,36 @@ export default function BatchEditScreen({
     }
     if (pages.length === 0) {
         return (
-            <SafeAreaView style={styles.container}>
+            <SafeAreaView style={[styles.container, { backgroundColor: T.bg }]}>
                 <StatusBar
-                    barStyle="light-content"
-                    backgroundColor={COLORS.background}
+                    barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+                    backgroundColor={T.bg}
                 />
                 <View style={styles.emptyState}>
                     <Ionicons
                         name="documents-outline"
                         size={48}
-                        color={COLORS.muted}
+                        color={T.subText}
                     />
-                    <Text style={styles.emptyTitle}>
+                    <Text style={[styles.emptyTitle, { color: T.text }]}>
                         Walang document page
                     </Text>
-                    <Text style={styles.emptyMessage}>
+                    <Text style={[styles.emptyMessage, { color: T.subText }]}>
                         Kumuha muna ng kahit isang malinaw na pahina.
                     </Text>
-                    <TouchableOpacity
-                        style={styles.emptyButton}
-                        onPress={() =>
-                            navigation.replace(
-                                'ScannerScreen'
-                            )
-                        }
-                    >
-                        <Text style={styles.emptyButtonText}>
-                            Buksan ang Camera
-                        </Text>
-                    </TouchableOpacity>
+                    <View style={styles.emptyCtaWrap}>
+                        <SplitCta
+                            label="Buksan ang Camera"
+                            icon="camera-outline"
+                            onPress={() =>
+                                navigation.replace(
+                                    'ScannerScreen'
+                                )
+                            }
+                            colors={T}
+                            sink={sink}
+                        />
+                    </View>
                 </View>
                 <AlertRender />
             </SafeAreaView>
@@ -1049,58 +1376,65 @@ export default function BatchEditScreen({
     }
     return (
         <SafeAreaView
-            style={styles.container}
+            style={[styles.container, { backgroundColor: T.bg }]}
             edges={['top', 'bottom']}
             testID="batch-edit-screen-v5"
         >
             <StatusBar
-                barStyle="light-content"
-                backgroundColor={COLORS.background}
+                barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+                backgroundColor={T.bg}
             />
-            <View style={styles.header}>
-                <TouchableOpacity
-                    style={styles.headerButton}
+            {/* APP BAR — editor header, kapareho ng ScreenLayout look:
+                2px ink rule sa ilalim + ALL-CAPS title + square pair */}
+            <View style={[styles.header, { borderBottomColor: T.ink }]}>
+                <NeoIconButton
+                    icon="arrow-back"
                     onPress={handleBack}
                     disabled={isBusy}
-                    accessibilityRole="button"
+                    size={40}
+                    iconSize={20}
                     accessibilityLabel="Bumalik"
-                >
-                    <Ionicons
-                        name="arrow-back"
-                        size={23}
-                        color={COLORS.text}
-                    />
-                </TouchableOpacity>
+                />
                 <View style={styles.headerCenter}>
-                    <Text
-                        style={styles.headerTitle}
-                        numberOfLines={1}
-                    >
-                        Suriin ang mga Pahina
-                    </Text>
-                    <Text style={styles.headerHint}>
+                    <View style={styles.headerTitleRow}>
+                        <View style={styles.titleMarker}>
+                            <View style={[styles.markerSquareInk, { backgroundColor: T.ink, borderColor: T.ink }]} />
+                            <View style={[styles.markerSquareBrand, { backgroundColor: T.brand, borderColor: T.ink }]} />
+                        </View>
+                        <Text
+                            style={[styles.headerTitle, { color: T.text }]}
+                            numberOfLines={1}
+                        >
+                            Suriin ang mga Pahina
+                        </Text>
+                    </View>
+                    <Text style={[styles.headerHint, { color: T.subText }]}>
                         {isOcrRunning ? 'Binabasa ang mga pahina…' : 'I-swipe para makita ang iba'}
                     </Text>
                 </View>
-                <View style={styles.pageCounter}>
-                    <Text style={styles.pageCounterText}>
+                <View style={[styles.pageCounter, { backgroundColor: T.card, borderColor: T.ink }]}>
+                    <Text style={[styles.pageCounterText, { color: T.text }]}>
                         {currentIndex + 1}/{pages.length}
                     </Text>
                 </View>
             </View>
             {isOcrRunning && (
-                <View style={styles.readingBanner} accessibilityLiveRegion="polite">
-                    <ActivityIndicator size="small" color={COLORS.primaryLight} />
+                <View
+                    style={[styles.readingBanner, { backgroundColor: T.card, borderBottomColor: T.ink }]}
+                    accessibilityLiveRegion="polite"
+                >
+                    <ActivityIndicator size="small" color={T.brand} />
                     <View style={styles.readingCopy}>
-                        <Text style={styles.readingTitle}>
+                        <Text style={[styles.readingTitle, { color: T.text }]}>
                             Binabasa ang pahina {ocrProgress.current} sa {ocrProgress.total}
                         </Text>
-                        <Text style={styles.readingSubtext}>
+                        <Text style={[styles.readingSubtext, { color: T.subText }]}>
                             Sa phone muna ito. Wala pang ipinapadala sa AI.
                         </Text>
                     </View>
                 </View>
             )}
+            {/* DOCUMENT CANVAS — sadyang madilim (media canvas) */}
             <View style={styles.viewerSection}>
                 <FlatList
                     ref={mainListRef}
@@ -1128,12 +1462,12 @@ export default function BatchEditScreen({
                     }}
                 />
             </View>
-            <View style={styles.thumbnailSection}>
+            <View style={[styles.thumbnailSection, { backgroundColor: T.bg, borderTopColor: T.ink }]}>
                 <View style={styles.thumbnailHeader}>
-                    <Text style={styles.thumbnailHeaderText}>
+                    <Text style={[styles.thumbnailHeaderText, { color: T.subText }]}>
                         MGA PAHINA
                     </Text>
-                    <Text style={styles.thumbnailCountText}>
+                    <Text style={[styles.thumbnailCountText, { color: T.brand }]}>
                         {pages.length}
                     </Text>
                 </View>
@@ -1152,7 +1486,7 @@ export default function BatchEditScreen({
                     onScrollToIndexFailed={() => undefined}
                 />
             </View>
-            <View style={styles.toolBar}>
+            <View style={[styles.toolBar, { backgroundColor: T.bg, borderTopColor: T.ink }]}>
                 <TouchableOpacity
                     style={styles.toolButton}
                     onPress={handleAddPage}
@@ -1172,13 +1506,13 @@ export default function BatchEditScreen({
                                 : 'add'
                         }
                         size={23}
-                        color={COLORS.primaryLight}
+                        color={T.brand}
                     />
-                    <Text style={styles.toolButtonText}>
+                    <Text style={[styles.toolButtonText, { color: T.subText }]}>
                         Dagdag
                     </Text>
                 </TouchableOpacity>
-                <View style={styles.toolDivider} />
+                <View style={[styles.toolDivider, { backgroundColor: T.border }]} />
                 <TouchableOpacity
                     style={styles.toolButton}
                     onPress={handleOpenCamera}
@@ -1190,13 +1524,13 @@ export default function BatchEditScreen({
                     <Ionicons
                         name="camera-outline"
                         size={22}
-                        color={COLORS.primaryLight}
+                        color={T.brand}
                     />
-                    <Text style={styles.toolButtonText}>
+                    <Text style={[styles.toolButtonText, { color: T.subText }]}>
                         Camera
                     </Text>
                 </TouchableOpacity>
-                <View style={styles.toolDivider} />
+                <View style={[styles.toolDivider, { backgroundColor: T.border }]} />
                 <TouchableOpacity
                     style={styles.toolButton}
                     onPress={handleDelete}
@@ -1208,19 +1542,19 @@ export default function BatchEditScreen({
                     <Ionicons
                         name="trash-outline"
                         size={21}
-                        color={COLORS.danger}
+                        color={T.danger}
                     />
                     <Text
                         style={[
                             styles.toolButtonText,
-                            styles.deleteText,
+                            { color: T.danger },
                         ]}
                     >
                         Alisin
                     </Text>
                 </TouchableOpacity>
             </View>
-            <View style={styles.bottomActionArea}>
+            <View style={[styles.bottomActionArea, { backgroundColor: T.bg, borderTopColor: T.ink }]}>
                 <TouchableOpacity
                     style={styles.ocrPreviewButton}
                     onPress={previewReadText}
@@ -1228,60 +1562,75 @@ export default function BatchEditScreen({
                     accessibilityRole="button"
                     accessibilityLabel="Tingnan ang text na nabasa sa phone"
                 >
-                    <Ionicons name="document-text-outline" size={17} color={COLORS.primaryLight} />
-                    <Text style={styles.ocrPreviewLabel}>Tingnan ang nabasang text</Text>
+                    <Ionicons name="document-text-outline" size={16} color={T.brand} />
+                    <Text style={[styles.ocrPreviewLabel, { color: T.brand }]}>Tingnan ang nabasang text</Text>
                 </TouchableOpacity>
-                <Text style={styles.privacyNote}>
+                <Text style={[styles.privacyNote, { color: T.subText }]}>
                     {isOcrRunning
                         ? `Binabasa sa phone ang pahina ${ocrProgress.current}/${ocrProgress.total}…`
                         : reviewResult?.failedPages.length
                           ? `Hindi nabasa ang pahina ${reviewResult.failedPages.map((item) => item.pageNumber).join(', ')}. Kunan ulit ito.`
                           : 'Sa phone muna babasahin at lilinisin ang text.'}
                 </Text>
-                <TouchableOpacity
-                    style={[styles.analyzeButton, isOcrRunning && styles.analyzeButtonReading]}
+                {/* HERO CTA — split-button, may 2px hard shadow + sink */}
+                <SplitCta
+                    label={isOcrRunning ? 'Binabasa ang mga pahina…' : `Ipa-check sa AI (${pages.length})`}
+                    icon="shield-checkmark-outline"
                     onPress={handleAnalyze}
                     disabled={isBusy}
-                    activeOpacity={0.78}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ipa-check sa AI ang ${pages.length} pahina`}
-                >
-                    {isOcrRunning
-                        ? <ActivityIndicator size="small" color={COLORS.text} />
-                        : <Ionicons name="shield-checkmark-outline" size={21} color={COLORS.text} />}
-                    <Text style={styles.analyzeButtonText}>
-                        {isOcrRunning ? 'Binabasa ang mga pahina…' : `Ipa-check sa AI (${pages.length})`}
-                    </Text>
-                </TouchableOpacity>
+                    busy={isOcrRunning}
+                    colors={T}
+                    sink={sink}
+                    height={48}
+                />
             </View>
+            {/* AI NOTICE MODAL — focal surface: 2px outline + 2px hard shadow */}
             <Modal
                 visible={pendingNotice !== null}
                 transparent
                 animationType="fade"
                 onRequestClose={() => setPendingNotice(null)}
             >
-                <View style={styles.noticeBackdrop}>
-                    <View style={styles.noticeCard}>
-                        <TouchableOpacity
+                <View style={[styles.noticeBackdrop, { backgroundColor: T.overlay }]}>
+                    <View
+                        style={[
+                            styles.noticeCard,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.ink,
+                            },
+                            getNeoShadow(T, 'sm'),
+                        ]}
+                    >
+                        <NeoIconButton
+                            icon="close"
+                            size={34}
+                            iconSize={19}
                             style={styles.noticeClose}
                             onPress={() => setPendingNotice(null)}
-                            accessibilityRole="button"
                             accessibilityLabel="Isara ang paalala"
-                        >
-                            <Ionicons name="close" size={22} color={COLORS.text} />
-                        </TouchableOpacity>
-                        <Ionicons name="shield-checkmark-outline" size={28} color={COLORS.primaryLight} />
-                        <Text style={styles.noticeTitle}>Bago suriin sa AI</Text>
-                        <Text style={styles.noticeBody}>
+                        />
+                        <Ionicons name="shield-checkmark-outline" size={28} color={T.brand} />
+                        <Text style={[styles.noticeTitle, { color: T.text }]}>Bago suriin sa AI</Text>
+                        <Text style={[styles.noticeBody, { color: T.subText }]}>
                             Nilinis na text lang ang ipapadala sa AI, hindi ang larawan. Gabay sa pag-unawa ang resulta; hindi ito legal advice. Tingnan pa rin ang orihinal na dokumento bago magdesisyon.
                         </Text>
-                        <TouchableOpacity
-                            style={styles.noticeProceed}
+                        <Pressable
                             onPress={() => { void acceptAiNotice(); }}
                             accessibilityRole="button"
                         >
-                            <Text style={styles.noticeProceedText}>Naiintindihan ko, suriin sa AI</Text>
-                        </TouchableOpacity>
+                            {({ pressed }) => (
+                                <View
+                                    style={[
+                                        styles.noticeProceed,
+                                        { backgroundColor: T.brandVivid, borderColor: T.ink },
+                                        sink(pressed, 'sm'),
+                                    ]}
+                                >
+                                    <Text style={[styles.noticeProceedText, { color: T.brandText }]}>Naiintindihan ko, suriin sa AI</Text>
+                                </View>
+                            )}
+                        </Pressable>
                     </View>
                 </View>
             </Modal>
@@ -1289,100 +1638,85 @@ export default function BatchEditScreen({
         </SafeAreaView>
     );
 }
+
 const styles = StyleSheet.create({
-    readingBanner: {
-        minHeight: 62,
-        paddingHorizontal: 17,
-        paddingVertical: 10,
+    // --- SHARED: geometric brand accent (same ng ScreenLayout) ---
+    titleMarker: {
+        width: 15,
+        height: 15,
+        marginRight: 9,
+    },
+    markerSquareInk: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: 9,
+        height: 9,
+        borderWidth: BORDER.thin,
+    },
+    markerSquareBrand: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        width: 9,
+        height: 9,
+        borderWidth: BORDER.thin,
+    },
+
+    // --- SHARED: split CTA (purple main + black arrow square — spec) ---
+    splitCta: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.md,
+        overflow: 'hidden',
+    },
+    splitCtaMain: {
+        flex: 1,
+        minWidth: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.surface,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
+        justifyContent: 'center',
+        gap: 9,
+        paddingHorizontal: 14,
     },
-    readingCopy: {
-        flex: 1,
-        marginLeft: 12,
-    },
-    readingTitle: {
-        color: COLORS.text,
+    splitCtaText: {
         fontSize: 13,
         fontWeight: '800',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
     },
-    readingSubtext: {
-        color: COLORS.subText,
-        fontSize: 11,
-        marginTop: 3,
-    },
-    analyzeButtonReading: {
-        backgroundColor: COLORS.elevated,
-    },
-    noticeBackdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.8)',
-        justifyContent: 'center',
-        paddingHorizontal: 24,
-    },
-    noticeCard: {
-        backgroundColor: COLORS.surface,
-        borderColor: COLORS.border,
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 22,
-    },
-    noticeClose: {
-        position: 'absolute',
-        right: 12,
-        top: 12,
-        padding: 8,
-        zIndex: 1,
-    },
-    noticeTitle: {
-        color: COLORS.text,
-        fontSize: 19,
-        fontWeight: '800',
-        marginTop: 14,
-        marginBottom: 8,
-    },
-    noticeBody: {
-        color: COLORS.subText,
-        fontSize: 14,
-        lineHeight: 21,
-        marginBottom: 22,
-    },
-    noticeProceed: {
-        minHeight: 50,
-        borderRadius: 6,
-        backgroundColor: COLORS.primary,
+    splitCtaArrow: {
+        width: 40,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 12,
     },
-    noticeProceedText: {
-        color: COLORS.text,
-        fontWeight: '800',
-        textAlign: 'center',
-        fontSize: 14,
+    disabledButton: {
+        opacity: 0.5,
     },
+
+    // --- CONTAINERS ---
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
     },
     processingScreen: {
         flex: 1,
-        backgroundColor: COLORS.background,
     },
+
+    // --- PROCESSING (AI analyzing) STATE ---
     processingHeader: {
         height: 62,
         alignItems: 'center',
         justifyContent: 'center',
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
+        flexDirection: 'row',
+        borderBottomWidth: BORDER.thick,
     },
     processingHeaderTitle: {
-        color: COLORS.text,
         fontSize: 17,
+        lineHeight: 22,
         fontWeight: '900',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     processingBody: {
         flex: 1,
@@ -1393,41 +1727,92 @@ const styles = StyleSheet.create({
     processingIconBox: {
         width: 58,
         height: 58,
-        borderRadius: 7,
+        borderRadius: RADIUS.lg,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+        borderWidth: BORDER.thin,
     },
     processingTitle: {
-        color: COLORS.text,
         fontSize: 20,
+        lineHeight: 26,
         fontWeight: '900',
         textAlign: 'center',
         marginTop: 18,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     processingMessage: {
         maxWidth: 320,
-        color: COLORS.subText,
         fontSize: 13,
         lineHeight: 19,
         textAlign: 'center',
         marginTop: 8,
     },
+    processingSpinner: {
+        marginTop: 18,
+    },
+    processingProgressCard: {
+        alignSelf: 'stretch',
+        marginTop: 18,
+        paddingVertical: 11,
+        paddingHorizontal: 13,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
+    },
+    processingProgressHead: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    processingProgressLabel: {
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '800',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
+    },
+    processingProgressValue: {
+        fontSize: 12,
+        lineHeight: 16,
+        fontWeight: '900',
+        fontVariant: ['tabular-nums'],
+    },
+    processingProgressTrack: {
+        width: '100%',
+        height: 8,
+        marginTop: 8,
+        borderRadius: 2,
+        overflow: 'hidden',
+    },
+    processingProgressFill: {
+        height: '100%',
+        borderRadius: 2,
+    },
+    processingProgressSweep: {
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        // PIXELS, hindi '%': nasa pixels na rin ang translateX ng sweep,
+        // para consistent ang unit at walang Android cast crash.
+        width: PROGRESS_SWEEP_WIDTH,
+        borderRadius: 2,
+        opacity: 0.85,
+    },
     processingInfoRow: {
         maxWidth: 340,
         marginTop: 20,
-        paddingHorizontal: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
         flexDirection: 'row',
         alignItems: 'center',
     },
     processingInfoText: {
         flexShrink: 1,
-        color: COLORS.muted,
         fontSize: 11,
         lineHeight: 16,
-        marginLeft: 7,
+        marginLeft: 8,
     },
     processingFooter: {
         width: '100%',
@@ -1436,86 +1821,94 @@ const styles = StyleSheet.create({
         paddingHorizontal: 22,
         paddingBottom: 18,
     },
-    backgroundButton: {
-        width: '100%',
-        height: 50,
-        borderRadius: 6,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.primary,
-    },
-    backgroundButtonText: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: '900',
-    },
     processingCancelButton: {
-        height: 44,
-        marginTop: 6,
-        paddingHorizontal: 22,
-        alignSelf: 'center',
+        height: 42,
+        marginTop: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
     },
     processingCancelText: {
-        color: COLORS.danger,
-        fontSize: 13,
+        fontSize: 12,
+        lineHeight: 17,
         fontWeight: '800',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
     },
+
+    // --- EDITOR APP BAR (kapareho ng ScreenLayout: 2px ink rule) ---
     header: {
-        height: 60,
-        paddingHorizontal: 12,
+        height: 66,
+        paddingHorizontal: SPACING.md,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-    },
-    headerButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 7,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+        gap: 10,
+        borderBottomWidth: BORDER.thick,
     },
     headerCenter: {
         flex: 1,
+        minWidth: 0,
         alignItems: 'center',
-        paddingHorizontal: 8,
+    },
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     headerTitle: {
-        color: COLORS.text,
         fontSize: 16,
+        lineHeight: 21,
         fontWeight: '900',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        flexShrink: 1,
     },
     headerHint: {
-        color: COLORS.muted,
         fontSize: 10,
-        marginTop: 3,
+        lineHeight: 13,
+        marginTop: 2,
     },
     pageCounter: {
         minWidth: 44,
         height: 36,
         paddingHorizontal: 7,
-        borderRadius: 6,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
     },
     pageCounterText: {
-        color: COLORS.text,
         fontSize: 12,
         fontWeight: '900',
     },
+
+    // --- READING BANNER (flat card, brand spinner — progreso per spec) ---
+    readingBanner: {
+        minHeight: 62,
+        paddingHorizontal: 17,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderBottomWidth: BORDER.thin,
+    },
+    readingCopy: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    readingTitle: {
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    readingSubtext: {
+        fontSize: 11,
+        marginTop: 3,
+    },
+
+    // --- DOCUMENT CANVAS (media — sadyang madilim, hindi themed) ---
     viewerSection: {
         flex: 1,
         minHeight: 160,
-        backgroundColor: COLORS.black,
+        backgroundColor: CANVAS.black,
     },
     pageSlide: {
         height: '100%',
@@ -1528,21 +1921,21 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        borderRadius: 5,
-        backgroundColor: '#050609',
+        borderRadius: RADIUS.sm,
+        backgroundColor: CANVAS.black,
         borderWidth: 1,
-        borderColor: '#242A35',
+        borderColor: CANVAS.border,
     },
     documentImage: {
         width: '100%',
         height: '100%',
     },
+
+    // --- THUMBNAIL STRIP (2px ink rule sa taas — mirror ng app bar) ---
     thumbnailSection: {
         height: 84,
         paddingTop: 7,
-        backgroundColor: COLORS.surface,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
+        borderTopWidth: BORDER.thick,
     },
     thumbnailHeader: {
         height: 18,
@@ -1551,13 +1944,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     thumbnailHeaderText: {
-        color: COLORS.muted,
         fontSize: 9,
         fontWeight: '900',
         letterSpacing: 0.9,
     },
     thumbnailCountText: {
-        color: COLORS.primaryLight,
         fontSize: 10,
         fontWeight: '900',
         marginLeft: 7,
@@ -1571,18 +1962,16 @@ const styles = StyleSheet.create({
         height: 54,
         marginHorizontal: 4,
         overflow: 'hidden',
-        borderRadius: 5,
+        borderRadius: RADIUS.sm,
         borderWidth: 2,
         borderColor: 'transparent',
-        backgroundColor: COLORS.elevated,
-    },
-    thumbnailButtonSelected: {
-        borderColor: COLORS.primaryLight,
+        backgroundColor: CANVAS.black,
     },
     thumbnailImage: {
         width: '100%',
         height: '100%',
     },
+    // Number badge: media overlay sa ibabaw ng thumbnail photo
     thumbnailNumber: {
         position: 'absolute',
         left: 3,
@@ -1590,13 +1979,13 @@ const styles = StyleSheet.create({
         minWidth: 19,
         height: 19,
         paddingHorizontal: 4,
-        borderRadius: 4,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.82)',
     },
     thumbnailNumberText: {
-        color: COLORS.text,
+        color: '#FFFFFF',
         fontSize: 9,
         fontWeight: '900',
     },
@@ -1610,19 +1999,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    thumbnailSuccess: {
-        backgroundColor: COLORS.success,
-    },
-    thumbnailError: {
-        backgroundColor: COLORS.danger,
-    },
+
+    // --- TOOL BAR (2px ink rule sa taas) ---
     toolBar: {
         height: 60,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
+        borderTopWidth: BORDER.thick,
     },
     toolButton: {
         flex: 1,
@@ -1631,139 +2014,93 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     toolButtonText: {
-        color: COLORS.subText,
         fontSize: 11,
         fontWeight: '800',
         marginTop: 4,
-    },
-    deleteText: {
-        color: COLORS.danger,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     toolDivider: {
         width: 1,
         height: 28,
-        backgroundColor: COLORS.border,
     },
-    ocrPreviewButton: {
-        minHeight: 38,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 6,
-    },
-    ocrPreviewLabel: {
-        color: COLORS.primaryLight,
-        fontWeight: '700',
-        fontSize: 12,
-    },
+
+    // --- BOTTOM ACTION AREA (2px ink rule sa taas) ---
     bottomActionArea: {
-        minHeight: 83,
+        minHeight: 96,
         paddingHorizontal: 14,
         paddingTop: 8,
-        paddingBottom: 5,
-        marginBottom: 5,
-        backgroundColor: COLORS.background,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
+        paddingBottom: 10,
+        borderTopWidth: BORDER.thick,
+    },
+    ocrPreviewButton: {
+        minHeight: 34,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    ocrPreviewLabel: {
+        fontWeight: '800',
+        fontSize: 11,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     privacyNote: {
-        color: COLORS.muted,
         fontSize: 10,
+        lineHeight: 14,
         textAlign: 'center',
-        marginBottom: 7,
+        marginBottom: 8,
     },
-    analyzeButton: {
-        height: 48,
-        borderRadius: 6,
-        paddingHorizontal: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
+
+    // --- AI NOTICE MODAL (focal: 2px outline + 2px hard shadow) ---
+    noticeBackdrop: {
+        flex: 1,
         justifyContent: 'center',
-        backgroundColor: COLORS.primary,
-    },
-    analyzeButtonText: {
-        color: COLORS.text,
-        fontSize: 16,
-        fontWeight: '900',
-        textAlign: 'center',
-        marginLeft: 9,
-    },
-    ocrOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        zIndex: 50,
         paddingHorizontal: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.84)',
     },
-    ocrPanel: {
-        width: '100%',
-        maxWidth: 350,
-        padding: 24,
-        borderRadius: 8,
-        alignItems: 'center',
-        backgroundColor: COLORS.surface,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+    noticeCard: {
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
+        padding: 22,
     },
-    ocrIconBox: {
-        width: 58,
-        height: 58,
-        borderRadius: 6,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.elevated,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+    noticeClose: {
+        position: 'absolute',
+        right: 12,
+        top: 12,
+        zIndex: 1,
     },
-    ocrTitle: {
-        color: COLORS.text,
-        fontSize: 18,
+    noticeTitle: {
+        fontSize: 19,
+        lineHeight: 24,
         fontWeight: '900',
-        marginTop: 15,
-    },
-    ocrMessage: {
-        color: COLORS.subText,
-        fontSize: 13,
-        marginTop: 6,
-    },
-    progressTrack: {
-        width: '100%',
-        height: 6,
-        marginTop: 18,
-        overflow: 'hidden',
-        borderRadius: 3,
-        backgroundColor: COLORS.elevated,
-    },
-    progressFill: {
-        height: '100%',
-        borderRadius: 3,
-        backgroundColor: COLORS.primary,
-    },
-    ocrPrivacyText: {
-        color: COLORS.success,
-        fontSize: 11,
-        lineHeight: 17,
-        textAlign: 'center',
         marginTop: 14,
+        marginBottom: 8,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
-    cancelOcrButton: {
-        minWidth: 100,
-        height: 42,
-        marginTop: 18,
-        borderRadius: 6,
+    noticeBody: {
+        fontSize: 14,
+        lineHeight: 21,
+        marginBottom: 22,
+    },
+    noticeProceed: {
+        minHeight: 50,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(239, 68, 68, 0.10)',
-        borderWidth: 1,
-        borderColor: 'rgba(239, 68, 68, 0.35)',
+        paddingHorizontal: 12,
     },
-    cancelOcrButtonText: {
-        color: COLORS.danger,
+    noticeProceedText: {
+        fontWeight: '800',
+        textAlign: 'center',
         fontSize: 13,
-        fontWeight: '900',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
+
+    // --- EMPTY STATE ---
     emptyState: {
         flex: 1,
         paddingHorizontal: 28,
@@ -1771,30 +2108,27 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     emptyTitle: {
-        color: COLORS.text,
         fontSize: 20,
+        lineHeight: 25,
         fontWeight: '900',
         marginTop: 16,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     emptyMessage: {
-        color: COLORS.subText,
         fontSize: 14,
         lineHeight: 21,
         textAlign: 'center',
         marginTop: 8,
     },
-    emptyButton: {
-        minHeight: 50,
+    emptyCtaWrap: {
+        alignSelf: 'stretch',
+        maxWidth: 320,
         marginTop: 22,
-        borderRadius: 7,
-        paddingHorizontal: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.primary,
     },
-    emptyButtonText: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: '900',
+
+    // --- LEGACY (hindi na ginagamit sa JSX — naka-keep lang) ---
+    analyzeButtonReading: {
+        opacity: 0.85,
     },
 });

@@ -1,15 +1,23 @@
-// LIBRARY SCREEN VERSION: 6.2.7
+// LIBRARY SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI lang ang nagbago; walang binagong logic/state/network)
+// Spec: purple system (zero na ang dilaw/gold/orange), 1.5px standard
+// borders, 2px sa CTA, 2–6px radius (squared), predominantly FLAT —
+// 2px hard shadow lang sa focal na search CTA.
+// Header: unified ScreenLayout app bar (ALL-CAPS title + ink/purple
+// square pair + sync icon button sa kanan) — tanggal na ang sariling
+// header; ang "{n} legal terms" subtitle ay pumunta sa search section.
+
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Platform,
+    Pressable,
     ScrollView,
-    StatusBar,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View,
+    type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Fuse from 'fuse.js';
@@ -17,15 +25,31 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import defaultDictionary from '../../../data/legal_dictionary.json';
 import { useCustomAlert } from '../../../components/CustomAlert';
+import ScreenLayout from '../../../components/ScreenLayout';
+import { NeoBadge, NeoButton, getNeoShadow } from '../../../components/Neo';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
 import { explainLegalEntry, explanationErrorMessage, legalEntryKey, legalText } from '../../../services/legalDictionaryService';
 import { getApiIdentityHeaders } from '../../../services/installId';
 
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const SUCCESS = '#10B981';
-const WARNING = '#F59E0B';
-const DANGER = '#EF4444';
+/**
+ * Hard-shadow press helper ("sink into paper") — pareho ng helper ng
+ * ProfileScreen. Para lang sa mga focal element na may 2px hard shadow
+ * (dito: search CTA lang). Flat surfaces ay simpleng dim press.
+ */
+function makeSink(colors: ThemeColors) {
+    return (pressed: boolean, level: 'sm' | 'md' | 'lg'): ViewStyle => {
+        if (!pressed) return getNeoShadow(colors, level);
+        const offset = SHADOW[level].ios.shadowOffset;
+        return {
+            elevation: 0,
+            transform: [
+                { translateX: offset.width },
+                { translateY: offset.height },
+            ],
+        };
+    };
+}
 
 type DictionaryItem = {
     id?: number;
@@ -102,7 +126,7 @@ const ResultCard = ({
                 styles.resultCard,
                 {
                     backgroundColor: T.card,
-                    borderColor: T.border,
+                    borderColor: T.ink,
                 },
             ]}
         >
@@ -114,70 +138,70 @@ const ResultCard = ({
             </Text>
 
             <Text
-                style={[styles.legalBasis, { color: PRIMARY_SOFT }]}
+                style={[styles.legalBasis, { color: T.brand }]}
                 numberOfLines={2}
             >
                 {item.legal_basis || 'Philippine legal reference'}
             </Text>
 
             <View
-                    style={[
-                        styles.tabBar,
-                        {
-                            backgroundColor: T.bg,
-                            borderColor: T.border,
-                        },
-                    ]}
-                >
-                    {(
-                        [
-                            ['ai', 'Paliwanag'],
-                            ['basis', 'Batayan'],
-                            ...(item.example ? [['example', 'Halimbawa'] as const] : []),
-                        ] as const
-                    ).map(([value, label]) => {
-                        const selected = activeTab === value;
+                style={[
+                    styles.tabBar,
+                    {
+                        backgroundColor: T.bg,
+                        borderColor: T.ink,
+                    },
+                ]}
+            >
+                {(
+                    [
+                        ['ai', 'Paliwanag'],
+                        ['basis', 'Batayan'],
+                        ...(item.example ? [['example', 'Halimbawa'] as const] : []),
+                    ] as const
+                ).map(([value, label]) => {
+                    const selected = activeTab === value;
 
-                        return (
-                            <TouchableOpacity
-                                key={value}
+                    return (
+                        <TouchableOpacity
+                            key={value}
+                            style={[
+                                styles.tabButton,
+                                selected && {
+                                    backgroundColor: T.brand,
+                                },
+                            ]}
+                            onPress={() => changeTab(value)}
+                            accessibilityRole="tab"
+                            accessibilityState={{ selected }}
+                        >
+                            <Text
                                 style={[
-                                    styles.tabButton,
-                                    selected && {
-                                        backgroundColor: PRIMARY,
+                                    styles.tabText,
+                                    {
+                                        color: selected
+                                            ? T.brandText
+                                            : T.subText,
                                     },
                                 ]}
-                                onPress={() => changeTab(value)}
-                                accessibilityRole="tab"
-                                accessibilityState={{ selected }}
                             >
-                                <Text
-                                    style={[
-                                        styles.tabText,
-                                        {
-                                            color: selected
-                                                ? '#FFFFFF'
-                                                : T.subText,
-                                        },
-                                    ]}
-                                >
-                                    {label}
-                                </Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
+                                {label}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
 
             <View
                 style={[
                     styles.resultTextBox,
                     {
                         backgroundColor: T.bg,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
                 ]}
             >
-                {activeTab === 'ai' && explaining && <ActivityIndicator size="small" color={PRIMARY_SOFT} />}
+                {activeTab === 'ai' && explaining && <ActivityIndicator size="small" color={T.brand} />}
                 <Text
                     style={[styles.resultText, { color: T.text }]}
                     selectable
@@ -193,7 +217,7 @@ const ResultCard = ({
                         }
                         accessibilityRole="button"
                     >
-                        <Text style={styles.readMoreText}>
+                        <Text style={[styles.readMoreText, { color: T.brand }]}>
                             {isTextExpanded
                                 ? 'Paikliin'
                                 : 'Basahin lahat'}
@@ -217,7 +241,7 @@ export default function LibraryScreen({ navigation }: any) {
     const [isSyncing, setIsSyncing] = useState(false);
 
     const { showAlert, AlertRender } = useCustomAlert();
-    const { colors: T, isDarkMode } = useTheme();
+    const { colors: T } = useTheme();
 
     const API_BASE_URL =
         process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
@@ -422,322 +446,290 @@ export default function LibraryScreen({ navigation }: any) {
     const hasResults = results.length > 0 && !loading;
     const showEmptyState =
         results.length === 0 && !loading && error === '';
+    const searchDisabled = searchQuery.trim().length < 2 || loading;
+    const sink = makeSink(T);
 
     return (
-        <View style={[styles.screen, { backgroundColor: T.bg }]}> 
-            <StatusBar
-                barStyle={
-                    isDarkMode ? 'light-content' : 'dark-content'
-                }
-                backgroundColor={T.bg}
-            />
-
-            <View style={styles.header}>
-                <View style={styles.headerCopy}>
-                    <Text style={[styles.headerTitle, { color: T.text }]}> 
-                        Lex-Library
-                    </Text>
+        <ScreenLayout
+            title="Lex-Library"
+            showBackButton={false}
+            noPadding
+            rightIcon="cloud-download-outline"
+            rightIconColor={T.text}
+            onRightPress={() => {
+                if (!isSyncing) void syncDatabase();
+            }}
+        >
+            <View style={[styles.screen, { backgroundColor: T.bg }]}>
+                <View style={styles.searchSection}>
                     <Text
-                        style={[
-                            styles.headerSubtitle,
-                            { color: T.subText },
-                        ]}
+                        style={[styles.metaText, { color: T.subText }]}
+                        numberOfLines={1}
                     >
-                        {dictionaryData.length} legal terms
-                    </Text>
-                </View>
-
-                <TouchableOpacity
-                    style={[
-                        styles.headerButton,
-                        {
-                            backgroundColor: T.card,
-                            borderColor: T.border,
-                        },
-                    ]}
-                    onPress={() => void syncDatabase()}
-                    disabled={isSyncing}
-                    accessibilityRole="button"
-                    accessibilityLabel="I-update ang offline dictionary"
-                >
-                    {isSyncing ? (
-                        <ActivityIndicator
-                            size="small"
-                            color={PRIMARY_SOFT}
-                        />
-                    ) : (
-                        <Ionicons
-                            name="cloud-download-outline"
-                            size={21}
-                            color={T.text}
-                        />
-                    )}
-                </TouchableOpacity>
-            </View>
-
-            <View style={styles.searchSection}>
-                <Text style={[styles.searchHeading, { color: T.text }]}> 
-                    Anong legal term ang hahanapin mo?
-                </Text>
-
-                <View style={styles.searchRow}>
-                    <View
-                        style={[
-                            styles.searchBox,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <Ionicons
-                            name="search-outline"
-                            size={19}
-                            color={T.subText}
-                        />
-                        <TextInput
-                            style={[
-                                styles.searchInput,
-                                { color: T.text },
-                            ]}
-                            placeholder="Hal. Usury o Article 13"
-                            placeholderTextColor={T.subText}
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                            onSubmitEditing={() => void handleSearch()}
-                            returnKeyType="search"
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            accessibilityLabel="Legal term"
-                        />
-
-                        {searchQuery.length > 0 && (
-                            <TouchableOpacity
-                                style={styles.clearButton}
-                                onPress={clearSearch}
-                                accessibilityRole="button"
-                                accessibilityLabel="Burahin ang search"
-                            >
-                                <Ionicons
-                                    name="close-circle"
-                                    size={19}
-                                    color={T.subText}
-                                />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    <TouchableOpacity
-                        style={[
-                            styles.searchButton,
-                            (!searchQuery.trim() || loading) &&
-                                styles.disabledButton,
-                        ]}
-                        onPress={() => void handleSearch()}
-                        disabled={searchQuery.trim().length < 2 || loading}
-                        accessibilityRole="button"
-                        accessibilityLabel="Hanapin"
-                    >
-                        {loading ? (
-                            <ActivityIndicator
-                                size="small"
-                                color="#FFFFFF"
-                            />
-                        ) : (
-                            <Text style={styles.searchButtonText}>
-                                Hanapin
-                            </Text>
-                        )}
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            {error !== '' && !loading && (
-                <View style={styles.messageState}>
-                    <View
-                        style={[
-                            styles.messageIcon,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <Ionicons
-                            name="search-outline"
-                            size={27}
-                            color={DANGER}
-                        />
-                    </View>
-                    <Text style={[styles.messageTitle, { color: T.text }]}> 
-                        Walang resulta
-                    </Text>
-                    <Text
-                        style={[
-                            styles.messageBody,
-                            { color: T.subText },
-                        ]}
-                    >
-                        {error}
-                    </Text>
-                </View>
-            )}
-
-            {showEmptyState && (
-                <View style={styles.emptyState}>
-                    <View
-                        style={[
-                            styles.emptyIcon,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                    >
-                        <Ionicons
-                            name="book-outline"
-                            size={32}
-                            color={PRIMARY_SOFT}
-                        />
-                    </View>
-
-                    <Text style={[styles.emptyTitle, { color: T.text }]}> 
-                        Legal dictionary
-                    </Text>
-                    <Text
-                        style={[
-                            styles.emptyBody,
-                            { color: T.subText },
-                        ]}
-                    >
-                        Maghanap ng legal term o tingnan ang naka-save na
-                        dictionary.
+                        {isSyncing
+                            ? 'Nag-i-sync ang dictionary…'
+                            : `${dictionaryData.length} legal terms`}
                     </Text>
 
-                    <TouchableOpacity
-                        style={[
-                            styles.browseButton,
-                            {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
-                            },
-                        ]}
-                        onPress={() =>
-                            navigation.navigate(
-                                'DictionaryDetailScreen',
-                                { dictionaryData }
-                            )
-                        }
-                        accessibilityRole="button"
-                    >
-                        <Ionicons
-                            name="library-outline"
-                            size={19}
-                            color={PRIMARY_SOFT}
-                        />
-                        <Text
-                            style={[
-                                styles.browseButtonText,
-                                { color: T.text },
-                            ]}
-                        >
-                            Tingnan ang offline dictionary
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            )}
+                    <Text style={[styles.searchHeading, { color: T.text }]}>
+                        Anong legal term ang hahanapin mo?
+                    </Text>
 
-            {hasResults && (
-                <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    contentContainerStyle={styles.resultsContent}
-                >
-                    <View style={styles.resultsHeader}>
-                        <Text
-                            style={[
-                                styles.resultsCount,
-                                { color: T.text },
-                            ]}
-                        >
-                            {results.length} resulta
-                        </Text>
-
+                    <View style={styles.searchRow}>
                         <View
                             style={[
-                                styles.modeBadge,
+                                styles.searchBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: isOfflineMode
-                                        ? T.border
-                                        : SUCCESS,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             <Ionicons
-                                name={
-                                    isOfflineMode
-                                        ? 'cloud-offline-outline'
-                                        : 'cloud-done-outline'
-                                }
-                                size={13}
-                                color={
-                                    isOfflineMode ? T.subText : SUCCESS
-                                }
+                                name="search-outline"
+                                size={19}
+                                color={T.subText}
                             />
+                            <TextInput
+                                style={[
+                                    styles.searchInput,
+                                    { color: T.text },
+                                ]}
+                                placeholder="Hal. Usury o Article 13"
+                                placeholderTextColor={T.subText}
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                                onSubmitEditing={() => void handleSearch()}
+                                returnKeyType="search"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                accessibilityLabel="Legal term"
+                            />
+
+                            {searchQuery.length > 0 && (
+                                <TouchableOpacity
+                                    style={styles.clearButton}
+                                    onPress={clearSearch}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Burahin ang search"
+                                >
+                                    <Ionicons
+                                        name="close-circle"
+                                        size={19}
+                                        color={T.subText}
+                                    />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+
+                        {/* SEARCH CTA — split-button (spec: purple main
+                            section + hiwalay na black square na may puting
+                            right-arrow). Focal element kaya may 2px hard
+                            shadow na bumabagsak kapag pinindot. */}
+                        <Pressable
+                            onPress={() => void handleSearch()}
+                            disabled={searchDisabled}
+                            accessibilityRole="button"
+                            accessibilityLabel="Hanapin"
+                            accessibilityState={{ disabled: searchDisabled }}
+                        >
+                            {({ pressed }) => (
+                                <View
+                                    style={[
+                                        styles.searchCta,
+                                        searchDisabled
+                                            ? styles.disabledButton
+                                            : sink(pressed, 'sm'),
+                                    ]}
+                                >
+                                    <View
+                                        style={[
+                                            styles.searchCtaMain,
+                                            { backgroundColor: T.brand },
+                                        ]}
+                                    >
+                                        {loading ? (
+                                            <ActivityIndicator
+                                                size="small"
+                                                color={T.brandText}
+                                            />
+                                        ) : (
+                                            <Text
+                                                style={[
+                                                    styles.searchCtaText,
+                                                    { color: T.brandText },
+                                                ]}
+                                            >
+                                                Hanapin
+                                            </Text>
+                                        )}
+                                    </View>
+                                    <View
+                                        style={[
+                                            styles.searchCtaArrow,
+                                            { backgroundColor: T.ink },
+                                        ]}
+                                    >
+                                        <Ionicons
+                                            name="arrow-forward"
+                                            size={16}
+                                            color={T.card}
+                                        />
+                                    </View>
+                                </View>
+                            )}
+                        </Pressable>
+                    </View>
+                </View>
+
+                {error !== '' && !loading && (
+                    <View style={styles.messageState}>
+                        <View
+                            style={[
+                                styles.messageIcon,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
+                            ]}
+                        >
+                            <Ionicons
+                                name="search-outline"
+                                size={27}
+                                color={T.danger}
+                            />
+                        </View>
+                        <Text style={[styles.messageTitle, { color: T.text }]}>
+                            Walang resulta
+                        </Text>
+                        <Text
+                            style={[
+                                styles.messageBody,
+                                { color: T.subText },
+                            ]}
+                        >
+                            {error}
+                        </Text>
+                    </View>
+                )}
+
+                {showEmptyState && (
+                    <View style={styles.emptyState}>
+                        <View
+                            style={[
+                                styles.emptyIcon,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
+                            ]}
+                        >
+                            <Ionicons
+                                name="book-outline"
+                                size={32}
+                                color={T.brand}
+                            />
+                        </View>
+
+                        <Text style={[styles.emptyTitle, { color: T.text }]}>
+                            Legal dictionary
+                        </Text>
+                        <Text
+                            style={[
+                                styles.emptyBody,
+                                { color: T.subText },
+                            ]}
+                        >
+                            Maghanap ng legal term o tingnan ang naka-save na
+                            dictionary.
+                        </Text>
+
+                        <NeoButton
+                            label="Tingnan ang offline dictionary"
+                            variant="secondary"
+                            size="sm"
+                            icon="library-outline"
+                            style={styles.browseButton}
+                            onPress={() =>
+                                navigation.navigate(
+                                    'DictionaryDetailScreen',
+                                    { dictionaryData }
+                                )
+                            }
+                        />
+                    </View>
+                )}
+
+                {hasResults && (
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        contentContainerStyle={styles.resultsContent}
+                    >
+                        <View style={styles.resultsHeader}>
                             <Text
                                 style={[
-                                    styles.modeBadgeText,
+                                    styles.resultsCount,
+                                    { color: T.text },
+                                ]}
+                            >
+                                {results.length} resulta
+                            </Text>
+
+                            {isOfflineMode ? (
+                                <NeoBadge
+                                    label="Offline"
+                                    variant="neutral"
+                                    icon="cloud-offline-outline"
+                                />
+                            ) : (
+                                <NeoBadge
+                                    label="Online"
+                                    variant="success"
+                                    icon="cloud-done-outline"
+                                />
+                            )}
+                        </View>
+
+                        {isOfflineMode && (
+                            <View
+                                style={[
+                                    styles.offlineNotice,
                                     {
-                                        color: isOfflineMode
-                                            ? T.subText
-                                            : SUCCESS,
+                                        backgroundColor: T.brandSoft,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                             >
-                                {isOfflineMode ? 'Offline' : 'Online'}
-                            </Text>
-                        </View>
-                    </View>
+                                <Ionicons
+                                    name="information-circle-outline"
+                                    size={18}
+                                    color={T.brand}
+                                />
+                                <Text
+                                    style={[
+                                        styles.offlineNoticeText,
+                                        { color: T.brandDeep },
+                                    ]}
+                                >
+                                    Offline ang legal text. Kailangan ng internet para sa paliwanag ng AI.
+                                </Text>
+                            </View>
+                        )}
 
-                    {isOfflineMode && (
-                        <View
-                            style={[
-                                styles.offlineNotice,
-                                {
-                                    backgroundColor: T.card,
-                                    borderColor: T.border,
-                                },
-                            ]}
-                        >
-                            <Ionicons
-                                name="information-circle-outline"
-                                size={18}
-                                color={WARNING}
+                        {results.map((item, index) => (
+                            <ResultCard
+                                key={`${legalEntryKey(item)}-${index}`}
+                                item={item}
+                                T={T}
                             />
-                            <Text
-                                style={[
-                                    styles.offlineNoticeText,
-                                    { color: T.subText },
-                                ]}
-                            >
-                                Offline ang legal text. Kailangan ng internet para sa paliwanag ng AI.
-                            </Text>
-                        </View>
-                    )}
+                        ))}
+                    </ScrollView>
+                )}
 
-                    {results.map((item, index) => (
-                        <ResultCard
-                            key={`${legalEntryKey(item)}-${index}`}
-                            item={item}
-                            T={T}
-                        />
-                    ))}
-                </ScrollView>
-            )}
-
-            <AlertRender />
-        </View>
+                <AlertRender />
+            </View>
+        </ScreenLayout>
     );
 }
 
@@ -745,59 +737,40 @@ const styles = StyleSheet.create({
     screen: {
         flex: 1,
     },
-    header: {
-        minHeight: 70,
-        paddingHorizontal: 16,
-        paddingTop:
-            Platform.OS === 'android'
-                ? (StatusBar.currentHeight || 24) + 8
-                : 48,
-        paddingBottom: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    headerCopy: {
-        flex: 1,
-    },
-    headerTitle: {
-        fontSize: 25,
-        fontWeight: '900',
-        letterSpacing: -0.4,
-    },
-    headerSubtitle: {
-        marginTop: 2,
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    headerButton: {
-        width: 42,
-        height: 42,
-        borderRadius: 7,
-        borderWidth: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+
+    // --- SEARCH SECTION (unified na ang header — dito na rin ang dating
+    //     "{n} legal terms" subtitle mula sa lumang header) ---
     searchSection: {
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 16,
+        paddingHorizontal: SPACING.lg,
+        paddingTop: 12,
+        paddingBottom: SPACING.lg,
+    },
+    metaText: {
+        marginBottom: 8,
+        fontSize: 10,
+        lineHeight: 13,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
     },
     searchHeading: {
         marginBottom: 10,
-        fontSize: 14,
+        fontSize: 16,
+        lineHeight: 21,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     searchRow: {
         flexDirection: 'row',
-        gap: 8,
+        gap: SPACING.sm,
     },
     searchBox: {
         flex: 1,
         minWidth: 0,
         height: 48,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         paddingLeft: 12,
         flexDirection: 'row',
         alignItems: 'center',
@@ -815,23 +788,39 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    searchButton: {
-        minWidth: 82,
+
+    // --- SEARCH CTA (split-button: purple main + black arrow square —
+    //     focal, kaya 2px border + 2px hard shadow; flat kapag disabled) ---
+    searchCta: {
         height: 48,
-        borderRadius: 7,
-        paddingHorizontal: 12,
-        backgroundColor: PRIMARY,
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.md,
+        overflow: 'hidden',
+    },
+    searchCtaMain: {
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        paddingHorizontal: 14,
     },
-    searchButtonText: {
-        color: '#FFFFFF',
+    searchCtaText: {
         fontSize: 12,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+    },
+    searchCtaArrow: {
+        width: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     disabledButton: {
         opacity: 0.45,
     },
+
+    // --- MESSAGE / EMPTY STATES (flat, 1.5px ink outlines, walang shadow) ---
     messageState: {
         flex: 1,
         paddingHorizontal: 32,
@@ -841,8 +830,8 @@ const styles = StyleSheet.create({
     messageIcon: {
         width: 58,
         height: 58,
-        borderRadius: 8,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 13,
@@ -851,6 +840,8 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '900',
         marginBottom: 6,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     messageBody: {
         maxWidth: 300,
@@ -868,8 +859,8 @@ const styles = StyleSheet.create({
     emptyIcon: {
         width: 62,
         height: 62,
-        borderRadius: 8,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 13,
@@ -878,30 +869,23 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '900',
         marginBottom: 6,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     emptyBody: {
         maxWidth: 310,
         fontSize: 12,
         lineHeight: 18,
         textAlign: 'center',
-        marginBottom: 16,
+        marginBottom: SPACING.lg,
     },
     browseButton: {
-        minHeight: 46,
-        borderRadius: 7,
-        borderWidth: 1,
-        paddingHorizontal: 14,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
+        minWidth: 220,
     },
-    browseButtonText: {
-        fontSize: 12,
-        fontWeight: '900',
-    },
+
+    // --- RESULTS LIST ---
     resultsContent: {
-        paddingHorizontal: 16,
+        paddingHorizontal: SPACING.lg,
         paddingBottom: 40,
     },
     resultsHeader: {
@@ -914,39 +898,34 @@ const styles = StyleSheet.create({
     resultsCount: {
         fontSize: 14,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
-    modeBadge: {
-        minHeight: 28,
-        borderRadius: 6,
-        borderWidth: 1,
-        paddingHorizontal: 9,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 5,
-    },
-    modeBadgeText: {
-        fontSize: 10,
-        fontWeight: '900',
-    },
+
+    // --- OFFLINE NOTICE (pale lavender — spec: informational surfaces) ---
     offlineNotice: {
         minHeight: 44,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 11,
         paddingVertical: 8,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: SPACING.sm,
         marginBottom: 10,
     },
     offlineNoticeText: {
         flex: 1,
         fontSize: 11,
         lineHeight: 16,
+        fontWeight: '600',
     },
+
+    // --- RESULT CARD (flat — list item, walang shadow per spec;
+    //     focal-only ang shadows, hindi sa bawat card) ---
     resultCard: {
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         padding: 14,
         marginBottom: 10,
     },
@@ -963,8 +942,8 @@ const styles = StyleSheet.create({
     },
     tabBar: {
         marginTop: 13,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         padding: 3,
         flexDirection: 'row',
         gap: 3,
@@ -972,7 +951,7 @@ const styles = StyleSheet.create({
     tabButton: {
         flex: 1,
         minHeight: 34,
-        borderRadius: 5,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 4,
@@ -981,11 +960,13 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '800',
         textAlign: 'center',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     resultTextBox: {
         marginTop: 10,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         padding: 12,
     },
     resultText: {
@@ -999,8 +980,9 @@ const styles = StyleSheet.create({
         marginTop: 5,
     },
     readMoreText: {
-        color: PRIMARY_SOFT,
         fontSize: 11,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
 });

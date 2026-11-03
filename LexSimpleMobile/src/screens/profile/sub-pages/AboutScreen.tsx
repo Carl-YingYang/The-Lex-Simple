@@ -1,11 +1,31 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../../../theme/globalStyles';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useTheme } from '../../../theme/ThemeContext';
+import { BORDER, RADIUS } from '../../../theme/tokens';
 
-// ABOUT SCREEN VERSION: 1.0.0
+// ABOUT SCREEN VERSION: 2.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Static info screen: hero, mission, features, developers, disclaimer.
+// UI lang ang binago; walang anumang logic/flow na binago.)
+// Spec: purple system (zero na ang asul/dilaw/gold/berde), 1.5px standard
+// borders, 2–6px radius (squared), predominantly FLAT — walang CTA dito,
+// kaya walang hard shadow kahit saan (content-screen precedent).
+// Pagbabago sa UI (v2.0.0):
+//   - Binura ang COLORS (globalStyles) import at lahat ng hardcoded
+//     rgba/hex — tokens lahat (T.brand / T.brandSoft / T.brandText /
+//     T.danger + BORDER/RADIUS).
+//   - Feature icons: iisa na lang ang accent — purple (T.brand sa
+//     T.brandSoft chip). Dati apat na kulay (violet/asul/dilaw/berde).
+//   - Disclaimer card: amber tint → danger token (T.dangerSoft bg +
+//     T.danger border/title/icon) — kanya-kanyang kulay bawal na, ang
+//     pula na lang ang caution semantics sa purple spec.
+//   - Developer avatar: purple fill + ITIM na initials (spec rule sa
+//     purple bg) — dating puting teksto sa asul.
+//   - Cards: 1.5px ink outline + RADIUS.lg (6px); icon boxes/chips:
+//     RADIUS.md (4px); version badge: RADIUS.sm (3px). Dating 1px border
+//     at 5–8px radius.
+//   - Version dot: bilog → maliit na square (spec: bawal circle shapes).
 
 type FeatureItemProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -27,8 +47,8 @@ function FeatureItem({
   const { colors: T } = useTheme();
 
   return (
-    <View style={[styles.featureItem, !isLast && { borderBottomColor: T.border, borderBottomWidth: 1 }]}> 
-      <View style={[styles.featureIconBox, { backgroundColor: iconBackground }]}> 
+    <View style={[styles.featureItem, !isLast && { borderBottomColor: T.border, borderBottomWidth: BORDER.thin }]}>
+      <View style={[styles.featureIconBox, { backgroundColor: iconBackground }]}>
         <Ionicons name={icon} size={19} color={iconColor} />
       </View>
       <View style={styles.featureCopy}>
@@ -50,13 +70,13 @@ function DeveloperItem({ initials, name, role, description }: DeveloperItemProps
   const { colors: T } = useTheme();
 
   return (
-    <View style={[styles.developerCard, { backgroundColor: T.card, borderColor: T.border }]}> 
-      <View style={styles.developerAvatar}>
-        <Text style={styles.developerInitials}>{initials}</Text>
+    <View style={[styles.developerCard, { backgroundColor: T.card, borderColor: T.ink }]}>
+      <View style={[styles.developerAvatar, { backgroundColor: T.brand }]}>
+        <Text style={[styles.developerInitials, { color: T.brandText }]}>{initials}</Text>
       </View>
       <View style={styles.developerCopy}>
         <Text style={[styles.developerName, { color: T.text }]}>{name}</Text>
-        <Text style={styles.developerRole}>{role}</Text>
+        <Text style={[styles.developerRole, { color: T.brand }]}>{role}</Text>
         <Text style={[styles.developerDescription, { color: T.subText }]}>{description}</Text>
       </View>
     </View>
@@ -74,17 +94,17 @@ export default function AboutScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.heroCard, { backgroundColor: T.card, borderColor: T.border }]}> 
-          <View style={styles.logoBox}>
-            <Ionicons name="library" size={32} color={COLORS.primaryLight} />
+        <View style={[styles.heroCard, { backgroundColor: T.card, borderColor: T.ink }]}>
+          <View style={[styles.logoBox, { backgroundColor: T.brandSoft, borderColor: T.ink }]}>
+            <Ionicons name="library" size={32} color={T.brand} />
           </View>
 
           <View style={styles.heroCopy}>
             <Text style={[styles.appName, { color: T.text }]}>Lex-Simple</Text>
             <Text style={[styles.appTagline, { color: T.subText }]}>Understand legal documents in clearer, conversational Taglish.</Text>
-            <View style={styles.versionBadge}>
-              <View style={styles.versionDot} />
-              <Text style={styles.versionText}>VERSION 1.0.0</Text>
+            <View style={[styles.versionBadge, { backgroundColor: T.brandSoft }]}>
+              <View style={[styles.versionDot, { backgroundColor: T.brand }]} />
+              <Text style={[styles.versionText, { color: T.brand }]}>VERSION 1.0.0</Text>
             </View>
           </View>
         </View>
@@ -94,10 +114,10 @@ export default function AboutScreen() {
           <View style={[styles.sectionLine, { backgroundColor: T.border }]} />
         </View>
 
-        <View style={[styles.missionCard, { backgroundColor: T.card, borderColor: T.border }]}> 
+        <View style={[styles.missionCard, { backgroundColor: T.card, borderColor: T.ink }]}>
           <View style={styles.missionHeader}>
-            <View style={styles.missionIconBox}>
-              <Ionicons name="people-outline" size={20} color={COLORS.primaryLight} />
+            <View style={[styles.missionIconBox, { backgroundColor: T.brandSoft }]}>
+              <Ionicons name="people-outline" size={20} color={T.brand} />
             </View>
             <View style={styles.missionHeaderCopy}>
               <Text style={[styles.missionTitle, { color: T.text }]}>Bridging the legal language gap</Text>
@@ -114,32 +134,32 @@ export default function AboutScreen() {
           <View style={[styles.sectionLine, { backgroundColor: T.border }]} />
         </View>
 
-        <View style={[styles.featureCard, { backgroundColor: T.card, borderColor: T.border }]}> 
+        <View style={[styles.featureCard, { backgroundColor: T.card, borderColor: T.ink }]}>
           <FeatureItem
             icon="scan-outline"
-            iconColor={COLORS.primaryLight}
-            iconBackground="rgba(167, 139, 250, 0.12)"
+            iconColor={T.brand}
+            iconBackground={T.brandSoft}
             title="Offline-first document scanning"
             description="Capture documents and extract readable text directly from your phone."
           />
           <FeatureItem
             icon="language-outline"
-            iconColor="#60A5FA"
-            iconBackground="rgba(96, 165, 250, 0.12)"
+            iconColor={T.brand}
+            iconBackground={T.brandSoft}
             title="Conversational Taglish explanations"
             description="Simplifies difficult legal wording while preserving the clause's meaning."
           />
           <FeatureItem
             icon="warning-outline"
-            iconColor={COLORS.warning}
-            iconBackground="rgba(245, 158, 11, 0.12)"
+            iconColor={T.brand}
+            iconBackground={T.brandSoft}
             title="Complex clause and risk highlighting"
             description="Points out unusual or potentially risky terms that deserve attention."
           />
           <FeatureItem
             icon="book-outline"
-            iconColor={COLORS.success}
-            iconBackground="rgba(16, 185, 129, 0.12)"
+            iconColor={T.brand}
+            iconBackground={T.brandSoft}
             title="Philippine legal dictionary"
             description="Provides quick, plain-language definitions for common legal terms."
             isLast
@@ -164,10 +184,10 @@ export default function AboutScreen() {
           description="Research development, legal-literacy content, documentation, and system evaluation."
         />
 
-        <View style={[styles.disclaimerCard, { backgroundColor: 'rgba(245, 158, 11, 0.08)', borderColor: 'rgba(245, 158, 11, 0.3)' }]}> 
+        <View style={[styles.disclaimerCard, { backgroundColor: T.dangerSoft, borderColor: T.danger }]}>
           <View style={styles.disclaimerHeader}>
-            <Ionicons name="shield-checkmark-outline" size={19} color={COLORS.warning} />
-            <Text style={styles.disclaimerTitle}>Educational tool only</Text>
+            <Ionicons name="shield-checkmark-outline" size={19} color={T.danger} />
+            <Text style={[styles.disclaimerTitle, { color: T.danger }]}>Educational tool only</Text>
           </View>
           <Text style={[styles.disclaimerText, { color: T.text }]}>Lex-Simple helps users understand legal language. It does not provide definitive legal judgments and is not a substitute for advice from a qualified lawyer.</Text>
         </View>
@@ -189,8 +209,8 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     minHeight: 116,
-    borderWidth: 1,
-    borderRadius: 8,
+    borderWidth: BORDER.thin,
+    borderRadius: RADIUS.lg,
     padding: 16,
     marginBottom: 24,
     flexDirection: 'row',
@@ -199,10 +219,8 @@ const styles = StyleSheet.create({
   logoBox: {
     width: 68,
     height: 68,
-    borderRadius: 8,
-    backgroundColor: 'rgba(167, 139, 250, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(167, 139, 250, 0.28)',
+    borderRadius: RADIUS.lg,
+    borderWidth: BORDER.thin,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -226,21 +244,18 @@ const styles = StyleSheet.create({
   versionBadge: {
     alignSelf: 'flex-start',
     minHeight: 24,
-    borderRadius: 5,
+    borderRadius: RADIUS.sm,
     paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(167, 139, 250, 0.1)',
   },
   versionDot: {
     width: 5,
     height: 5,
-    borderRadius: 3,
+    borderRadius: 1,
     marginRight: 6,
-    backgroundColor: COLORS.primaryLight,
   },
   versionText: {
-    color: COLORS.primaryLight,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.7,
@@ -262,8 +277,8 @@ const styles = StyleSheet.create({
     height: 1,
   },
   missionCard: {
-    borderWidth: 1,
-    borderRadius: 8,
+    borderWidth: BORDER.thin,
+    borderRadius: RADIUS.lg,
     padding: 15,
     marginBottom: 22,
   },
@@ -275,8 +290,7 @@ const styles = StyleSheet.create({
   missionIconBox: {
     width: 38,
     height: 38,
-    borderRadius: 7,
-    backgroundColor: 'rgba(167, 139, 250, 0.12)',
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
@@ -304,8 +318,8 @@ const styles = StyleSheet.create({
     marginTop: 11,
   },
   featureCard: {
-    borderWidth: 1,
-    borderRadius: 8,
+    borderWidth: BORDER.thin,
+    borderRadius: RADIUS.lg,
     overflow: 'hidden',
     marginBottom: 22,
   },
@@ -320,7 +334,7 @@ const styles = StyleSheet.create({
   featureIconBox: {
     width: 38,
     height: 38,
-    borderRadius: 7,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 11,
@@ -343,8 +357,8 @@ const styles = StyleSheet.create({
   },
   developerCard: {
     minHeight: 92,
-    borderWidth: 1,
-    borderRadius: 8,
+    borderWidth: BORDER.thin,
+    borderRadius: RADIUS.lg,
     padding: 13,
     marginBottom: 10,
     flexDirection: 'row',
@@ -353,14 +367,12 @@ const styles = StyleSheet.create({
   developerAvatar: {
     width: 42,
     height: 42,
-    borderRadius: 8,
-    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 11,
   },
   developerInitials: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0.4,
@@ -376,7 +388,6 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   developerRole: {
-    color: COLORS.primaryLight,
     fontSize: 10,
     lineHeight: 14,
     fontWeight: '800',
@@ -388,8 +399,8 @@ const styles = StyleSheet.create({
     maxWidth: 270,
   },
   disclaimerCard: {
-    borderWidth: 1,
-    borderRadius: 8,
+    borderWidth: BORDER.thin,
+    borderRadius: RADIUS.lg,
     padding: 14,
     marginTop: 12,
   },
@@ -399,7 +410,6 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   disclaimerTitle: {
-    color: COLORS.warning,
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '900',

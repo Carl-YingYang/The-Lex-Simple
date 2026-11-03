@@ -11,9 +11,17 @@ import type { DimensionValue } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../theme/ThemeContext';
+import { getNeoShadow } from './Neo';
+import { BORDER, RADIUS } from '../theme/tokens';
 
-// MODAL SHEET VERSION: 1.0.0
-// Same modal structure with sharper visual styling.
+// MODAL SHEET VERSION: 2.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Same modal structure at closing behavior — API at logic 1:1 pa rin.)
+// Pagbabago sa UI (v2.0.0):
+//   - Scrim: hardcoded rgba → T.overlay token (theme-aware).
+//   - Sheet: 1.5px ink outline + squared 6px radius (dating 1px hairline
+//     + 8px radius), at blur shadow → HARD shadow (getNeoShadow 'sm' —
+//     modal = focal element kaya puwedeng may hard shadow).
+//   - Close button: 1.5px ink outline, squared 4px (dating 1px + 6px).
 interface ModalSheetProps {
     title: string;
     iconName: string;
@@ -36,7 +44,7 @@ export default function ModalSheet({
     const { colors: T } = useTheme();
 
     return (
-        <View style={styles.overlay}>
+        <View style={[styles.overlay, { backgroundColor: T.overlay }]}>
             <Pressable
                 style={StyleSheet.absoluteFill}
                 onPress={onClose}
@@ -51,8 +59,9 @@ export default function ModalSheet({
                     {
                         maxHeight: maxHeightPercent,
                         backgroundColor: T.card,
-                        borderColor: T.border,
+                        borderColor: T.ink,
                     },
+                    getNeoShadow(T, 'sm'),
                 ]}
             >
                 {/* HEADER */}
@@ -89,7 +98,7 @@ export default function ModalSheet({
                             styles.closeBtn,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                         activeOpacity={0.72}
@@ -124,24 +133,15 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         paddingHorizontal: 16,
-        backgroundColor: 'rgba(0,0,0,0.72)',
         justifyContent: 'center',
         alignItems: 'center',
     },
     sheetContainer: {
         width: '100%',
         maxWidth: 500,
-        borderWidth: 1,
-        borderRadius: 8,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         overflow: 'hidden',
-        elevation: 5,
-        shadowColor: '#000000',
-        shadowOpacity: 0.18,
-        shadowRadius: 7,
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
     },
     header: {
         minHeight: 56,
@@ -172,8 +172,8 @@ const styles = StyleSheet.create({
     closeBtn: {
         width: 32,
         height: 32,
-        borderWidth: 1,
-        borderRadius: 6,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         justifyContent: 'center',
         alignItems: 'center',
     },

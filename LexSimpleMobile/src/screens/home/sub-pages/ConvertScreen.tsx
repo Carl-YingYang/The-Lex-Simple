@@ -25,14 +25,27 @@ import { postFileEndpoint } from '../../../services/AiEngine';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
+import { getNeoShadow } from '../../../components/Neo';
+import { BORDER, RADIUS } from '../../../theme/tokens';
 import { useBackgroundProcessScreen } from '../../../hooks/useBackgroundProcessScreen';
 
-// CONVERT SCREEN VERSION: 6.2.6
-// Document import with flat processing UI and recoverable error states.
+// CONVERT SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Document import with flat processing UI and recoverable error states.
+// UI lang ang binago; picker/network/history/processing logic 1:1 pa rin.)
+// Spec: purple system (zero na ang asul/dilaw/gold/orange), 1.5px standard
+// borders, 2px lang sa CTA, 2–6px radius (squared), predominantly FLAT —
+// hard shadow lang sa primary CTA (focal element).
+// Pagbabago sa UI (v7.0.0):
+//   - Binura ang PRIMARY/PRIMARY_SOFT/DANGER constants — tokens lahat
+//     (T.brand / T.brandText / T.danger + BORDER/RADIUS).
+//   - Primary CTA ("I-minimize" / "Pumili ulit"): purple fill + ITIM na
+//     icon/teksto (spec CTA rule), 2px ink border + hard shadow
+//     (getNeoShadow 'sm') — dating puting teksto sa asul, borderless.
+//   - Secondary buttons ("Bumalik" / "Kanselahin"): 1.5px ink outline,
+//     squared 4px; Kanselahin = danger token na teksto.
+//   - State icon box: 1.5px ink outline + squared 4px; spinner/status
+//     icons = purple/danger tokens na.
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const DANGER = '#EF4444';
 
 const ACCEPTED_DOCUMENT_TYPES = [
     'text/plain',
@@ -69,6 +82,7 @@ export default function ConvertScreen({ navigation }: any) {
     const hasInitialized = useRef(false);
     const isMounted = useRef(true);
     const isPickerActive = useRef(false);
+    const prevProcessingRef = useRef(false);
     const [screenState, setScreenState] =
         useState<ScreenState>('opening');
     const [selectedFileName, setSelectedFileName] =
@@ -317,6 +331,21 @@ export default function ConvertScreen({ navigation }: any) {
         void handleSelectDocument();
     }, [handleSelectDocument, isProcessing]);
 
+        // v7.0.1 fix: kapag nag-settle ang background process (tagumpay,
+    // pagkabigo, o pag-cancel), hindi dapat manatili ang screen sa
+    // 'opening' state — otherwise infinite "Binubuksan ang files"
+    // spinner ang maiiwan sa likod ng error dialog. Ang failure alert
+    // mismo ay hawak ng BackgroundProcessContext; dito lang hinahandle
+    // kung anong screen state ang maiiwan pagkatapos nito.
+    useEffect(() => {
+        const wasProcessing = prevProcessingRef.current;
+        prevProcessingRef.current = isProcessing;
+
+        if (wasProcessing && !isProcessing && screenState === 'opening') {
+            updateScreenState('error');
+        }
+    }, [isProcessing, screenState, updateScreenState]);
+
     if (isProcessing) {
         return (
             <ScreenLayout
@@ -342,13 +371,13 @@ export default function ConvertScreen({ navigation }: any) {
                                 styles.stateIconBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             <ActivityIndicator
                                 size="small"
-                                color={PRIMARY_SOFT}
+                                color={T.brand}
                             />
                         </View>
 
@@ -380,7 +409,14 @@ export default function ConvertScreen({ navigation }: any) {
                         </Text>
 
                         <TouchableOpacity
-                            style={styles.primaryButton}
+                            style={[
+                                styles.primaryButton,
+                                {
+                                    backgroundColor: T.brand,
+                                    borderColor: T.ink,
+                                },
+                                getNeoShadow(T, 'sm'),
+                            ]}
                             onPress={() =>
                                 navigation.navigate('Main', {
                                     screen: 'Scan',
@@ -392,9 +428,14 @@ export default function ConvertScreen({ navigation }: any) {
                             <Ionicons
                                 name="remove-outline"
                                 size={19}
-                                color="#FFFFFF"
+                                color={T.brandText}
                             />
-                            <Text style={styles.primaryButtonText}>
+                            <Text
+                                style={[
+                                    styles.primaryButtonText,
+                                    { color: T.brandText },
+                                ]}
+                            >
                                 I-minimize
                             </Text>
                         </TouchableOpacity>
@@ -402,7 +443,7 @@ export default function ConvertScreen({ navigation }: any) {
                         <TouchableOpacity
                             style={[
                                 styles.secondaryButton,
-                                { borderColor: T.border },
+                                { borderColor: T.ink },
                             ]}
                             onPress={cancelProcess}
                             activeOpacity={0.78}
@@ -411,7 +452,7 @@ export default function ConvertScreen({ navigation }: any) {
                             <Text
                                 style={[
                                     styles.secondaryButtonText,
-                                    { color: DANGER },
+                                    { color: T.danger },
                                 ]}
                             >
                                 Kanselahin
@@ -453,13 +494,13 @@ export default function ConvertScreen({ navigation }: any) {
                                 styles.stateIconBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             <ActivityIndicator
                                 size="small"
-                                color={PRIMARY_SOFT}
+                                color={T.brand}
                             />
                         </View>
                         <Text
@@ -486,7 +527,7 @@ export default function ConvertScreen({ navigation }: any) {
                                 styles.stateIconBox,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
@@ -497,7 +538,7 @@ export default function ConvertScreen({ navigation }: any) {
                                         : 'document-text-outline'
                                 }
                                 size={29}
-                                color={isBlocked ? PRIMARY_SOFT : DANGER}
+                                color={isBlocked ? T.brand : T.danger}
                             />
                         </View>
                         <Text
@@ -523,7 +564,14 @@ export default function ConvertScreen({ navigation }: any) {
 
                         {!isBlocked && (
                             <TouchableOpacity
-                                style={styles.primaryButton}
+                                style={[
+                                    styles.primaryButton,
+                                    {
+                                        backgroundColor: T.brand,
+                                        borderColor: T.ink,
+                                    },
+                                    getNeoShadow(T, 'sm'),
+                                ]}
                                 onPress={() => void handleSelectDocument()}
                                 activeOpacity={0.82}
                                 accessibilityRole="button"
@@ -531,9 +579,14 @@ export default function ConvertScreen({ navigation }: any) {
                                 <Ionicons
                                     name="folder-open-outline"
                                     size={18}
-                                    color="#FFFFFF"
+                                    color={T.brandText}
                                 />
-                                <Text style={styles.primaryButtonText}>
+                                <Text
+                                    style={[
+                                        styles.primaryButtonText,
+                                        { color: T.brandText },
+                                    ]}
+                                >
                                     Pumili ulit
                                 </Text>
                             </TouchableOpacity>
@@ -542,7 +595,7 @@ export default function ConvertScreen({ navigation }: any) {
                         <TouchableOpacity
                             style={[
                                 styles.secondaryButton,
-                                { borderColor: T.border },
+                                { borderColor: T.ink },
                             ]}
                             onPress={safeGoBack}
                             activeOpacity={0.78}
@@ -579,8 +632,8 @@ const styles = StyleSheet.create({
     stateIconBox: {
         width: 58,
         height: 58,
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -610,8 +663,8 @@ const styles = StyleSheet.create({
         minWidth: 190,
         minHeight: 46,
         marginTop: 21,
-        borderRadius: 9,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
@@ -619,7 +672,6 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     primaryButtonText: {
-        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '900',
     },
@@ -627,8 +679,8 @@ const styles = StyleSheet.create({
         minWidth: 190,
         minHeight: 44,
         marginTop: 9,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',

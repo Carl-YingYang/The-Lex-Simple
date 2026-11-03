@@ -16,6 +16,7 @@ import {
     DefaultTheme,
     NavigationContainer,
 } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
@@ -23,6 +24,7 @@ import { ThemeProvider, useTheme } from '../theme/ThemeContext';
 import { navigationRef } from './RootNavigation';
 import { migrateLegacyDataToGuest } from '../services/localDataScope';
 import { waitForScanHistoryWrites } from '../services/scanHistoryStorage';
+import { BORDER, RADIUS } from '../theme/tokens';
 
 import ScanScreen from '../screens/home/tab-pages/ScanScreen';
 import LibraryScreen from '../screens/dictionary/tab-pages/LibraryScreen';
@@ -39,13 +41,24 @@ import AboutScreen from '../screens/profile/sub-pages/AboutScreen';
 import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
 import BatchEditScreen from '../screens/home/sub-pages/BatchEditScreen';
 
-// APP NAVIGATOR VERSION: 2.0.0
+// APP NAVIGATOR VERSION: 3.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Routing, startup sequence, tab structure, at screen registry 1:1 pa
+// rin — UI lang ang binago.)
+// Pagbabago sa UI (v3.0.0):
+//   - Landing loading ("Inihahanda ang saved scans…"): bare spinner sa
+//     hard-coded na asul-puting bg → branded boot state (LEX-SIMPLE
+//     eyebrow + icon box na may 1.5px ink outline + purple spinner),
+//     tokens lahat — zero hardcoded hex/rgba.
+//   - Error state: bare text link → 1.5px ink outline button (squared),
+//     danger icon sa icon box.
+//   - Tab bar accent: lumang blue-violet constant → T.brand tokens
+//     (active tint, top indicator, focused bg, ripple, inactive tint) —
+//     theme-aware na sa light/dark.
 
 LogBox.ignoreLogs([
     'The app is running using the Legacy Architecture',
 ]);
 
-const ACTIVE_COLOR = '#7C6CFF';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
@@ -63,6 +76,7 @@ const TabBarButton = ({
     accessibilityLabel,
     testID,
 }: any) => {
+    const { colors: T } = useTheme();
     const focused = Boolean(accessibilityState?.selected);
 
     return (
@@ -74,23 +88,23 @@ const TabBarButton = ({
             accessibilityLabel={accessibilityLabel}
             testID={testID}
             android_ripple={{
-                color: 'rgba(124, 108, 255, 0.12)',
+                color: T.brandSoft,
                 borderless: false,
             }}
             style={({ pressed }) => [
                 styles.tabButton,
-                focused && styles.tabButtonFocused,
+                focused && { backgroundColor: T.brandSoft },
                 pressed && styles.tabButtonPressed,
             ]}
         >
-            {focused && <View style={styles.activeIndicator} />}
+            {focused && <View style={[styles.activeIndicator, { backgroundColor: T.brand }]} />}
             {children}
         </Pressable>
     );
 };
 
 function MainTabs() {
-    const { colors, isDarkMode } = useTheme();
+    const { colors: T, isDarkMode } = useTheme();
 
     return (
         <Tab.Navigator
@@ -99,15 +113,13 @@ function MainTabs() {
                 headerShown: false,
                 tabBarHideOnKeyboard: true,
                 tabBarShowLabel: true,
-                tabBarActiveTintColor: ACTIVE_COLOR,
-                tabBarInactiveTintColor: isDarkMode
-                    ? '#7E8797'
-                    : '#747883',
+                tabBarActiveTintColor: T.brand,
+                tabBarInactiveTintColor: T.subText,
                 tabBarStyle: [
                     styles.tabBar,
                     {
-                        backgroundColor: colors.bg,
-                        borderTopColor: colors.border,
+                        backgroundColor: T.bg,
+                        borderTopColor: T.border,
                     },
                 ],
                 tabBarItemStyle: styles.tabItem,
@@ -117,7 +129,7 @@ function MainTabs() {
                     <View
                         style={[
                             styles.iconContainer,
-                            focused && styles.iconContainerFocused,
+                            focused && { backgroundColor: T.brandSoft },
                         ]}
                     >
                         <Image
@@ -158,7 +170,7 @@ function MainTabs() {
 }
 
 function NavigationContent() {
-    const { colors, isDarkMode } = useTheme();
+    const { colors: T, isDarkMode } = useTheme();
     const [startupPhase, setStartupPhase] = useState<'loading' | 'ready' | 'error'>('loading');
     const mountedRef = useRef(true);
 
@@ -186,12 +198,37 @@ function NavigationContent() {
     }, [runStartup]);
 
     if (startupPhase === 'loading') {
-        return <View style={styles.prepare}><ActivityIndicator color={ACTIVE_COLOR} />
-            <Text style={styles.prepareText}>Inihahanda ang saved scans…</Text></View>;
+        return (
+            <View style={[styles.prepare, { backgroundColor: T.bg }]}>
+                <Text style={[styles.prepareEyebrow, { color: T.brand }]}>LEX-SIMPLE</Text>
+                <View style={[styles.prepareIconBox, { backgroundColor: T.card, borderColor: T.ink }]}>
+                    <ActivityIndicator color={T.brand} size="small" />
+                </View>
+                <Text style={[styles.prepareText, { color: T.text }]}>
+                    Inihahanda ang saved scans…
+                </Text>
+            </View>
+        );
     }
     if (startupPhase === 'error') {
-        return <View style={styles.prepare}><Text style={styles.prepareText}>Hindi mabuksan ang session o local data. Nananatili ang saved scans.</Text>
-            <TouchableOpacity onPress={() => void runStartup()}><Text style={styles.retry}>Subukan muli</Text></TouchableOpacity></View>;
+        return (
+            <View style={[styles.prepare, { backgroundColor: T.bg }]}>
+                <View style={[styles.prepareIconBox, { backgroundColor: T.card, borderColor: T.ink }]}>
+                    <Ionicons name="alert-circle-outline" size={26} color={T.danger} />
+                </View>
+                <Text style={[styles.prepareText, { color: T.text }]}>
+                    Hindi mabuksan ang session o local data. Nananatili ang saved scans.
+                </Text>
+                <TouchableOpacity
+                    style={[styles.retryButton, { borderColor: T.ink }]}
+                    onPress={() => void runStartup()}
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                >
+                    <Text style={[styles.retryText, { color: T.text }]}>Subukan muli</Text>
+                </TouchableOpacity>
+            </View>
+        );
     }
 
     const baseTheme = isDarkMode ? DarkTheme : DefaultTheme;
@@ -199,11 +236,11 @@ function NavigationContent() {
         ...baseTheme,
         colors: {
             ...baseTheme.colors,
-            primary: ACTIVE_COLOR,
-            background: colors.bg,
-            card: colors.bg,
-            text: colors.text,
-            border: colors.border,
+            primary: T.brand,
+            background: T.bg,
+            card: T.bg,
+            text: T.text,
+            border: T.border,
         },
     };
 
@@ -245,9 +282,12 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-    prepare: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#F8F8FD' },
-    prepareText: { marginTop: 12, color: '#444', textAlign: 'center' },
-    retry: { color: ACTIVE_COLOR, fontWeight: '700', marginTop: 16 },
+    prepare: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+    prepareEyebrow: { fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 2.5, marginBottom: 22 },
+    prepareIconBox: { width: 56, height: 56, borderWidth: BORDER.thin, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    prepareText: { fontSize: 13, lineHeight: 19, fontWeight: '700', textAlign: 'center', maxWidth: 280 },
+    retryButton: { minHeight: 44, marginTop: 18, borderWidth: BORDER.thin, borderRadius: RADIUS.md, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center' },
+    retryText: { fontSize: 13, fontWeight: '800' },
     tabBar: {
         height: 64,
         paddingTop: 5,
@@ -264,13 +304,10 @@ const styles = StyleSheet.create({
         flex: 1,
         minHeight: 52,
         marginHorizontal: 3,
-        borderRadius: 6,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-    },
-    tabButtonFocused: {
-        backgroundColor: 'rgba(124, 108, 255, 0.08)',
     },
     tabButtonPressed: {
         opacity: 0.72,
@@ -281,17 +318,13 @@ const styles = StyleSheet.create({
         width: 28,
         height: 3,
         borderRadius: 1,
-        backgroundColor: ACTIVE_COLOR,
     },
     iconContainer: {
         width: 32,
         height: 28,
-        borderRadius: 5,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    iconContainerFocused: {
-        backgroundColor: 'rgba(124, 108, 255, 0.10)',
     },
     tabIcon: {
         width: 22,

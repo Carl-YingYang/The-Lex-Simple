@@ -1,19 +1,48 @@
+
 import React, { useCallback } from 'react';
 import {
+    Platform,
+    Pressable,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native';
+import type { TextStyle, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '../theme/ThemeContext';
+import { NeoIconButton, getNeoShadow } from './Neo';
+import { SPACING, RADIUS, BORDER, SHADOW, TYPE } from '../theme/tokens';
 
-// SCREEN LAYOUT VERSION: 1.0.0
-// Safe-area-aware app bar with balanced side slots and sharp controls.
-const DANGER = '#EF4444';
+function pressedNeoState(): ViewStyle {
+    const offset = SHADOW.sm.ios.shadowOffset;
+
+    if (Platform.OS === 'android') {
+        return {
+            elevation: 0,
+            transform: [
+                { translateX: offset.width },
+                { translateY: offset.height },
+            ],
+        };
+    }
+
+    return {
+        shadowOffset: { width: 0, height: 0 },
+        shadowRadius: 0,
+        shadowOpacity: 0,
+        transform: [
+            { translateX: offset.width },
+            { translateY: offset.height },
+        ],
+    };
+}
+
+function typeStyle(preset: unknown): TextStyle {
+    return preset as TextStyle;
+}
 
 interface ScreenLayoutProps {
     title: string;
@@ -34,7 +63,7 @@ export default function ScreenLayout({
     onRightPress,
     noPadding = false,
     onBackPress,
-    rightIconColor = DANGER,
+    rightIconColor,
 }: ScreenLayoutProps) {
     const navigation = useNavigation();
     const { colors } = useTheme();
@@ -53,6 +82,9 @@ export default function ScreenLayout({
     const normalizedTitle =
         typeof title === 'string' ? title.trim() : '';
 
+    const resolvedRightColor =
+        rightIconColor ?? colors.danger;
+
     return (
         <SafeAreaView
             testID="screen-layout-v1"
@@ -62,89 +94,91 @@ export default function ScreenLayout({
             ]}
             edges={['top']}
         >
-            {/* APP BAR */}
             <View
                 style={[
                     styles.appBar,
                     {
                         backgroundColor: colors.bg,
-                        borderBottomColor: colors.border,
+                        borderBottomColor: colors.ink,
                     },
                 ]}
             >
-                {/* LEFT */}
+                {/* Left action */}
                 <View style={styles.sideSlot}>
                     {showBackButton ? (
-                        <TouchableOpacity
-                            style={[
-                                styles.iconButton,
-                                {
-                                    backgroundColor: colors.card,
-                                    borderColor: colors.border,
-                                },
-                            ]}
+                        <NeoIconButton
+                            icon="arrow-back"
                             onPress={handleBackPress}
-                            activeOpacity={0.72}
-                            accessibilityRole="button"
+                            size={36}
+                            iconSize={18}
                             accessibilityLabel="Bumalik"
-                        >
-                            <Ionicons
-                                name="arrow-back"
-                                size={21}
-                                color={colors.text}
-                            />
-                        </TouchableOpacity>
+                        />
                     ) : (
                         <View style={styles.buttonPlaceholder} />
                     )}
                 </View>
 
-                {/* CENTER */}
+                {/* Compact centered title */}
                 <View style={styles.centerSlot}>
-                    <Text
-                        style={[
-                            styles.appBarTitle,
-                            { color: colors.text },
-                        ]}
-                        numberOfLines={1}
-                    >
-                        {normalizedTitle}
-                    </Text>
+                    {normalizedTitle !== '' ? (
+                        <Text
+                            style={[
+                                typeStyle(TYPE.display),
+                                styles.appBarTitle,
+                                { color: colors.text },
+                            ]}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.72}
+                            maxFontSizeMultiplier={1.15}
+                        >
+                            {normalizedTitle}
+                        </Text>
+                    ) : null}
                 </View>
 
-                {/* RIGHT */}
+                {/* Right action */}
                 <View style={styles.sideSlot}>
                     {rightIcon ? (
-                        <TouchableOpacity
-                            style={[
-                                styles.iconButton,
-                                {
-                                    backgroundColor: colors.card,
-                                    borderColor: colors.border,
-                                },
-                            ]}
+                        <Pressable
                             onPress={onRightPress}
                             disabled={!onRightPress}
-                            activeOpacity={0.72}
                             accessibilityRole="button"
                             accessibilityLabel="Karagdagang action"
                             accessibilityState={{
                                 disabled: !onRightPress,
                             }}
+                            hitSlop={4}
                         >
-                            <Ionicons
-                                name={rightIcon}
-                                size={20}
-                                color={rightIconColor}
-                            />
-                        </TouchableOpacity>
+                            {({ pressed }) => (
+                                <View
+                                    style={[
+                                        styles.iconButton,
+                                        {
+                                            backgroundColor: colors.card,
+                                            borderColor: colors.ink,
+                                        },
+                                        pressed && onRightPress
+                                            ? pressedNeoState()
+                                            : getNeoShadow(colors, 'sm'),
+                                    ]}
+                                >
+                                    <Ionicons
+                                        name={rightIcon}
+                                        size={18}
+                                        color={resolvedRightColor}
+                                    />
+                                </View>
+                            )}
+                        </Pressable>
                     ) : (
                         <View style={styles.buttonPlaceholder} />
                     )}
                 </View>
             </View>
 
-            {/* CONTENT */}
+            {/* Screen content */}
             <View
                 style={[
                     styles.content,
@@ -157,56 +191,70 @@ export default function ScreenLayout({
     );
 }
 
-const SIDE_SLOT_WIDTH = 46;
+const SIDE_SLOT_WIDTH = 40;
+const ACTION_BUTTON_SIZE = 36;
 
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
     },
+
     appBar: {
-        minHeight: 58,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderBottomWidth: StyleSheet.hairlineWidth,
+        minHeight: 56,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 6,
+        borderBottomWidth: BORDER.thin,
         flexDirection: 'row',
         alignItems: 'center',
     },
+
     sideSlot: {
         width: SIDE_SLOT_WIDTH,
         alignItems: 'center',
         justifyContent: 'center',
     },
+
     centerSlot: {
         flex: 1,
         minWidth: 0,
-        paddingHorizontal: 8,
+        paddingHorizontal: 4,
         alignItems: 'center',
         justifyContent: 'center',
     },
+
     iconButton: {
-        width: 38,
-        height: 38,
-        borderWidth: 1,
-        borderRadius: 8,
+        width: ACTION_BUTTON_SIZE,
+        height: ACTION_BUTTON_SIZE,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
     },
+
     buttonPlaceholder: {
-        width: 38,
-        height: 38,
+        width: ACTION_BUTTON_SIZE,
+        height: ACTION_BUTTON_SIZE,
     },
+
     appBarTitle: {
         width: '100%',
-        fontSize: 17,
-        lineHeight: 22,
+        minWidth: 0,
+        flexShrink: 1,
+        fontSize: 19,
+        lineHeight: 23,
         fontWeight: '900',
+        letterSpacing: 0.25,
+        textTransform: 'uppercase',
         textAlign: 'center',
-        letterSpacing: 0.15,
+        includeFontPadding: false,
     },
+
     content: {
         flex: 1,
+        minHeight: 0,
     },
+
     contentPadding: {
-        paddingHorizontal: 16,
+        paddingHorizontal: SPACING.lg,
     },
 });

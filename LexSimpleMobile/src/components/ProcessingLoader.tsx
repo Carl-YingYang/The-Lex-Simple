@@ -9,12 +9,23 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../theme/ThemeContext';
 import { useBackgroundProcess } from '../context/BackgroundProcessContext';
+import { getNeoShadow } from './Neo';
+import { BORDER, RADIUS } from '../theme/tokens';
 
-// PROCESSING LOADER VERSION: 1.0.0
-// Flat progress UI driven only by the process context's actual progress value.
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const DANGER = '#EF4444';
+// PROCESSING LOADER VERSION: 2.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (Flat progress UI driven only by the process context's actual progress
+// value — progress math at messages logic 1:1 pa rin.)
+// Pagbabago sa UI (v2.0.0):
+//   - Binura ang PRIMARY/PRIMARY_SOFT/DANGER constants (asul — bawal sa
+//     purple spec) — tokens lahat (T.brand / T.danger + BORDER/RADIUS).
+//   - Primary button ("I-minimize"): purple fill + ITIM na icon/teksto
+//     (spec CTA rule), 2px ink border + hard shadow (getNeoShadow 'sm') —
+//     dating puting teksto sa asul, borderless.
+//   - Cancel button: 1.5px ink outline (dating 1px hairline), danger
+//     token ang kulay ng icon/teksto.
+//   - Progress track/fill: squared 3px radius (dating 4px), purple fill.
+//   - Icon box: 1.5px ink outline + squared 6px radius (dating 1px +
+//     12px radius); icon = purple (dating asul).
 
 interface ProcessingLoaderProps {
     title?: string;
@@ -92,7 +103,7 @@ export default function ProcessingLoader({
                         styles.iconBox,
                         {
                             backgroundColor: T.card,
-                            borderColor: T.border,
+                            borderColor: T.ink,
                         },
                     ]}
                 >
@@ -103,7 +114,7 @@ export default function ProcessingLoader({
                                 : 'document-text-outline'
                         }
                         size={28}
-                        color={safeProgress >= 100 ? PRIMARY : PRIMARY_SOFT}
+                        color={T.brand}
                     />
                 </View>
 
@@ -163,7 +174,10 @@ export default function ProcessingLoader({
                     <View
                         style={[
                             styles.progressFill,
-                            { width: `${safeProgress}%` },
+                            {
+                                width: `${safeProgress}%`,
+                                backgroundColor: T.brand,
+                            },
                         ]}
                     />
                 </View>
@@ -172,7 +186,14 @@ export default function ProcessingLoader({
                     <View style={styles.actions}>
                         {onMinimize && (
                             <TouchableOpacity
-                                style={styles.primaryButton}
+                                style={[
+                                    styles.primaryButton,
+                                    {
+                                        backgroundColor: T.brand,
+                                        borderColor: T.ink,
+                                    },
+                                    getNeoShadow(T, 'sm'),
+                                ]}
                                 onPress={onMinimize}
                                 activeOpacity={0.82}
                                 accessibilityRole="button"
@@ -181,9 +202,14 @@ export default function ProcessingLoader({
                                 <Ionicons
                                     name="remove-outline"
                                     size={19}
-                                    color="#FFFFFF"
+                                    color={T.brandText}
                                 />
-                                <Text style={styles.primaryButtonText}>
+                                <Text
+                                    style={[
+                                        styles.primaryButtonText,
+                                        { color: T.brandText },
+                                    ]}
+                                >
                                     I-minimize
                                 </Text>
                             </TouchableOpacity>
@@ -193,7 +219,7 @@ export default function ProcessingLoader({
                             <TouchableOpacity
                                 style={[
                                     styles.secondaryButton,
-                                    { borderColor: T.border },
+                                    { borderColor: T.ink },
                                 ]}
                                 onPress={onCancel}
                                 activeOpacity={0.78}
@@ -203,9 +229,14 @@ export default function ProcessingLoader({
                                 <Ionicons
                                     name="close-outline"
                                     size={19}
-                                    color={DANGER}
+                                    color={T.danger}
                                 />
-                                <Text style={styles.cancelButtonText}>
+                                <Text
+                                    style={[
+                                        styles.cancelButtonText,
+                                        { color: T.danger },
+                                    ]}
+                                >
                                     Kanselahin
                                 </Text>
                             </TouchableOpacity>
@@ -244,8 +275,8 @@ const styles = StyleSheet.create({
     iconBox: {
         width: 58,
         height: 58,
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -283,13 +314,12 @@ const styles = StyleSheet.create({
     progressTrack: {
         width: '100%',
         height: 7,
-        borderRadius: 4,
+        borderRadius: RADIUS.sm,
         overflow: 'hidden',
     },
     progressFill: {
         height: '100%',
-        borderRadius: 4,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.sm,
     },
     actions: {
         width: '100%',
@@ -298,8 +328,8 @@ const styles = StyleSheet.create({
     },
     primaryButton: {
         minHeight: 47,
-        borderRadius: 9,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
@@ -307,14 +337,13 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     primaryButtonText: {
-        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '900',
     },
     secondaryButton: {
         minHeight: 45,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 18,
         flexDirection: 'row',
         alignItems: 'center',
@@ -322,7 +351,6 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     cancelButtonText: {
-        color: DANGER,
         fontSize: 13,
         fontWeight: '800',
     },

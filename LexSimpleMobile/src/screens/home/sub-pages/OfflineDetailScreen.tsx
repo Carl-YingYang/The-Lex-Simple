@@ -1,9 +1,30 @@
+// OFFLINE DETAIL SCREEN VERSION: 7.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI-flow lang ang nagbago; walang binagong OCR/AI/storage/navigation logic)
+// Spec: purple system (zero na ang asul #3478F6 at amber #F59E0B na hardcoded
+// constants), 1.5px standard borders, 2px sa CTA/focal, 2–6px radius (squared),
+// predominantly FLAT — hard shadow sa mga focal element lang.
+// Pagbabago sa UI (v7.0.0):
+//   - Binura ang PRIMARY/PRIMARY_SOFT/SUCCESS/WARNING/DANGER constants — theme
+//     tokens na lahat (brand/brandVivid/brandDeep/brandSoft/success/warning/danger).
+//   - Risk config: ang kulay ay naging "tone" (neutral/success/info/warning/danger)
+//     na binibigyang-kulay ng tema — 1:1 pa rin ang score thresholds, icons, labels.
+//   - Score card, CTA buttons (Ipa-check / Magtanong kay Lexie / Bumalik), at ang
+//     dalawang info modal (score breakdown, legal basis): focal treatment — 2px ink
+//     border + 2px hard shadow; purple fill na CTA na may ITIM na label (spec).
+//   - Score breakdown at legal basis modal: centered na may T.overlay scrim,
+//     ink X-square, at ink rule sa ilalim ng header — pareho ng modal pattern ng
+//     DictionaryDetailScreen v8.0.0. Scrim tap / X / Android back = sarado.
+//   - Offline badge at offline notice: informational purple na (brandSoft bg +
+//     brandDeep content) sa halip na amber.
+//   - Fullscreen viewer: T.ink backdrop, card-bg na close button at page indicator
+//     (1.5px ink border) para theme-adaptive.
+//   - Flat-first: walang shadow sa ordinaryong cards/rows (ClauseCard, utility
+//     buttons, thumbnails, previews) — focal elements lang ang may hard shadow.
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
     Modal,
-    Pressable,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -21,15 +42,11 @@ import { postEndpoint, postFileEndpoint } from '../../../services/AiEngine';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import ClauseCard from '../../../components/ClauseCard';
+import { getNeoShadow } from '../../../components/Neo';
 import { sanitizeLocalText } from '../../../utils/sanitizer';
 import { useTheme } from '../../../theme/ThemeContext';
-
-// OFFLINE DETAIL SCREEN VERSION: 6.2.6
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const SUCCESS = '#10B981';
-const WARNING = '#F59E0B';
-const DANGER = '#EF4444';
+import { BORDER, RADIUS, SPACING } from '../../../theme/tokens';
+import type { ThemeColors } from '../../../theme/tokens';
 
 type Finding = {
     title: string;
@@ -63,8 +80,12 @@ type ScanItem = {
     sanitizedText?: string;
 };
 
+// Ang dating `color: string` ng RiskConfig ay naging `tone` — ang totoong kulay
+// ay kinukuha na mula sa theme tokens (light/dark adaptive, zero hardcoded hex).
+type RiskTone = 'neutral' | 'success' | 'info' | 'warning' | 'danger';
+
 type RiskConfig = {
-    color: string;
+    tone: RiskTone;
     icon: React.ComponentProps<typeof Ionicons>['name'];
     label: string;
 };
@@ -98,17 +119,19 @@ const getImagePages = (item?: ScanItem): string[] => {
     );
 };
 
+// 1:1 pa rin ang thresholds (90/70/50), icons, at labels — ang dating
+// PRIMARY_SOFT (asul) ay naging purple tone ('neutral'/'info') ayon sa spec.
 const getRiskConfig = (score: number | null): RiskConfig => {
     if (score === null) {
         return {
-            color: PRIMARY_SOFT,
+            tone: 'neutral',
             icon: 'information-circle-outline',
             label: 'REVIEW NEEDED',
         };
     }
     if (score >= 90) {
         return {
-            color: SUCCESS,
+            tone: 'success',
             icon: 'shield-checkmark-outline',
             label: 'VERY SAFE',
         };
@@ -116,7 +139,7 @@ const getRiskConfig = (score: number | null): RiskConfig => {
 
     if (score >= 70) {
         return {
-            color: PRIMARY_SOFT,
+            tone: 'info',
             icon: 'checkmark-circle-outline',
             label: 'ACCEPTABLE',
         };
@@ -124,17 +147,35 @@ const getRiskConfig = (score: number | null): RiskConfig => {
 
     if (score >= 50) {
         return {
-            color: WARNING,
+            tone: 'warning',
             icon: 'warning-outline',
             label: 'RISKY',
         };
     }
 
     return {
-        color: DANGER,
+        tone: 'danger',
         icon: 'alert-circle-outline',
         label: 'HIGH RISK',
     };
+};
+
+// Tone → theme token (dating hardcoded hex). Ang neutral/info ay purple na
+// (brandVivid) sa halip na asul — semantic feedback colors mula sa tokens.
+const getRiskToneColor = (tone: RiskTone, colors: ThemeColors): string => {
+    if (tone === 'success') {
+        return colors.success;
+    }
+
+    if (tone === 'warning') {
+        return colors.warning;
+    }
+
+    if (tone === 'danger') {
+        return colors.danger;
+    }
+
+    return colors.brandVivid;
 };
 
 const normalizeAnalysisResult = (
@@ -203,7 +244,11 @@ const ExpandableFinding = ({
                 >
                     {finding.title || 'Finding'}
                 </Text>
-                <Text style={styles.deductionText}>-{deduction}</Text>
+                <Text
+                    style={[styles.deductionText, { color: T.danger }]}
+                >
+                    -{deduction}
+                </Text>
             </View>
             <Text
                 style={[styles.breakdownBody, { color: T.subText }]}
@@ -215,8 +260,9 @@ const ExpandableFinding = ({
                 <TouchableOpacity
                     style={styles.readMoreButton}
                     onPress={() => setExpanded((current) => !current)}
+                    accessibilityRole="button"
                 >
-                    <Text style={styles.readMoreText}>
+                    <Text style={[styles.readMoreText, { color: T.brand }]}>
                         {expanded ? 'Paikliin' : 'Basahin lahat'}
                     </Text>
                 </TouchableOpacity>
@@ -279,6 +325,7 @@ export default function OfflineDetailScreen({
         ocrText: rawResult?.ocrText || scanItem?.ocrText,
     };
     const riskConfig = getRiskConfig(result.score);
+    const riskColor = getRiskToneColor(riskConfig.tone, T);
 
     const getDisplayTitle = (): string => {
         let title = String(scanItem?.title || 'Saved Document').trim();
@@ -662,21 +709,46 @@ export default function OfflineDetailScreen({
                         { backgroundColor: T.bg },
                     ]}
                 >
-                    <Ionicons
-                        name="document-outline"
-                        size={36}
-                        color={T.subText}
-                    />
+                    <View
+                        style={[
+                            styles.missingIcon,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.ink,
+                            },
+                        ]}
+                    >
+                        <Ionicons
+                            name="document-outline"
+                            size={30}
+                            color={T.subText}
+                        />
+                    </View>
                     <Text
                         style={[styles.missingTitle, { color: T.text }]}
                     >
                         Hindi mahanap ang file
                     </Text>
                     <TouchableOpacity
-                        style={styles.backButton}
+                        style={[
+                            styles.ctaButton,
+                            {
+                                backgroundColor: T.brand,
+                                borderColor: T.ink,
+                            },
+                            getNeoShadow(T, 'sm'),
+                        ]}
                         onPress={() => navigation.goBack()}
+                        accessibilityRole="button"
                     >
-                        <Text style={styles.backButtonText}>Bumalik</Text>
+                        <Text
+                            style={[
+                                styles.ctaButtonText,
+                                { color: T.brandText },
+                            ]}
+                        >
+                            Bumalik
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </ScreenLayout>
@@ -692,7 +764,20 @@ export default function OfflineDetailScreen({
                         { backgroundColor: T.bg },
                     ]}
                 >
-                    <ActivityIndicator size="large" color={PRIMARY} />
+                    <View
+                        style={[
+                            styles.processingSpinnerBox,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.ink,
+                            },
+                        ]}
+                    >
+                        <ActivityIndicator
+                            size="large"
+                            color={T.brand}
+                        />
+                    </View>
                     <Text
                         style={[
                             styles.processingTitle,
@@ -736,19 +821,21 @@ export default function OfflineDetailScreen({
                     contentContainerStyle={styles.resultContent}
                     showsVerticalScrollIndicator={false}
                 >
+                    {/* Disclaimer — informational surface (brandSoft +
+                        brandDeep icon, flat 1.5px ink border) */}
                     <View
                         style={[
                             styles.noticeCard,
                             {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
+                                backgroundColor: T.brandSoft,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
                         <Ionicons
                             name="information-circle-outline"
                             size={18}
-                            color={PRIMARY_SOFT}
+                            color={T.brandDeep}
                         />
                         <Text
                             style={[
@@ -761,16 +848,22 @@ export default function OfflineDetailScreen({
                         </Text>
                     </View>
 
+                    {/* SCORE CARD — focal element: 2px ink border + 2px
+                        hard shadow; ang risk color ay nasa badge at sa
+                        malaking score number lang */}
                     <TouchableOpacity
                         style={[
                             styles.scoreCard,
                             {
                                 backgroundColor: T.card,
-                                borderColor: riskConfig.color,
+                                borderColor: T.ink,
                             },
+                            getNeoShadow(T, 'sm'),
                         ]}
                         onPress={() => setScoreModalVisible(true)}
                         activeOpacity={0.85}
+                        accessibilityRole="button"
+                        accessibilityLabel="Tingnan ang score breakdown"
                     >
                         <View style={styles.scoreHeader}>
                             <Text
@@ -784,15 +877,23 @@ export default function OfflineDetailScreen({
                             <View
                                 style={[
                                     styles.riskBadge,
-                                    { backgroundColor: riskConfig.color },
+                                    {
+                                        backgroundColor: riskColor,
+                                        borderColor: T.ink,
+                                    },
                                 ]}
                             >
                                 <Ionicons
                                     name={riskConfig.icon}
                                     size={13}
-                                    color="#FFFFFF"
+                                    color={T.card}
                                 />
-                                <Text style={styles.riskBadgeText}>
+                                <Text
+                                    style={[
+                                        styles.riskBadgeText,
+                                        { color: T.card },
+                                    ]}
+                                >
                                     {riskConfig.label}
                                 </Text>
                             </View>
@@ -801,7 +902,7 @@ export default function OfflineDetailScreen({
                             <Text
                                 style={[
                                     styles.scoreValue,
-                                    { color: riskConfig.color },
+                                    { color: riskColor },
                                 ]}
                             >
                                 {result.score === null ? '—' : result.score}
@@ -834,15 +935,16 @@ export default function OfflineDetailScreen({
                             styles.utilityButton,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                         onPress={openSanitizedText}
+                        accessibilityRole="button"
                     >
                         <Ionicons
                             name="shield-checkmark-outline"
                             size={20}
-                            color={SUCCESS}
+                            color={T.success}
                         />
                         <View style={styles.utilityCopy}>
                             <Text
@@ -876,15 +978,25 @@ export default function OfflineDetailScreen({
                                 styles.emptyFindingCard,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
-                            <Ionicons
-                                name="checkmark-circle-outline"
-                                size={34}
-                                color={SUCCESS}
-                            />
+                            <View
+                                style={[
+                                    styles.emptyFindingIcon,
+                                    {
+                                        backgroundColor: T.brandSoft,
+                                        borderColor: T.ink,
+                                    },
+                                ]}
+                            >
+                                <Ionicons
+                                    name="checkmark-circle-outline"
+                                    size={30}
+                                    color={T.success}
+                                />
+                            </View>
                             <Text
                                 style={[
                                     styles.emptyFindingText,
@@ -904,7 +1016,7 @@ export default function OfflineDetailScreen({
                                 <ClauseCard
                                     item={finding}
                                     themeConfig={{
-                                        mainColor: riskConfig.color,
+                                        mainColor: riskColor,
                                         icon: riskConfig.icon,
                                         label: riskConfig.label,
                                     }}
@@ -916,21 +1028,40 @@ export default function OfflineDetailScreen({
                         ))
                     )}
 
+                    {/* CTA — purple fill + ITIM na label (spec), 2px ink
+                        border + 2px hard shadow (focal) */}
                     <TouchableOpacity
-                        style={styles.askLexieButton}
+                        style={[
+                            styles.askLexieButton,
+                            {
+                                backgroundColor: T.brand,
+                                borderColor: T.ink,
+                            },
+                            getNeoShadow(T, 'sm'),
+                        ]}
                         onPress={askLexieAboutDocument}
+                        accessibilityRole="button"
+                        accessibilityLabel="Magtanong kay Lexie tungkol sa document"
                     >
                         <Ionicons
                             name="chatbubble-ellipses-outline"
                             size={19}
-                            color="#FFFFFF"
+                            color={T.brandText}
                         />
-                        <Text style={styles.askLexieText}>
+                        <Text
+                            style={[
+                                styles.askLexieText,
+                                { color: T.brandText },
+                            ]}
+                        >
                             Magtanong kay Lexie
                         </Text>
                     </TouchableOpacity>
                 </ScrollView>
 
+                {/* SCORE BREAKDOWN MODAL — centered, focal (2px ink border
+                    + 2px hard shadow). Scrim tap / X / Android back = sarado.
+                    Content logic 1:1 (starting 100, deductions, final). */}
                 <Modal
                     visible={scoreModalVisible}
                     transparent
@@ -938,110 +1069,155 @@ export default function OfflineDetailScreen({
                     statusBarTranslucent
                     onRequestClose={() => setScoreModalVisible(false)}
                 >
-                    <View style={styles.modalBackdrop}>
-                        <Pressable
-                            style={StyleSheet.absoluteFill}
+                    <View
+                        style={[
+                            styles.modalScrim,
+                            { backgroundColor: T.overlay },
+                        ]}
+                    >
+                        <TouchableOpacity
+                            style={styles.modalDismiss}
                             onPress={() => setScoreModalVisible(false)}
+                            activeOpacity={1}
+                            accessibilityRole="button"
+                            accessibilityLabel="Isara ang score breakdown"
                         />
                         <View
                             style={[
                                 styles.modalCard,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
+                                getNeoShadow(T, 'sm'),
                             ]}
                         >
                             <View style={styles.modalHeader}>
+                                <Ionicons
+                                    name="stats-chart-outline"
+                                    size={18}
+                                    color={T.brandDeep}
+                                />
                                 <Text
                                     style={[
                                         styles.modalTitle,
                                         { color: T.text },
                                     ]}
+                                    numberOfLines={1}
                                 >
                                     {result.score === null
                                         ? 'Bakit walang score?'
                                         : 'Score breakdown'}
                                 </Text>
                                 <TouchableOpacity
-                                    style={styles.modalCloseButton}
+                                    style={[
+                                        styles.modalClose,
+                                        { backgroundColor: T.ink },
+                                    ]}
                                     onPress={() =>
                                         setScoreModalVisible(false)
                                     }
+                                    hitSlop={{
+                                        top: 8,
+                                        bottom: 8,
+                                        left: 8,
+                                        right: 8,
+                                    }}
+                                    activeOpacity={0.7}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Isara"
                                 >
                                     <Ionicons
                                         name="close"
-                                        size={20}
-                                        color={T.text}
+                                        size={15}
+                                        color={T.card}
                                     />
                                 </TouchableOpacity>
                             </View>
+                            <View
+                                style={[
+                                    styles.modalRule,
+                                    { backgroundColor: T.ink },
+                                ]}
+                            />
                             <ScrollView
+                                style={styles.modalBody}
+                                contentContainerStyle={
+                                    styles.modalBodyContent
+                                }
                                 showsVerticalScrollIndicator={false}
                             >
                                 {result.score === null ? (
                                     <Text
                                         style={[
-                                            styles.emptyFindingText,
+                                            styles.modalBodyText,
                                             { color: T.subText },
                                         ]}
                                     >
-                                        Walang na-flag sa available OCR text,
-                                        kaya walang safety score. Hindi nito
-                                        kinukumpirma na ligtas ang dokumento.
-                                        Suriin ang scan at orihinal na clauses.
+                                        Walang na-flag sa available OCR
+                                        text, kaya walang safety score.
+                                        Hindi nito kinukumpirma na ligtas
+                                        ang dokumento. Suriin ang scan at
+                                        orihinal na clauses.
                                     </Text>
                                 ) : (
                                     <>
-                                <View style={styles.totalScoreRow}>
-                                    <Text
-                                        style={[
-                                            styles.totalScoreLabel,
-                                            { color: T.text },
-                                        ]}
-                                    >
-                                        Starting score
-                                    </Text>
-                                    <Text style={styles.startingScore}>
-                                        100
-                                    </Text>
-                                </View>
-                                {result.findings.map((finding, index) => (
-                                    <ExpandableFinding
-                                        key={`${finding.title}-${index}`}
-                                        finding={finding}
-                                        deduction={
-                                            baseDeduction +
-                                            (index === 0
-                                                ? remainderDeduction
-                                                : 0)
-                                        }
-                                        T={T}
-                                    />
-                                ))}
-                                <View
-                                    style={[
-                                        styles.finalScoreRow,
-                                        { borderTopColor: T.border },
-                                    ]}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.finalScoreLabel,
-                                            { color: T.text },
-                                        ]}
-                                    >
-                                        Final score
-                                    </Text>
-                                    <Text
-                                        style={[
-                                            styles.finalScoreValue,
-                                            { color: riskConfig.color },
-                                        ]}
-                                    >
-                                        {result.score}
-                                    </Text>
-                                </View>
+                                        <View style={styles.totalScoreRow}>
+                                            <Text
+                                                style={[
+                                                    styles.totalScoreLabel,
+                                                    { color: T.subText },
+                                                ]}
+                                            >
+                                                Starting score
+                                            </Text>
+                                            <Text
+                                                style={[
+                                                    styles.startingScore,
+                                                    { color: T.success },
+                                                ]}
+                                            >
+                                                100
+                                            </Text>
+                                        </View>
+                                        {result.findings.map(
+                                            (finding, index) => (
+                                                <ExpandableFinding
+                                                    key={`${finding.title}-${index}`}
+                                                    finding={finding}
+                                                    deduction={
+                                                        baseDeduction +
+                                                        (index === 0
+                                                            ? remainderDeduction
+                                                            : 0)
+                                                    }
+                                                    T={T}
+                                                />
+                                            )
+                                        )}
+                                        <View
+                                            style={[
+                                                styles.finalScoreRow,
+                                                { borderTopColor: T.ink },
+                                            ]}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.finalScoreLabel,
+                                                    { color: T.text },
+                                                ]}
+                                            >
+                                                Final score
+                                            </Text>
+                                            <Text
+                                                style={[
+                                                    styles.finalScoreValue,
+                                                    { color: riskColor },
+                                                ]}
+                                            >
+                                                {result.score}
+                                            </Text>
+                                        </View>
                                     </>
                                 )}
                             </ScrollView>
@@ -1049,6 +1225,9 @@ export default function OfflineDetailScreen({
                     </View>
                 </Modal>
 
+                {/* LEGAL BASIS MODAL — same centered focal pattern.
+                    Content logic 1:1 (RAG chunk matching sa
+                    showLegalBasis). */}
                 <Modal
                     visible={legalModalVisible}
                     transparent
@@ -1056,21 +1235,35 @@ export default function OfflineDetailScreen({
                     statusBarTranslucent
                     onRequestClose={() => setLegalModalVisible(false)}
                 >
-                    <View style={styles.modalBackdrop}>
-                        <Pressable
-                            style={StyleSheet.absoluteFill}
+                    <View
+                        style={[
+                            styles.modalScrim,
+                            { backgroundColor: T.overlay },
+                        ]}
+                    >
+                        <TouchableOpacity
+                            style={styles.modalDismiss}
                             onPress={() => setLegalModalVisible(false)}
+                            activeOpacity={1}
+                            accessibilityRole="button"
+                            accessibilityLabel="Isara ang legal basis"
                         />
                         <View
                             style={[
                                 styles.modalCard,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
+                                getNeoShadow(T, 'sm'),
                             ]}
                         >
                             <View style={styles.modalHeader}>
+                                <Ionicons
+                                    name="gavel-outline"
+                                    size={18}
+                                    color={T.brandDeep}
+                                />
                                 <Text
                                     style={[
                                         styles.modalTitle,
@@ -1081,19 +1274,41 @@ export default function OfflineDetailScreen({
                                     {selectedLegalTitle}
                                 </Text>
                                 <TouchableOpacity
-                                    style={styles.modalCloseButton}
+                                    style={[
+                                        styles.modalClose,
+                                        { backgroundColor: T.ink },
+                                    ]}
                                     onPress={() =>
                                         setLegalModalVisible(false)
                                     }
+                                    hitSlop={{
+                                        top: 8,
+                                        bottom: 8,
+                                        left: 8,
+                                        right: 8,
+                                    }}
+                                    activeOpacity={0.7}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Isara"
                                 >
                                     <Ionicons
                                         name="close"
-                                        size={20}
-                                        color={T.text}
+                                        size={15}
+                                        color={T.card}
                                     />
                                 </TouchableOpacity>
                             </View>
+                            <View
+                                style={[
+                                    styles.modalRule,
+                                    { backgroundColor: T.ink },
+                                ]}
+                            />
                             <ScrollView
+                                style={styles.modalBody}
+                                contentContainerStyle={
+                                    styles.modalBodyContent
+                                }
                                 showsVerticalScrollIndicator={false}
                             >
                                 <Text
@@ -1136,15 +1351,23 @@ export default function OfflineDetailScreen({
                             styles.documentPreview,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
-                        <View style={styles.documentIcon}>
+                        <View
+                            style={[
+                                styles.documentIcon,
+                                {
+                                    backgroundColor: T.brandSoft,
+                                    borderColor: T.ink,
+                                },
+                            ]}
+                        >
                             <Ionicons
                                 name="document-text-outline"
-                                size={28}
-                                color={PRIMARY_SOFT}
+                                size={26}
+                                color={T.brandDeep}
                             />
                         </View>
                         <View style={styles.documentCopy}>
@@ -1169,12 +1392,15 @@ export default function OfflineDetailScreen({
                     </View>
                 ) : imagePages.length > 0 ? (
                     <View>
+                        {/* IMAGE PREVIEW — hero ng screen: 2px ink border
+                            (overflow hidden dahil may laman na lumalampas
+                            sa corners; kaya walang hard shadow dito) */}
                         <TouchableOpacity
                             style={[
                                 styles.imagePreview,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
                             ]}
                             activeOpacity={0.9}
@@ -1207,17 +1433,38 @@ export default function OfflineDetailScreen({
                                 </View>
                             )}
 
-                            <View style={styles.pageBadge}>
-                                <Text style={styles.pageBadgeText}>
+                            <View
+                                style={[
+                                    styles.pageBadge,
+                                    {
+                                        backgroundColor: T.overlay,
+                                        borderColor: T.ink,
+                                    },
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.pageBadgeText,
+                                        { color: T.card },
+                                    ]}
+                                >
                                     {activePageIndex + 1} /{' '}
                                     {imagePages.length}
                                 </Text>
                             </View>
-                            <View style={styles.expandBadge}>
+                            <View
+                                style={[
+                                    styles.expandBadge,
+                                    {
+                                        backgroundColor: T.overlay,
+                                        borderColor: T.ink,
+                                    },
+                                ]}
+                            >
                                 <Ionicons
                                     name="expand-outline"
                                     size={16}
-                                    color="#FFFFFF"
+                                    color={T.card}
                                 />
                             </View>
                         </TouchableOpacity>
@@ -1227,7 +1474,7 @@ export default function OfflineDetailScreen({
                                 <Text
                                     style={[
                                         styles.thumbnailLabel,
-                                        { color: T.text },
+                                        { color: T.subText },
                                     ]}
                                 >
                                     Mga pahina
@@ -1254,9 +1501,11 @@ export default function OfflineDetailScreen({
                                                         backgroundColor:
                                                             T.card,
                                                         borderColor: selected
-                                                            ? PRIMARY
-                                                            : T.border,
+                                                            ? T.brand
+                                                            : T.ink,
                                                     },
+                                                    selected &&
+                                                        styles.thumbnailButtonSelected,
                                                 ]}
                                                 onPress={() =>
                                                     setActivePageIndex(index)
@@ -1287,14 +1536,21 @@ export default function OfflineDetailScreen({
                                                     />
                                                 )}
                                                 <View
-                                                    style={
-                                                        styles.thumbnailNumber
-                                                    }
+                                                    style={[
+                                                        styles.thumbnailNumber,
+                                                        {
+                                                            backgroundColor:
+                                                                T.overlay,
+                                                            borderColor:
+                                                                T.ink,
+                                                        },
+                                                    ]}
                                                 >
                                                     <Text
-                                                        style={
-                                                            styles.thumbnailNumberText
-                                                        }
+                                                        style={[
+                                                            styles.thumbnailNumberText,
+                                                            { color: T.card },
+                                                        ]}
                                                     >
                                                         {index + 1}
                                                     </Text>
@@ -1312,7 +1568,7 @@ export default function OfflineDetailScreen({
                             styles.noPreviewCard,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
@@ -1333,21 +1589,28 @@ export default function OfflineDetailScreen({
                 )}
 
                 <View style={styles.fileHeader}>
+                    {/* Offline badge — informational purple na (dating
+                        amber), brandSoft bg + brandDeep content */}
                     <View
                         style={[
                             styles.offlineBadge,
                             {
-                                backgroundColor: T.card,
-                                borderColor: T.border,
+                                backgroundColor: T.brandSoft,
+                                borderColor: T.ink,
                             },
                         ]}
                     >
                         <Ionicons
                             name="phone-portrait-outline"
                             size={13}
-                            color={WARNING}
+                            color={T.brandDeep}
                         />
-                        <Text style={styles.offlineBadgeText}>
+                        <Text
+                            style={[
+                                styles.offlineBadgeText,
+                                { color: T.brandDeep },
+                            ]}
+                        >
                             NAKA-SAVE SA PHONE
                         </Text>
                     </View>
@@ -1378,15 +1641,16 @@ export default function OfflineDetailScreen({
                             styles.utilityButton,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
                         ]}
                         onPress={openSanitizedText}
+                        accessibilityRole="button"
                     >
                         <Ionicons
                             name="shield-checkmark-outline"
                             size={20}
-                            color={SUCCESS}
+                            color={T.success}
                         />
                         <View style={styles.utilityCopy}>
                             <Text
@@ -1409,19 +1673,20 @@ export default function OfflineDetailScreen({
                     </TouchableOpacity>
                 )}
 
+                {/* Offline notice — informational purple surface */}
                 <View
                     style={[
                         styles.offlineNotice,
                         {
-                            backgroundColor: T.card,
-                            borderColor: T.border,
+                            backgroundColor: T.brandSoft,
+                            borderColor: T.ink,
                         },
                     ]}
                 >
                     <Ionicons
                         name="cloud-offline-outline"
                         size={19}
-                        color={WARNING}
+                        color={T.brandDeep}
                     />
                     <Text
                         style={[
@@ -1434,22 +1699,44 @@ export default function OfflineDetailScreen({
                     </Text>
                 </View>
 
+                {/* ACTIONS — CTA: purple fill + itim na label + 2px ink
+                    border + 2px hard shadow; delete = danger token surface */}
                 <View style={styles.actionRow}>
                     <TouchableOpacity
-                        style={styles.analyzeButton}
+                        style={[
+                            styles.analyzeButton,
+                            {
+                                backgroundColor: T.brand,
+                                borderColor: T.ink,
+                            },
+                            getNeoShadow(T, 'sm'),
+                        ]}
                         onPress={() => void handleAnalyze()}
+                        accessibilityRole="button"
+                        accessibilityLabel="Ipa-check ang document"
                     >
                         <Ionicons
                             name="shield-checkmark-outline"
                             size={19}
-                            color="#FFFFFF"
+                            color={T.brandText}
                         />
-                        <Text style={styles.analyzeButtonText}>
+                        <Text
+                            style={[
+                                styles.analyzeButtonText,
+                                { color: T.brandText },
+                            ]}
+                        >
                             Ipa-check ang document
                         </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                        style={styles.deleteButton}
+                        style={[
+                            styles.deleteButton,
+                            {
+                                backgroundColor: T.dangerSoft,
+                                borderColor: T.danger,
+                            },
+                        ]}
                         onPress={handleDelete}
                         accessibilityRole="button"
                         accessibilityLabel="Burahin ang file"
@@ -1457,12 +1744,15 @@ export default function OfflineDetailScreen({
                         <Ionicons
                             name="trash-outline"
                             size={20}
-                            color={DANGER}
+                            color={T.danger}
                         />
                     </TouchableOpacity>
                 </View>
             </ScrollView>
 
+            {/* FULLSCREEN VIEWER — solid ink backdrop (theme-adaptive);
+                card-bg na close button at indicator na may 1.5px ink
+                border. Viewer logic (swipe down, onChange, index) 1:1. */}
             <Modal
                 visible={fullscreenVisible}
                 transparent
@@ -1470,9 +1760,20 @@ export default function OfflineDetailScreen({
                 statusBarTranslucent
                 onRequestClose={() => setFullscreenVisible(false)}
             >
-                <View style={styles.viewerBackdrop}>
+                <View
+                    style={[
+                        styles.viewerBackdrop,
+                        { backgroundColor: T.ink },
+                    ]}
+                >
                     <TouchableOpacity
-                        style={styles.viewerCloseButton}
+                        style={[
+                            styles.viewerCloseButton,
+                            {
+                                backgroundColor: T.card,
+                                borderColor: T.ink,
+                            },
+                        ]}
                         onPress={() => setFullscreenVisible(false)}
                         accessibilityRole="button"
                         accessibilityLabel="Isara"
@@ -1480,7 +1781,7 @@ export default function OfflineDetailScreen({
                         <Ionicons
                             name="close"
                             size={22}
-                            color="#FFFFFF"
+                            color={T.text}
                         />
                     </TouchableOpacity>
                     {imagePages.length > 0 && (
@@ -1497,9 +1798,20 @@ export default function OfflineDetailScreen({
                                 }
                             }}
                             renderIndicator={(current, total) => (
-                                <View style={styles.viewerIndicator}>
+                                <View
+                                    style={[
+                                        styles.viewerIndicator,
+                                        {
+                                            backgroundColor: T.card,
+                                            borderColor: T.ink,
+                                        },
+                                    ]}
+                                >
                                     <Text
-                                        style={styles.viewerIndicatorText}
+                                        style={[
+                                            styles.viewerIndicatorText,
+                                            { color: T.text },
+                                        ]}
                                     >
                                         {current} / {total}
                                     </Text>
@@ -1518,41 +1830,75 @@ export default function OfflineDetailScreen({
 }
 
 const styles = StyleSheet.create({
+    // ------------------------------------------------------------
+    // MGA KULAY: lahat naka-inline sa JSX gamit ang theme tokens
+    // (T.brand, T.ink, atbp.) — dito sa StyleSheet ay geometry lang
+    // (tokens: RADIUS 2–6px, BORDER 1.5/2px, SPACING).
+    // ------------------------------------------------------------
+
+    // --- MISSING STATE (flat, centered, uppercase heading) ---
     missingState: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 24,
+        padding: SPACING.xxl,
+    },
+    missingIcon: {
+        width: 58,
+        height: 58,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 14,
     },
     missingTitle: {
-        marginTop: 12,
-        marginBottom: 16,
-        fontSize: 16,
+        marginBottom: 18,
+        fontSize: 17,
+        lineHeight: 22,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
-    backButton: {
-        minHeight: 44,
-        borderRadius: 7,
-        backgroundColor: PRIMARY,
+    // CTA (Bumalik) — 2px ink border, purple fill + itim na label
+    // (kulay naka-inline), 2px hard shadow (getNeoShadow sa JSX)
+    ctaButton: {
+        minHeight: 48,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backButtonText: {
-        color: '#FFFFFF',
+    ctaButtonText: {
         fontSize: 12,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
     },
+
+    // --- PROCESSING STATE (bordered spinner box + uppercase title) ---
     processingState: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         padding: 28,
     },
+    processingSpinnerBox: {
+        width: 68,
+        height: 68,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     processingTitle: {
         marginTop: 16,
         fontSize: 17,
+        lineHeight: 22,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     processingText: {
         marginTop: 7,
@@ -1560,16 +1906,20 @@ const styles = StyleSheet.create({
         lineHeight: 18,
         textAlign: 'center',
     },
+
+    // --- OFFLINE VIEW ---
     offlineContent: {
-        paddingHorizontal: 16,
+        paddingHorizontal: SPACING.lg,
         paddingTop: 14,
         paddingBottom: 40,
     },
+    // Hero preview: 2px ink border; overflow hidden dahil full-bleed
+    // ang image sa loob — kaya WALANG hard shadow dito (iOS masks).
     imagePreview: {
         width: '100%',
         height: 330,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
         overflow: 'hidden',
         position: 'relative',
     },
@@ -1589,19 +1939,20 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         textAlign: 'center',
     },
+    // Mga badge/overlay sa ibabaw ng image: T.overlay scrim + 1.5px
+    // ink border + T.card content (kulay naka-inline)
     pageBadge: {
         position: 'absolute',
         top: 9,
         left: 9,
-        minHeight: 28,
-        borderRadius: 5,
-        backgroundColor: 'rgba(0,0,0,0.72)',
+        minHeight: 26,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 9,
         alignItems: 'center',
         justifyContent: 'center',
     },
     pageBadgeText: {
-        color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '900',
     },
@@ -1611,8 +1962,8 @@ const styles = StyleSheet.create({
         bottom: 9,
         width: 32,
         height: 32,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.72)',
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1622,22 +1973,30 @@ const styles = StyleSheet.create({
     },
     thumbnailLabel: {
         marginBottom: 8,
-        fontSize: 12,
-        fontWeight: '900',
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
     },
     thumbnailContent: {
         gap: 8,
-        paddingRight: 16,
+        paddingRight: SPACING.lg,
     },
+    // Thumbnail: squared (3px); selected = 2px purple border,
+    // unselected = 1.5px ink border
     thumbnailButton: {
         width: 58,
         height: 74,
-        borderRadius: 6,
-        borderWidth: 2,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
+    },
+    thumbnailButtonSelected: {
+        borderWidth: BORDER.thick,
     },
     thumbnailImage: {
         width: '100%',
@@ -1649,29 +2008,28 @@ const styles = StyleSheet.create({
         bottom: 4,
         minWidth: 20,
         height: 20,
-        borderRadius: 4,
-        backgroundColor: 'rgba(0,0,0,0.75)',
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
     thumbnailNumberText: {
-        color: '#FFFFFF',
         fontSize: 9,
         fontWeight: '900',
     },
     documentPreview: {
         minHeight: 88,
-        borderRadius: 7,
-        borderWidth: 1,
-        padding: 12,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
+        padding: SPACING.md,
         flexDirection: 'row',
         alignItems: 'center',
     },
     documentIcon: {
         width: 54,
         height: 54,
-        borderRadius: 7,
-        backgroundColor: 'rgba(102,160,255,0.10)',
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1689,11 +2047,13 @@ const styles = StyleSheet.create({
         marginTop: 3,
         fontSize: 10,
         fontWeight: '700',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     noPreviewCard: {
         minHeight: 180,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         padding: 20,
         alignItems: 'center',
         justifyContent: 'center',
@@ -1710,26 +2070,26 @@ const styles = StyleSheet.create({
         paddingTop: 16,
         paddingBottom: 13,
     },
+    // Offline badge — informational purple surface (kulay naka-inline)
     offlineBadge: {
         alignSelf: 'flex-start',
-        minHeight: 28,
-        borderRadius: 6,
-        borderWidth: 1,
+        minHeight: 26,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 8,
-        marginBottom: 9,
+        marginBottom: 10,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
     },
     offlineBadgeText: {
-        color: WARNING,
         fontSize: 9,
         fontWeight: '900',
-        letterSpacing: 0.35,
+        letterSpacing: 0.8,
     },
     fileTitle: {
-        fontSize: 19,
-        lineHeight: 24,
+        fontSize: 20,
+        lineHeight: 25,
         fontWeight: '900',
     },
     fileMeta: {
@@ -1737,11 +2097,13 @@ const styles = StyleSheet.create({
         fontSize: 11,
         lineHeight: 16,
         fontWeight: '700',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     utilityButton: {
         minHeight: 58,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 11,
         paddingVertical: 9,
         flexDirection: 'row',
@@ -1756,16 +2118,19 @@ const styles = StyleSheet.create({
     utilityTitle: {
         fontSize: 12,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     utilityDescription: {
         marginTop: 2,
         fontSize: 10,
         lineHeight: 14,
     },
+    // Offline notice — informational purple surface (flat row)
     offlineNotice: {
         minHeight: 52,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 11,
         paddingVertical: 9,
         flexDirection: 'row',
@@ -1783,35 +2148,38 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 8,
     },
+    // CTA — 2px ink border + purple fill + itim na label (kulay at
+    // hard shadow naka-inline sa JSX)
     analyzeButton: {
         flex: 1,
-        minHeight: 48,
-        borderRadius: 7,
-        backgroundColor: PRIMARY,
-        paddingHorizontal: 12,
+        minHeight: 50,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        paddingHorizontal: SPACING.md,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
     },
     analyzeButtonText: {
-        color: '#FFFFFF',
         fontSize: 12,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
+    // Delete — danger token surface (kulay naka-inline), 1.5px border
     deleteButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 7,
-        borderWidth: 1,
-        borderColor: 'rgba(239,68,68,0.35)',
-        backgroundColor: 'rgba(239,68,68,0.08)',
+        width: 50,
+        height: 50,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
+
+    // --- FULLSCREEN VIEWER ---
     viewerBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.96)',
     },
     viewerCloseButton: {
         position: 'absolute',
@@ -1820,8 +2188,8 @@ const styles = StyleSheet.create({
         zIndex: 20,
         width: 40,
         height: 40,
-        borderRadius: 7,
-        backgroundColor: 'rgba(255,255,255,0.14)',
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1831,26 +2199,27 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         zIndex: 20,
         minHeight: 32,
-        borderRadius: 6,
-        backgroundColor: 'rgba(0,0,0,0.70)',
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 10,
         alignItems: 'center',
         justifyContent: 'center',
     },
     viewerIndicatorText: {
-        color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '900',
     },
+
+    // --- SCAN RESULT VIEW ---
     resultContent: {
-        paddingHorizontal: 16,
+        paddingHorizontal: SPACING.lg,
         paddingTop: 14,
         paddingBottom: 40,
     },
     noticeCard: {
         minHeight: 48,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 11,
         paddingVertical: 9,
         flexDirection: 'row',
@@ -1863,9 +2232,10 @@ const styles = StyleSheet.create({
         fontSize: 10,
         lineHeight: 15,
     },
+    // Score card — focal: 2px ink border + 2px hard shadow (sa JSX)
     scoreCard: {
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
         padding: 14,
         marginBottom: 10,
     },
@@ -1875,21 +2245,25 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
     },
     scoreLabel: {
-        fontSize: 11,
-        fontWeight: '900',
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
     },
     riskBadge: {
-        minHeight: 27,
-        borderRadius: 5,
+        minHeight: 26,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 8,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
     },
     riskBadgeText: {
-        color: '#FFFFFF',
         fontSize: 9,
         fontWeight: '900',
+        letterSpacing: 0.5,
     },
     scoreValueRow: {
         marginTop: 8,
@@ -1913,23 +2287,33 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     sectionTitle: {
-        marginTop: 9,
-        marginBottom: 9,
+        marginTop: 12,
+        marginBottom: 10,
         fontSize: 14,
         fontWeight: '900',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     emptyFindingCard: {
         minHeight: 130,
-        borderRadius: 7,
-        borderWidth: 1,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thin,
         padding: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 10,
+    },
+    emptyFindingIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 10,
     },
     emptyFindingText: {
         maxWidth: 280,
-        marginTop: 9,
         fontSize: 12,
         lineHeight: 18,
         textAlign: 'center',
@@ -1937,11 +2321,12 @@ const styles = StyleSheet.create({
     clauseWrapper: {
         marginBottom: 10,
     },
+    // Ask Lexie CTA — same treatment ng analyzeButton
     askLexieButton: {
-        minHeight: 48,
-        borderRadius: 7,
-        backgroundColor: PRIMARY,
-        paddingHorizontal: 12,
+        minHeight: 50,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        paddingHorizontal: SPACING.md,
         marginTop: 4,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1949,43 +2334,73 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     askLexieText: {
-        color: '#FFFFFF',
         fontSize: 12,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
-    modalBackdrop: {
+
+    // --- INFO MODALS (score breakdown / legal basis) — centered focal:
+    //     2px ink border + 2px hard shadow; scrim tap = sarado
+    modalScrim: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.66)',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 18,
+        paddingHorizontal: SPACING.lg,
     },
+    modalDismiss: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+    },
+    // Walang overflow:'hidden' — sa iOS kinakain nito ang sariling hard
+    // shadow (masksToBounds). May padding naman ang header/body kaya
+    // walang lumalampas na content sa rounded corners.
     modalCard: {
         width: '100%',
-        maxWidth: 430,
-        maxHeight: '78%',
-        borderRadius: 8,
-        borderWidth: 1,
-        padding: 15,
+        maxWidth: 460,
+        borderRadius: RADIUS.lg,
+        borderWidth: BORDER.thick,
     },
     modalHeader: {
-        minHeight: 42,
-        paddingBottom: 10,
+        minHeight: 52,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: 8,
     },
     modalTitle: {
         flex: 1,
-        fontSize: 15,
-        lineHeight: 20,
+        minWidth: 0,
+        fontSize: 13,
+        lineHeight: 17,
         fontWeight: '900',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
-    modalCloseButton: {
-        width: 38,
-        height: 38,
+    modalClose: {
+        width: 28,
+        height: 28,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    modalRule: {
+        height: BORDER.thick,
+    },
+    modalBody: {
+        maxHeight: 400,
+    },
+    modalBodyContent: {
+        padding: 16,
+    },
+    modalBodyText: {
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: 'center',
     },
     legalModalText: {
         fontSize: 13,
@@ -1999,11 +2414,13 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     totalScoreLabel: {
-        fontSize: 12,
-        fontWeight: '900',
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
     },
     startingScore: {
-        color: SUCCESS,
         fontSize: 16,
         fontWeight: '900',
     },
@@ -2023,7 +2440,6 @@ const styles = StyleSheet.create({
         fontWeight: '900',
     },
     deductionText: {
-        color: DANGER,
         fontSize: 12,
         fontWeight: '900',
     },
@@ -2038,13 +2454,14 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     readMoreText: {
-        color: PRIMARY_SOFT,
         fontSize: 10,
-        fontWeight: '900',
+        fontWeight: '800',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     finalScoreRow: {
         minHeight: 50,
-        borderTopWidth: 1,
+        borderTopWidth: BORDER.thin,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',

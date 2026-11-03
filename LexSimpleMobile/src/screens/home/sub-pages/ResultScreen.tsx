@@ -1,3 +1,32 @@
+// RESULT SCREEN VERSION: 8.0.0 — PURPLE NEO-BRUTALISM SPEC
+// (UI/UX lang; walang binagong logic/state/network maliban sa
+// user-requested na auto-open ng AI summary modal sa pagpasok.)
+// Spec: purple system (tanggal ang blue), 1.5px standard borders,
+// 2px sa hero score card / CTAs / modal panels, 2–6px radius (squared,
+// walang pill), predominantly FLAT — hard shadow lang sa hero score
+// card, Lex Insight floating CTA, split CTA, at mga modal panel
+// (focal surfaces).
+// Risk colors: semantic tokens na (success/warning/danger); ang dating
+// blue na "acceptable/review/no-flags" ay purple na (brandVivid) ayon
+// sa spec. Text sa loob ng colored fills = itim (brandText) — spec CTA.
+// Header: unified ScreenLayout app bar na (may back button + onBackPress
+// na papuntang Main).
+// v8.0.0 CHANGES (user-requested UX):
+//   - AI BUOD MUNA: kapag may document summary ang resulta, awtomatikong
+//     bubukas ang summary modal sa pagpasok ng screen; pagsasara nito ang
+//     magbubunyag ng buong resulta (kada pasok sa screen, hindi kada
+//     tab-switch sa batch).
+//   - Section reorder: hero score card na ang una (bago ang disclaimer),
+//     sunod ang AI buod card, tapos findings at key clauses; ang
+//     "Sanitized OCR text" card ay nailipat sa dulo bilang utility.
+//   - Hero label: "FINDING CHECK" → "COMPLEXITY SCORE" (score-first
+//     framing para mas malinaw sa users) + intro line sa findings
+//     section.
+//   - Hero card: flat score meter + quick stats row (FINDINGS / BAWAS /
+//     DETALYE) para kitang-kita agad ang basehan ng score.
+//   - Summary modal (ang bungad): may "Tingnan ang buong resulta" CTA na
+//     sa footer — isang tap papunta sa buong result.
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -10,6 +39,7 @@ import {
     Text,
     TouchableOpacity,
     View,
+    type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { updateScanHistory } from '../../../services/scanHistoryStorage';
@@ -17,16 +47,31 @@ import { updateScanHistory } from '../../../services/scanHistoryStorage';
 import ScreenLayout from '../../../components/ScreenLayout';
 import ClauseCard from '../../../components/ClauseCard';
 import { useCustomAlert } from '../../../components/CustomAlert';
+import { NeoIconButton, getNeoShadow } from '../../../components/Neo';
 import { useTheme } from '../../../theme/ThemeContext';
 import { analyzeSanitizedDocument } from '../../../services/AiEngine';
+import { BORDER, RADIUS, SHADOW, type ThemeColors } from '../../../theme/tokens';
 import type { SanitizedDocumentApiPayload } from '../../../utils/sanitizer';
 
-// RESULT SCREEN VERSION: 6.3.24
-const PRIMARY = '#3478F6';
-const PRIMARY_SOFT = '#66A0FF';
-const SUCCESS = '#10B981';
-const WARNING = '#F59E0B';
-const DANGER = '#EF4444';
+/**
+ * Hard-shadow press helper ("sink into paper") — pareho ng helper ng
+ * ProfileScreen/LibraryScreen/ScanScreen. Para lang sa mga focal element
+ * na may 2px hard shadow (dito: hero score card, Lex Insight floating
+ * CTA, at ang split CTA ng kondisyon modal).
+ */
+function makeSink(colors: ThemeColors) {
+    return (pressed: boolean, level: 'sm' | 'md' | 'lg'): ViewStyle => {
+        if (!pressed) return getNeoShadow(colors, level);
+        const offset = SHADOW[level].ios.shadowOffset;
+        return {
+            elevation: 0,
+            transform: [
+                { translateX: offset.width },
+                { translateY: offset.height },
+            ],
+        };
+    };
+}
 
 type Finding = {
     title: string;
@@ -114,46 +159,68 @@ const clampScore = (value: unknown): number | null => {
     return Math.max(0, Math.min(100, Math.round(parsed)));
 };
 
-const getRiskConfig = (score: number | null): RiskConfig => {
+// Label mapping lang — ginagamit ng normalizeAnalysisResult (hindi nito
+// kailangan ng kulay) at ng getRiskConfig sa ibaba. Same strings tulad
+// ng dating hardcoded labels.
+const getRiskLabel = (score: number | null): string => {
+    if (score === null) {
+        return 'REVIEW REQUIRED';
+    }
+    if (score >= 90) {
+        return 'VERY SAFE';
+    }
+    if (score >= 70) {
+        return 'ACCEPTABLE';
+    }
+    if (score >= 50) {
+        return 'RISKY';
+    }
+    return 'HIGH RISK';
+};
+
+// DATING: module-level hex constants (blue #66A0FF para sa acceptable/
+// review, green/amber/red). NGAYON: semantic tokens — ang blue ay
+// purple na (brandVivid) ayon sa purple spec.
+const getRiskConfig = (score: number | null, colors: ThemeColors): RiskConfig => {
     if (score === null) {
         return {
-            mainColor: PRIMARY_SOFT,
+            mainColor: colors.brandVivid,
             icon: 'information-circle-outline',
-            label: 'REVIEW REQUIRED',
+            label: getRiskLabel(score),
             shortLabel: 'Kailangang suriin',
         };
     }
     if (score >= 90) {
         return {
-            mainColor: SUCCESS,
+            mainColor: colors.success,
             icon: 'shield-checkmark-outline',
-            label: 'VERY SAFE',
+            label: getRiskLabel(score),
             shortLabel: 'Mababang risk',
         };
     }
 
     if (score >= 70) {
         return {
-            mainColor: PRIMARY_SOFT,
+            mainColor: colors.brandVivid,
             icon: 'checkmark-circle-outline',
-            label: 'ACCEPTABLE',
+            label: getRiskLabel(score),
             shortLabel: 'Katanggap-tanggap',
         };
     }
 
     if (score >= 50) {
         return {
-            mainColor: WARNING,
+            mainColor: colors.warning,
             icon: 'warning-outline',
-            label: 'RISKY',
+            label: getRiskLabel(score),
             shortLabel: 'May dapat suriin',
         };
     }
 
     return {
-        mainColor: DANGER,
+        mainColor: colors.danger,
         icon: 'alert-circle-outline',
-        label: 'HIGH RISK',
+        label: getRiskLabel(score),
         shortLabel: 'Kailangang pag-ingatan',
     };
 };
@@ -239,7 +306,7 @@ const normalizeAnalysisResult = (raw: any): AnalysisResult => {
             : String(
                   payload.riskLevel ??
                       payload.risk_level ??
-                      getRiskConfig(score).label
+                      getRiskLabel(score)
               ),
         documentTitle: payload.documentTitle
             ? String(payload.documentTitle)
@@ -315,7 +382,12 @@ const BreakdownFinding = ({
                     {finding.title}
                 </Text>
                 {showDeduction && typeof finding.scoreDeduction === 'number' && (
-                    <Text style={styles.deductionText}>
+                    <Text
+                        style={[
+                            styles.deductionText,
+                            { color: theme.danger },
+                        ]}
+                    >
                         -{finding.scoreDeduction}
                     </Text>
                 )}
@@ -335,7 +407,7 @@ const BreakdownFinding = ({
                     onPress={() => setExpanded((current) => !current)}
                     accessibilityRole="button"
                 >
-                    <Text style={styles.readMoreText}>
+                    <Text style={[styles.readMoreText, { color: theme.brandDeep }]}>
                         {expanded ? 'Paikliin' : 'Basahin lahat'}
                     </Text>
                 </TouchableOpacity>
@@ -347,6 +419,7 @@ const BreakdownFinding = ({
 export default function ResultScreen({ route, navigation }: any) {
     const { isDarkMode, colors: T } = useTheme();
     const { showAlert, AlertRender } = useCustomAlert();
+    const sink = useMemo(() => makeSink(T), [T]);
     const [scoreModalVisible, setScoreModalVisible] = useState(false);
     const [legalModalVisible, setLegalModalVisible] = useState(false);
     const [selectedLegalTitle, setSelectedLegalTitle] = useState('');
@@ -413,12 +486,12 @@ export default function ResultScreen({ route, navigation }: any) {
               : `${result.findings.length} bahagi ang kailangan mong suriin.`;
     const riskConfig: RiskConfig = noFindings
         ? {
-            mainColor: PRIMARY_SOFT,
+            mainColor: T.brandVivid,
             icon: 'checkmark-circle-outline',
             label: 'NO FLAGS IN READ TEXT',
             shortLabel: 'Walang na-flag',
         }
-        : getRiskConfig(result.score);
+        : getRiskConfig(result.score, T);
     const totalDeduction = result.score === null
         ? 0
         : Math.max(0, 100 - result.score);
@@ -493,6 +566,17 @@ export default function ResultScreen({ route, navigation }: any) {
         return () => subscription.remove();
     }, [navigation]);
 
+    // v8.0.0 — AI BUOD MUNA: kapag may available na summary, diretsong
+    // bubuksan ang summary modal sa pagpasok ng screen. Isang beses lang
+    // sa mount (hindi muling bubuksan kapag nagpalit ng batch document
+    // tab — panatilihin ang manual na close ng user).
+    useEffect(() => {
+        if (showCompletedSummary) {
+            setSummaryModalVisible(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     if (!hasAnalysisResult) {
         return (
             <ScreenLayout title="Resulta" onBackPress={goToMain}>
@@ -534,10 +618,13 @@ export default function ResultScreen({ route, navigation }: any) {
                         Buksan ulit ang saved document at piliing ipa-check.
                     </Text>
                     <TouchableOpacity
-                        style={styles.missingButton}
+                        style={[
+                            styles.missingButton,
+                            { backgroundColor: T.brand, borderColor: T.ink },
+                        ]}
                         onPress={goToMain}
                     >
-                        <Text style={styles.missingButtonText}>
+                        <Text style={[styles.missingButtonText, { color: T.brandText }]}>
                             Bumalik sa Library
                         </Text>
                     </TouchableOpacity>
@@ -767,8 +854,10 @@ export default function ResultScreen({ route, navigation }: any) {
                                     key={`${item.pageNumbers.join('-')}-${index}`}
                                     style={[
                                         styles.documentTab,
-                                        { borderColor: index === selectedDocumentIndex ? PRIMARY : T.border,
-                                          backgroundColor: index === selectedDocumentIndex ? PRIMARY : T.card },
+                                        {
+                                            borderColor: index === selectedDocumentIndex ? T.ink : T.border,
+                                            backgroundColor: index === selectedDocumentIndex ? T.brand : T.card,
+                                        },
                                     ]}
                                     onPress={() => {
                                         setSelectedDocumentIndex(index);
@@ -781,10 +870,10 @@ export default function ResultScreen({ route, navigation }: any) {
                                     accessibilityRole="tab"
                                     accessibilityState={{ selected: index === selectedDocumentIndex }}
                                 >
-                                    <Text style={{ color: index === selectedDocumentIndex ? '#FFFFFF' : T.text, fontWeight: '800' }}>
+                                    <Text style={{ color: index === selectedDocumentIndex ? T.brandText : T.text, fontWeight: '800' }}>
                                         Dokumento {index + 1}
                                     </Text>
-                                    <Text style={{ color: index === selectedDocumentIndex ? '#E6EEFF' : T.subText, fontSize: 11, marginTop: 3 }}>
+                                    <Text style={{ color: index === selectedDocumentIndex ? T.brandText : T.subText, fontSize: 11, marginTop: 3 }}>
                                         Pahina {item.pageNumbers.join(', ')}
                                     </Text>
                                 </TouchableOpacity>
@@ -794,14 +883,17 @@ export default function ResultScreen({ route, navigation }: any) {
                 )}
                 {selectedDocument?.retryPayload && activeAnalysis?.failureMessage && (
                     <TouchableOpacity
-                        style={styles.retryDocumentButton}
+                        style={[
+                            styles.retryDocumentButton,
+                            { backgroundColor: T.brand, borderColor: T.ink },
+                        ]}
                         onPress={() => void retrySelectedDocument()}
                         disabled={retryingIndex !== null}
                         accessibilityRole="button"
                     >
                         {retryingIndex === selectedDocumentIndex &&
-                            <ActivityIndicator size="small" color="#FFFFFF" />}
-                        <Text style={styles.retryDocumentText}>
+                            <ActivityIndicator size="small" color={T.brandText} />}
+                        <Text style={[styles.retryDocumentText, { color: T.brandText }]}>
                             Subukan muli ang Dokumento {selectedDocumentIndex + 1}
                         </Text>
                     </TouchableOpacity>
@@ -828,40 +920,17 @@ export default function ResultScreen({ route, navigation }: any) {
                     </View>
                 )}
 
-                <View
-                    style={[
-                        styles.noticeCard,
-                        {
-                            backgroundColor: T.card,
-                            borderColor: T.border,
-                        },
-                    ]}
-                >
-                    <Ionicons
-                        name="information-circle-outline"
-                        size={19}
-                        color={PRIMARY_SOFT}
-                    />
-                    <Text
-                        style={[
-                            styles.noticeText,
-                            { color: T.subText },
-                        ]}
-                    >
-                        Gabay lang ito sa pag-unawa. Hindi ito legal
-                        advice o kapalit ng abogado.
-                    </Text>
-                </View>
-
-                <TouchableOpacity
-                    style={[
+                {/* HERO — focal surface: 2px risk-colored outline + 2px
+                    hard shadow na "humuhugos" sa press (sink) */}
+                <Pressable
+                    style={({ pressed }) => [
                         styles.scoreCard,
                         {
                             backgroundColor: T.card,
                             borderColor: riskConfig.mainColor,
                         },
+                        sink(pressed, 'sm'),
                     ]}
-                    activeOpacity={0.86}
                     onPress={() => setScoreModalVisible(true)}
                     accessibilityRole="button"
                     accessibilityLabel={noFindings
@@ -875,7 +944,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 { color: T.subText },
                             ]}
                         >
-                            FINDING CHECK
+                            COMPLEXITY SCORE
                         </Text>
                         <View
                             style={[
@@ -883,15 +952,16 @@ export default function ResultScreen({ route, navigation }: any) {
                                 {
                                     backgroundColor:
                                         riskConfig.mainColor,
+                                    borderColor: T.ink,
                                 },
                             ]}
                         >
                             <Ionicons
                                 name={riskConfig.icon}
                                 size={13}
-                                color="#FFFFFF"
+                                color={T.brandText}
                             />
-                            <Text style={styles.riskBadgeText}>
+                            <Text style={[styles.riskBadgeText, { color: T.brandText }]}>
                                 {riskConfig.shortLabel}
                             </Text>
                         </View>
@@ -936,6 +1006,58 @@ export default function ResultScreen({ route, navigation }: any) {
                         </View>
                     )}
 
+                    {/* v8.0.0 — score meter (flat, proportional: walang
+                        gradient, solid fill lang) + quick stats row: kita
+                        agad ang basehan ng score bago pa pumasok sa
+                        findings. */}
+                    {!noFindings && result.score !== null && (
+                        <View
+                            style={[
+                                styles.scoreMeterTrack,
+                                { backgroundColor: T.bg, borderColor: T.ink },
+                            ]}
+                        >
+                            <View
+                                style={{
+                                    flex: result.score,
+                                    backgroundColor: riskConfig.mainColor,
+                                }}
+                            />
+                            <View style={{ flex: Math.max(0, 100 - result.score) }} />
+                        </View>
+                    )}
+                    <View style={styles.scoreStatsRow}>
+                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
+                                FINDINGS
+                            </Text>
+                            <Text style={[styles.scoreStatValue, { color: T.text }]}>
+                                {result.findings.length}
+                            </Text>
+                        </View>
+                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
+                                BAWAS
+                            </Text>
+                            <Text
+                                style={[
+                                    styles.scoreStatValue,
+                                    { color: result.score === null ? T.subText : T.danger },
+                                ]}
+                            >
+                                {result.score === null ? '—' : `-${totalDeduction}`}
+                            </Text>
+                        </View>
+                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
+                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
+                                DETALYE
+                            </Text>
+                            <Text style={[styles.scoreStatValue, { color: T.text }]}>
+                                {result.keyClauses.length}
+                            </Text>
+                        </View>
+                    </View>
+
                     <Text
                         style={[
                             styles.scoreSummary,
@@ -945,54 +1067,39 @@ export default function ResultScreen({ route, navigation }: any) {
                         {resultMessage}
                     </Text>
 
-                    <Text style={styles.scoreActionText}>
+                    <Text style={[styles.scoreActionText, { color: T.brandDeep }]}>
                         {noFindings
                             ? 'Ano ang ibig sabihin nito?'
                             : result.score === null
                             ? 'Bakit walang score?'
                             : 'Tingnan kung paano nakuha ang score'}
                     </Text>
-                </TouchableOpacity>
+                </Pressable>
 
-                <TouchableOpacity
+                <View
                     style={[
-                        styles.privacyCard,
+                        styles.noticeCard,
                         {
                             backgroundColor: T.card,
                             borderColor: T.border,
                         },
                     ]}
-                    onPress={openSanitizedText}
-                    activeOpacity={0.82}
-                    accessibilityRole="button"
                 >
-                    <View style={styles.privacyIconBox}>
-                        <Ionicons
-                            name="shield-checkmark-outline"
-                            size={21}
-                            color={SUCCESS}
-                        />
-                    </View>
-                    <View style={styles.privacyCopy}>
-                        <Text
-                            style={[
-                                styles.privacyTitle,
-                                { color: T.text },
-                            ]}
-                        >
-                            Sanitized OCR text
-                        </Text>
-                        <Text
-                            style={[
-                                styles.privacyDescription,
-                                { color: T.subText },
-                            ]}
-                        >
-                            Tingnan ang text na ginamit sa analysis at
-                            i-review kung may hindi na-redact.
-                        </Text>
-                    </View>
-                </TouchableOpacity>
+                    <Ionicons
+                        name="information-circle-outline"
+                        size={19}
+                        color={T.brandVivid}
+                    />
+                    <Text
+                        style={[
+                            styles.noticeText,
+                            { color: T.subText },
+                        ]}
+                    >
+                        Gabay lang ito sa pag-unawa. Hindi ito legal
+                        advice o kapalit ng abogado.
+                    </Text>
+                </View>
 
                 {showCompletedSummary && (
                     <TouchableOpacity
@@ -1005,8 +1112,8 @@ export default function ResultScreen({ route, navigation }: any) {
                         accessibilityRole="button"
                         accessibilityLabel="Buksan ang AI buod ng dokumento"
                     >
-                        <View style={styles.summaryIconBox}>
-                            <Ionicons name="document-text-outline" size={21} color={PRIMARY_SOFT} />
+                        <View style={[styles.summaryIconBox, { backgroundColor: T.brandSoft }]}>
+                            <Ionicons name="document-text-outline" size={21} color={T.brandDeep} />
                         </View>
                         <View style={styles.privacyCopy}>
                             <Text style={[styles.privacyTitle, { color: T.text }]}>AI buod ng dokumento</Text>
@@ -1036,6 +1143,9 @@ export default function ResultScreen({ route, navigation }: any) {
                         {result.findings.length}
                     </Text>
                 </View>
+                <Text style={[styles.findingsIntro, { color: T.subText }]}>
+                    Mga bahaging na-flag ng AI — ito ang basehan ng complexity score.
+                </Text>
 
                 {result.findings.length === 0 ? (
                     <View
@@ -1047,11 +1157,11 @@ export default function ResultScreen({ route, navigation }: any) {
                             },
                         ]}
                     >
-                        <View style={styles.emptyIconBox}>
+                        <View style={[styles.emptyIconBox, { backgroundColor: T.brandSoft }]}>
                             <Ionicons
                                 name={needsReview ? 'alert-outline' : 'information-outline'}
                                 size={24}
-                                color={PRIMARY_SOFT}
+                                color={T.brandVivid}
                             />
                         </View>
                         <Text
@@ -1134,7 +1244,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                 onPress={() => setShowAllConditions((current) => !current)}
                                 accessibilityRole="button"
                             >
-                                <Text style={styles.showConditionsText}>
+                                <Text style={[styles.showConditionsText, { color: T.brandDeep }]}>
                                     {showAllConditions ? 'Ipakita ang unang 3' : `Tingnan lahat (${result.keyClauses.length})`}
                                 </Text>
                             </TouchableOpacity>
@@ -1142,25 +1252,73 @@ export default function ResultScreen({ route, navigation }: any) {
                     </>
                 )}
 
+                <TouchableOpacity
+                    style={[
+                        styles.privacyCard,
+                        {
+                            backgroundColor: T.card,
+                            borderColor: T.border,
+                        },
+                    ]}
+                    onPress={openSanitizedText}
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                >
+                    <View style={[styles.privacyIconBox, { backgroundColor: T.successSoft }]}>
+                        <Ionicons
+                            name="shield-checkmark-outline"
+                            size={21}
+                            color={T.success}
+                        />
+                    </View>
+                    <View style={styles.privacyCopy}>
+                        <Text
+                            style={[
+                                styles.privacyTitle,
+                                { color: T.text },
+                            ]}
+                        >
+                            Sanitized OCR text
+                        </Text>
+                        <Text
+                            style={[
+                                styles.privacyDescription,
+                                { color: T.subText },
+                            ]}
+                        >
+                            Tingnan ang text na ginamit sa analysis at
+                            i-review kung may hindi na-redact.
+                        </Text>
+                    </View>
+                </TouchableOpacity>
 
             </ScrollView>
 
-            {canAskLexie && <TouchableOpacity
-                style={styles.lexieButton}
+            {/* LEX INSIGHT — floating CTA (focal): purple fill + itim na
+                text (spec) + 2px ink outline + 2px hard shadow na sumususrô
+                sa press */}
+            {canAskLexie && <Pressable
+                style={({ pressed }) => [
+                    styles.lexieButton,
+                    {
+                        backgroundColor: T.brand,
+                        borderColor: T.ink,
+                    },
+                    sink(pressed, 'sm'),
+                ]}
                 onPress={askLexieAboutDocument}
-                activeOpacity={0.88}
                 accessibilityRole="button"
                 accessibilityLabel="Buksan ang Lex Insight"
             >
-                <View style={styles.lexieIconBox}>
+                <View style={[styles.lexieIconBox, { backgroundColor: T.brandDeep }]}>
                     <Ionicons
                         name="chatbubble-ellipses-outline"
                         size={19}
-                        color="#FFFFFF"
+                        color={T.brandText}
                     />
                 </View>
-                <Text style={styles.lexieTitle}>Lex Insight</Text>
-            </TouchableOpacity>}
+                <Text style={[styles.lexieTitle, { color: T.brandText }]}>Lex Insight</Text>
+            </Pressable>}
 
             <Modal
                 visible={scoreModalVisible}
@@ -1169,7 +1327,7 @@ export default function ResultScreen({ route, navigation }: any) {
                 statusBarTranslucent
                 onRequestClose={() => setScoreModalVisible(false)}
             >
-                <View style={styles.modalBackdrop}>
+                <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
                     <Pressable
                         style={StyleSheet.absoluteFill}
                         onPress={() => setScoreModalVisible(false)}
@@ -1179,11 +1337,12 @@ export default function ResultScreen({ route, navigation }: any) {
                             styles.modalCard,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
+                            getNeoShadow(T, 'sm'),
                         ]}
                     >
-                        <View style={styles.modalHeader}>
+                        <View style={[styles.modalHeader, { borderBottomColor: T.border }]}>
                             <View style={styles.modalHeadingCopy}>
                                 <Text
                                     style={[
@@ -1214,19 +1373,13 @@ export default function ResultScreen({ route, navigation }: any) {
                                         : 'Buod ng mga nakitang bahagi'}
                                 </Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.modalCloseButton}
-                                onPress={() =>
-                                    setScoreModalVisible(false)
-                                }
+                            <NeoIconButton
+                                icon="close"
+                                size={34}
+                                iconSize={19}
+                                onPress={() => setScoreModalVisible(false)}
                                 accessibilityLabel="Isara"
-                            >
-                                <Ionicons
-                                    name="close"
-                                    size={21}
-                                    color={T.text}
-                                />
-                            </TouchableOpacity>
+                            />
                         </View>
 
                         <ScrollView
@@ -1252,7 +1405,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     styles.scoreEquation,
                                     {
                                         backgroundColor: T.bg,
-                                        borderColor: T.border,
+                                        borderColor: T.ink,
                                     },
                                 ]}
                             >
@@ -1294,7 +1447,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     <Text
                                         style={[
                                             styles.equationValue,
-                                            { color: DANGER },
+                                            { color: T.danger },
                                         ]}
                                     >
                                         {totalDeduction}
@@ -1363,7 +1516,7 @@ export default function ResultScreen({ route, navigation }: any) {
                                     <Text
                                         style={[
                                             styles.breakdownNote,
-                                            { color: T.subText },
+                                            { color: T.subText, borderTopColor: T.border },
                                         ]}
                                     >
                                         Total deduction lang ang available sa
@@ -1390,24 +1543,23 @@ export default function ResultScreen({ route, navigation }: any) {
                     summaryScrollRef.current?.scrollTo({ y: 0, animated: false });
                 }}
             >
-                <View style={styles.modalBackdrop}>
+                <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
                     <Pressable style={StyleSheet.absoluteFill} onPress={() => setSummaryModalVisible(false)} />
-                    <View style={[styles.modalCard, styles.summaryModalCard, { backgroundColor: T.card, borderColor: T.border }]}>
-                        <View style={styles.modalHeader}>
+                    <View style={[styles.modalCard, styles.summaryModalCard, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
+                        <View style={[styles.modalHeader, { borderBottomColor: T.border }]}>
                             <View style={styles.modalHeadingCopy}>
                                 <Text style={[styles.modalTitle, { color: T.text }]}>AI buod ng dokumento</Text>
                                 <Text style={[styles.modalSubtitle, { color: T.subText }]} numberOfLines={2}>
                                     {result.documentTitle || 'Nabasang dokumento'}
                                 </Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.modalCloseButton}
+                            <NeoIconButton
+                                icon="close"
+                                size={34}
+                                iconSize={19}
                                 onPress={() => setSummaryModalVisible(false)}
-                                accessibilityRole="button"
                                 accessibilityLabel="Isara ang AI buod"
-                            >
-                                <Ionicons name="close" size={21} color={T.text} />
-                            </TouchableOpacity>
+                            />
                         </View>
                         <ScrollView
                             ref={summaryScrollRef}
@@ -1445,8 +1597,8 @@ export default function ResultScreen({ route, navigation }: any) {
                                     accessible
                                     accessibilityLabel={`Punto ${point.number}. ${point.text}`}
                                 >
-                                    <View style={styles.summaryPointNumber}>
-                                        <Text style={styles.summaryPointNumberText}>{point.number}</Text>
+                                    <View style={[styles.summaryPointNumber, { backgroundColor: T.brandSoft }]}>
+                                        <Text style={[styles.summaryPointNumberText, { color: T.brandDeep }]}>{point.number}</Text>
                                     </View>
                                     <Text style={[styles.summaryPointText, { color: T.text }]} selectable>
                                         {point.text}
@@ -1460,12 +1612,43 @@ export default function ResultScreen({ route, navigation }: any) {
                             )}
                         </ScrollView>
                         <View style={[styles.summaryModalFooter, { borderTopColor: T.border }]}>
-                            {summaryHasMore && <Ionicons name="chevron-down" size={15} color={PRIMARY_SOFT} />}
-                            <Text style={[styles.summaryNote, { color: T.subText }]}>
-                                {summaryHasMore
-                                    ? 'Mag-scroll para mabasa ang buong buod'
-                                    : 'Buod ng AI. Ihambing sa orihinal na dokumento.'}
-                            </Text>
+                            {/* v8.0.0 — bungad CTA: isang tap papunta sa
+                                buong result (pareho ng X sa itaas). */}
+                            <Pressable
+                                onPress={() => setSummaryModalVisible(false)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Tingnan ang buong resulta"
+                            >
+                                {({ pressed }) => (
+                                    <View
+                                        style={[
+                                            styles.summaryCtaButton,
+                                            {
+                                                backgroundColor: T.brand,
+                                                borderColor: T.ink,
+                                            },
+                                            sink(pressed, 'sm'),
+                                        ]}
+                                    >
+                                        <Ionicons
+                                            name="document-text-outline"
+                                            size={16}
+                                            color={T.brandText}
+                                        />
+                                        <Text style={[styles.summaryCtaText, { color: T.brandText }]}>
+                                            Tingnan ang buong resulta
+                                        </Text>
+                                    </View>
+                                )}
+                            </Pressable>
+                            <View style={styles.summaryNoteRow}>
+                                {summaryHasMore && <Ionicons name="chevron-down" size={15} color={T.brandVivid} />}
+                                <Text style={[styles.summaryNote, { color: T.subText }]}>
+                                    {summaryHasMore
+                                        ? 'Mag-scroll para mabasa ang buong buod'
+                                        : 'Buod ng AI. Ihambing sa orihinal na dokumento.'}
+                                </Text>
+                            </View>
                         </View>
                     </View>
                 </View>
@@ -1478,10 +1661,10 @@ export default function ResultScreen({ route, navigation }: any) {
                 statusBarTranslucent
                 onRequestClose={() => setSelectedCondition(null)}
             >
-                <View style={styles.modalBackdrop}>
+                <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
                     <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedCondition(null)} />
-                    <View style={[styles.modalCard, { backgroundColor: T.card, borderColor: T.border }]}>
-                        <View style={styles.modalHeader}>
+                    <View style={[styles.modalCard, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
+                        <View style={[styles.modalHeader, { borderBottomColor: T.border }]}>
                             <View style={styles.modalHeadingCopy}>
                                 <Text style={[styles.modalTitle, { color: T.text }]} numberOfLines={2}>
                                     {selectedCondition?.title}
@@ -1490,14 +1673,13 @@ export default function ResultScreen({ route, navigation }: any) {
                                     Mahalagang detalye
                                 </Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.modalCloseButton}
+                            <NeoIconButton
+                                icon="close"
+                                size={34}
+                                iconSize={19}
                                 onPress={() => setSelectedCondition(null)}
-                                accessibilityRole="button"
                                 accessibilityLabel="Isara ang kondisyon"
-                            >
-                                <Ionicons name="close" size={21} color={T.text} />
-                            </TouchableOpacity>
+                            />
                         </View>
                         <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
                             <Text style={[styles.conditionModalLabel, { color: T.subText }]}>PALIWANAG</Text>
@@ -1505,21 +1687,42 @@ export default function ResultScreen({ route, navigation }: any) {
                                 {selectedCondition?.explanation}
                             </Text>
                             <Text style={[styles.conditionModalLabel, { color: T.subText }]}>NABASANG TEXT SA DOKUMENTO</Text>
-                            <Text style={[styles.conditionModalQuote, { color: T.text, borderColor: T.border, backgroundColor: T.bg }]} selectable>
+                            <Text style={[styles.conditionModalQuote, { color: T.text, borderColor: T.ink, backgroundColor: T.bg }]} selectable>
                                 {selectedCondition?.foundText}
                             </Text>
                             <Text style={[styles.conditionModalNote, { color: T.subText }]}>
                                 Ihambing ang nabasang text sa orihinal na pahina kung may malabong salita o numero.
                             </Text>
                             {selectedCondition && (
-                                <TouchableOpacity
-                                    style={styles.conditionAskButton}
+                                <Pressable
                                     onPress={() => askLexieAboutCondition(selectedCondition)}
                                     accessibilityRole="button"
+                                    accessibilityLabel="Tanungin ang Lex Insight"
                                 >
-                                    <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
-                                    <Text style={styles.conditionAskText}>Tanungin ang Lex Insight</Text>
-                                </TouchableOpacity>
+                                    {({ pressed }) => (
+                                        <View
+                                            style={[
+                                                styles.conditionAskButton,
+                                                { backgroundColor: T.brand, borderColor: T.ink },
+                                                sink(pressed, 'sm'),
+                                            ]}
+                                        >
+                                            <View style={styles.conditionAskMain}>
+                                                <Ionicons
+                                                    name="chatbubble-ellipses-outline"
+                                                    size={17}
+                                                    color={T.brandText}
+                                                />
+                                                <Text style={[styles.conditionAskText, { color: T.brandText }]}>
+                                                    Tanungin ang Lex Insight
+                                                </Text>
+                                            </View>
+                                            <View style={[styles.conditionAskArrow, { backgroundColor: T.ink }]}>
+                                                <Ionicons name="arrow-forward" size={16} color={T.card} />
+                                            </View>
+                                        </View>
+                                    )}
+                                </Pressable>
                             )}
                         </ScrollView>
                     </View>
@@ -1533,7 +1736,7 @@ export default function ResultScreen({ route, navigation }: any) {
                 statusBarTranslucent
                 onRequestClose={() => setLegalModalVisible(false)}
             >
-                <View style={styles.modalBackdrop}>
+                <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
                     <Pressable
                         style={StyleSheet.absoluteFill}
                         onPress={() => setLegalModalVisible(false)}
@@ -1543,11 +1746,12 @@ export default function ResultScreen({ route, navigation }: any) {
                             styles.modalCard,
                             {
                                 backgroundColor: T.card,
-                                borderColor: T.border,
+                                borderColor: T.ink,
                             },
+                            getNeoShadow(T, 'sm'),
                         ]}
                     >
-                        <View style={styles.modalHeader}>
+                        <View style={[styles.modalHeader, { borderBottomColor: T.border }]}>
                             <View style={styles.modalHeadingCopy}>
                                 <Text
                                     style={[
@@ -1567,19 +1771,13 @@ export default function ResultScreen({ route, navigation }: any) {
                                     Posibleng kaugnay na sanggunian
                                 </Text>
                             </View>
-                            <TouchableOpacity
-                                style={styles.modalCloseButton}
-                                onPress={() =>
-                                    setLegalModalVisible(false)
-                                }
+                            <NeoIconButton
+                                icon="close"
+                                size={34}
+                                iconSize={19}
+                                onPress={() => setLegalModalVisible(false)}
                                 accessibilityLabel="Isara"
-                            >
-                                <Ionicons
-                                    name="close"
-                                    size={21}
-                                    color={T.text}
-                                />
-                            </TouchableOpacity>
+                            />
                         </View>
                         <ScrollView
                             contentContainerStyle={styles.modalBody}
@@ -1607,18 +1805,40 @@ export default function ResultScreen({ route, navigation }: any) {
     );
 }
 
+// ------------------------------------------------------------
+// STATIC STYLES — layout lang dito (walang kulay); lahat ng
+// tema-dependent na kulay ay inline sa JSX gamit ang T.* tokens.
+// Radius: RADIUS.sm/md/lg (2–6px, squared — walang pill).
+// Borders: BORDER.thin (1.5px standard) / BORDER.thick (2px sa
+// hero card, CTAs, modal panels).
+// ------------------------------------------------------------
 const styles = StyleSheet.create({
     retryDocumentButton: {
-        minHeight: 46, borderRadius: 7, backgroundColor: PRIMARY,
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-        gap: 9, marginBottom: 14, paddingHorizontal: 12,
+        minHeight: 46,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 9,
+        marginBottom: 14,
+        paddingHorizontal: 12,
     },
-    retryDocumentText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-    documentTabs: { borderWidth: 1, borderRadius: 9, padding: 12, marginBottom: 15 },
+    retryDocumentText: { fontSize: 13, fontWeight: '800' },
+    documentTabs: {
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
+        padding: 12,
+        marginBottom: 15,
+    },
     documentTabsHeading: { fontSize: 12, lineHeight: 18, marginBottom: 10 },
     documentTab: {
-        minWidth: 126, borderWidth: 1, borderRadius: 7,
-        paddingHorizontal: 12, paddingVertical: 9, marginRight: 8,
+        minWidth: 126,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        marginRight: 8,
     },
     missingState: {
         flex: 1,
@@ -1629,8 +1849,8 @@ const styles = StyleSheet.create({
     missingIconBox: {
         width: 58,
         height: 58,
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1651,14 +1871,13 @@ const styles = StyleSheet.create({
     missingButton: {
         minHeight: 44,
         marginTop: 18,
-        borderRadius: 8,
-        backgroundColor: PRIMARY,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',
     },
     missingButtonText: {
-        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '900',
     },
@@ -1670,8 +1889,8 @@ const styles = StyleSheet.create({
     noticeCard: {
         marginTop: 12,
         minHeight: 58,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 13,
         paddingVertical: 12,
         flexDirection: 'row',
@@ -1699,10 +1918,12 @@ const styles = StyleSheet.create({
         lineHeight: 24,
         fontWeight: '900',
     },
+    // HERO score card — focal surface: 2px outline + 2px hard shadow
+    // (binibigay ng makeSink sa press state; tingnan ang JSX).
     scoreCard: {
         marginTop: 18,
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 18,
         paddingVertical: 17,
     },
@@ -1717,13 +1938,14 @@ const styles = StyleSheet.create({
         flexShrink: 1,
         fontSize: 11,
         lineHeight: 15,
-        fontWeight: '900',
-        letterSpacing: 1,
+        fontWeight: '800',
+        letterSpacing: 0.8,
     },
     riskBadge: {
         maxWidth: '58%',
         minHeight: 27,
-        borderRadius: 14,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         paddingHorizontal: 10,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1731,7 +1953,6 @@ const styles = StyleSheet.create({
         gap: 5,
     },
     riskBadgeText: {
-        color: '#FFFFFF',
         flexShrink: 1,
         fontSize: 10,
         lineHeight: 13,
@@ -1774,18 +1995,51 @@ const styles = StyleSheet.create({
         lineHeight: 19,
     },
     scoreActionText: {
-        color: PRIMARY_SOFT,
         marginTop: 13,
         textAlign: 'center',
         fontSize: 11,
         lineHeight: 15,
         fontWeight: '800',
     },
+    // v8.0.0 — flat score meter + quick stats row ng hero card.
+    scoreMeterTrack: {
+        marginTop: 14,
+        height: 12,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
+        overflow: 'hidden',
+        flexDirection: 'row',
+    },
+    scoreStatsRow: {
+        marginTop: 13,
+        flexDirection: 'row',
+        gap: 8,
+    },
+    scoreStatBox: {
+        flex: 1,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 4,
+    },
+    scoreStatLabel: {
+        fontSize: 9,
+        lineHeight: 12,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+    },
+    scoreStatValue: {
+        marginTop: 2,
+        fontSize: 15,
+        lineHeight: 19,
+        fontWeight: '900',
+    },
     privacyCard: {
         marginTop: 12,
         minHeight: 72,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 13,
         paddingVertical: 12,
         flexDirection: 'row',
@@ -1794,20 +2048,18 @@ const styles = StyleSheet.create({
     privacyIconBox: {
         width: 40,
         height: 40,
-        borderRadius: 8,
-        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
     },
     summaryIconBox: {
         width: 40,
         height: 40,
-        borderRadius: 8,
-        backgroundColor: 'rgba(52, 120, 246, 0.14)',
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    summaryModalCard: { height: '72%', maxHeight: 660, borderRadius: 14 },
+    summaryModalCard: { height: '72%', maxHeight: 660 },
     summaryModalScroll: { flex: 1 },
     summaryModalBody: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 16 },
     summaryLead: { fontSize: 15, lineHeight: 23, fontWeight: '600', marginBottom: 12 },
@@ -1818,17 +2070,38 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
     },
     summaryPointNumber: {
-        width: 25, height: 25, borderRadius: 13,
-        backgroundColor: 'rgba(52,120,246,0.18)',
-        alignItems: 'center', justifyContent: 'center', marginRight: 11,
+        width: 25,
+        height: 25,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 11,
     },
-    summaryPointNumberText: { color: PRIMARY_SOFT, fontSize: 12, fontWeight: '800' },
+    summaryPointNumberText: { fontSize: 12, fontWeight: '800' },
     summaryPointText: { flex: 1, fontSize: 15, lineHeight: 23 },
     summaryModalFooter: {
-        minHeight: 45,
         borderTopWidth: StyleSheet.hairlineWidth,
         paddingHorizontal: 20,
-        paddingVertical: 10,
+        paddingTop: 12,
+        paddingBottom: 14,
+    },
+    // v8.0.0 — bungad CTA ng summary modal (focal: 2px ink + hard
+    // shadow via makeSink sa JSX).
+    summaryCtaButton: {
+        minHeight: 46,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    summaryCtaText: {
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    summaryNoteRow: {
+        marginTop: 9,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 7,
@@ -1860,6 +2133,8 @@ const styles = StyleSheet.create({
         fontSize: 17,
         lineHeight: 22,
         fontWeight: '900',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
     },
     sectionCount: {
         fontSize: 13,
@@ -1868,14 +2143,20 @@ const styles = StyleSheet.create({
     clauseWrapper: {
         marginBottom: 12,
     },
+    findingsIntro: {
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 12,
+        marginTop: -4,
+    },
     keyClauseIntro: {
         fontSize: 12,
         lineHeight: 18,
         marginBottom: 12,
     },
     keyClauseCard: {
-        borderWidth: 1,
-        borderRadius: 7,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 16,
         paddingVertical: 14,
         marginBottom: 9,
@@ -1898,14 +2179,13 @@ const styles = StyleSheet.create({
     },
     showConditionsButton: {
         minHeight: 44,
-        borderWidth: 1,
-        borderRadius: 7,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 3,
     },
     showConditionsText: {
-        color: PRIMARY_SOFT,
         fontSize: 13,
         fontWeight: '800',
     },
@@ -1921,8 +2201,8 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     conditionModalQuote: {
-        borderWidth: 1,
-        borderRadius: 7,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         padding: 13,
         fontSize: 12,
         lineHeight: 19,
@@ -1932,25 +2212,39 @@ const styles = StyleSheet.create({
         lineHeight: 17,
         marginTop: 12,
     },
+    // SPLIT CTA — spec signature: purple main section + itim na arrow
+    // square sa kanan (puting arrow), 2px ink outline, hard shadow sa press.
     conditionAskButton: {
         minHeight: 46,
         marginTop: 20,
         marginBottom: 3,
-        borderRadius: 7,
-        backgroundColor: '#5B21B6',
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
+        overflow: 'hidden',
         flexDirection: 'row',
+        alignItems: 'stretch',
+    },
+    conditionAskMain: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 13,
+    },
+    conditionAskArrow: {
+        width: 38,
         alignItems: 'center',
         justifyContent: 'center',
     },
     conditionAskText: {
-        marginLeft: 8,
         fontSize: 13,
         fontWeight: '800',
-        color: '#FFFFFF',
     },
     emptyCard: {
-        borderWidth: 1,
-        borderRadius: 10,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.lg,
         paddingHorizontal: 20,
         paddingVertical: 24,
         alignItems: 'center',
@@ -1959,7 +2253,6 @@ const styles = StyleSheet.create({
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: 'rgba(16, 185, 129, 0.12)',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1977,46 +2270,40 @@ const styles = StyleSheet.create({
         lineHeight: 18,
         textAlign: 'center',
     },
+    // LEX INSIGHT — floating CTA (focal): 2px ink outline + 2px hard
+    // shadow via makeSink; squared na (tanggal ang pill shape).
     lexieButton: {
         position: 'absolute',
         right: 18,
         bottom: 22,
         minHeight: 54,
-        borderRadius: 28,
-        backgroundColor: '#5B21B6',
-        paddingLeft: 8,
-        paddingRight: 20,
+        borderRadius: RADIUS.md,
+        paddingLeft: 10,
+        paddingRight: 18,
         paddingVertical: 8,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.34)',
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.28,
-        shadowRadius: 7,
-        elevation: 9,
+        borderWidth: BORDER.thick,
         zIndex: 20,
     },
     lexieIconBox: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
-        backgroundColor: 'rgba(255,255,255,0.14)',
+        width: 36,
+        height: 36,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
         justifyContent: 'center',
     },
     lexieTitle: {
-        color: '#FFFFFF',
         marginLeft: 9,
         fontSize: 15,
         lineHeight: 19,
         fontWeight: '900',
     },
+    // MODALS — focal surfaces: 2px ink outline + 2px hard shadow
+    // (getNeoShadow sa JSX); backdrop kulay = T.overlay (inline).
     modalBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.66)',
         paddingHorizontal: 18,
         paddingVertical: 42,
         alignItems: 'center',
@@ -2026,8 +2313,8 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 430,
         maxHeight: '82%',
-        borderWidth: 1,
-        borderRadius: 12,
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
         overflow: 'hidden',
     },
     modalHeader: {
@@ -2038,7 +2325,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(128,128,128,0.28)',
     },
     modalHeadingCopy: {
         flex: 1,
@@ -2049,25 +2335,21 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 20,
         fontWeight: '900',
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     modalSubtitle: {
         marginTop: 2,
         fontSize: 10,
         lineHeight: 14,
     },
-    modalCloseButton: {
-        width: 42,
-        height: 42,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
     modalBody: {
         padding: 16,
     },
     scoreEquation: {
         minHeight: 94,
-        borderWidth: 1,
-        borderRadius: 9,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 10,
         paddingVertical: 13,
         flexDirection: 'row',
@@ -2113,7 +2395,6 @@ const styles = StyleSheet.create({
         fontWeight: '900',
     },
     deductionText: {
-        color: DANGER,
         fontSize: 13,
         lineHeight: 18,
         fontWeight: '900',
@@ -2129,7 +2410,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     readMoreText: {
-        color: PRIMARY_SOFT,
         fontSize: 10,
         fontWeight: '900',
     },
@@ -2141,7 +2421,6 @@ const styles = StyleSheet.create({
     },
     breakdownNote: {
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: 'rgba(128,128,128,0.3)',
         paddingTop: 13,
         fontSize: 10,
         lineHeight: 16,
