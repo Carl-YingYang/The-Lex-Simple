@@ -32,7 +32,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { completeScan, deleteScans } from '../../../services/scanHistoryStorage';
 import * as Network from 'expo-network';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -1260,7 +1260,7 @@ export default function OfflineDetailScreen({
                         >
                             <View style={styles.modalHeader}>
                                 <Ionicons
-                                    name="gavel-outline"
+                                    name="scale-outline"
                                     size={18}
                                     color={T.brandDeep}
                                 />
