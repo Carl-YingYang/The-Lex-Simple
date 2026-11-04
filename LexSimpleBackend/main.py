@@ -15,7 +15,7 @@ from db.usage_store import touch_install
 from db.sqlite_store import init_db
 from services.knowledge_catalog import ensure_schema, recover_interrupted_indexes
 
-REQUIRED_ENV_VARS = ("GROQ_API_KEY", "ADMIN_API_KEY")
+REQUIRED_ENV_VARS = ("GROQ_API_KEY", "ADMIN_API_KEY", "INSTALL_ID_SALT")
 
 
 @asynccontextmanager
@@ -72,6 +72,8 @@ async def track_install_activity(request: Request, call_next):
       last_seen ng install (hashed lang ang id sa DB).
     - X-Analytics: 0 → huwag mag-store ng kahit ano.
     - Best-effort: kahit anong error sa tracking, tuloy pa rin ang request.
+    - Task B1: ang daily quota ay hiwalay na sa tracking — hindi na
+      umaasa sa analytics flag (tingnan ang api/routers/ai.py).
     """
     install_id = (request.headers.get("X-Install-Id") or "").strip()
     opted_out = (request.headers.get("X-Analytics") or "").strip() == "0"

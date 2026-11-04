@@ -37,7 +37,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "@types/string-similarity": "^4.0.2",
     "jetifier": "^2.0.0",
     "typescript": "~5.9.2"
   },

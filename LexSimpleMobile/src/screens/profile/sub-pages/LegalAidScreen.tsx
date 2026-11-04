@@ -130,7 +130,6 @@ export default function LegalAidScreen() {
       const response = await fetch(`${API_BASE_URL}/guides/sync`, {
         method: 'GET',
         headers: {
-          'ngrok-skip-browser-warning': 'true',
           ...(await getApiIdentityHeaders()),
         },
         signal: controller.signal,

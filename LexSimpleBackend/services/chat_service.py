@@ -555,7 +555,6 @@ def generate_chat_reply(
 
             # 2c. BUILD RETRIEVAL QUERY
             contextual_query = build_contextual_query(user_msg, normalized_history)
-            print("[CHAT] Retrieval query:\n", contextual_query[:1000])
 
             # 2d. VECTOR RAG
             retrieved_contexts = search_contextual_rag(contextual_query, exact_context)

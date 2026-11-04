@@ -29,7 +29,7 @@ import { useTheme } from '../../../theme/ThemeContext';
 import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
 import { clearLocalData, getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
 import { getApiIdentityHeaders, isAnalyticsEnabled, setAnalyticsEnabled } from '../../../services/installId';
-import { fetchUsage, type UsageStatus } from '../../../services/AiEngine';
+import { fetchUsage, formatQuotaResetAt, type UsageStatus } from '../../../services/AiEngine';
 
 // PROFILE SCREEN VERSION: 6.2.0 — PURPLE NEO-BRUTALISM SPEC
 // A2/P1: email removed from profile (name = optional nickname), at bagong
@@ -158,7 +158,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
-  const [shareContact, setShareContact] = useState(false);
+  const [feedbackContact, setFeedbackContact] = useState('');
 
   const { showAlert, AlertRender } = useCustomAlert();
   const { colors: T } = useTheme();
@@ -291,13 +291,11 @@ export default function ProfileScreen({ navigation }: any) {
   const toggleAnalytics = async (next: boolean) => {
     setAnalyticsOn(next);
     await setAnalyticsEnabled(next);
-    if (next) {
-      try {
-        setUsage(await fetchUsage());
-      } catch {
-        setUsage(null);
-      }
-    } else {
+    // Task B2: may daily limit pa rin kahit naka-off ang analytics,
+    // kaya totoong used/remaining pa rin ang ipinapakita.
+    try {
+      setUsage(await fetchUsage());
+    } catch {
       setUsage(null);
     }
   };
@@ -346,6 +344,7 @@ export default function ProfileScreen({ navigation }: any) {
     setFeedbackMessage('');
     setFeedbackCategory('Suggestion');
     setFeedbackFeature('General Feedback');
+    setFeedbackContact('');
     setIsDropdownOpen(false);
     setIsFeedbackVisible(true);
   };
@@ -371,8 +370,12 @@ export default function ProfileScreen({ navigation }: any) {
       feature: feedbackFeature,
       message: cleanMessage,
     };
-    if (shareContact) {
-      if (name.trim() && name !== DEFAULT_PROFILE.name) feedbackBody.name = name;
+    // Task B2: opsyonal na contact (email o mobile number) para masagot
+    // ang user. Hindi ito naka-save sa profile — feedback lang ang dala.
+    const contact = feedbackContact.trim();
+    if (contact) {
+      if (contact.includes('@')) feedbackBody.email = contact;
+      else feedbackBody.name = contact;
     }
 
     try {
@@ -407,7 +410,7 @@ export default function ProfileScreen({ navigation }: any) {
       }
 
       setFeedbackMessage('');
-      setShareContact(false);
+      setFeedbackContact('');
       setIsFeedbackVisible(false);
       showAlert('Thank You!', 'Your feedback helps us improve Lex-Simple.', 'success');
     } catch (error: any) {
@@ -587,8 +590,7 @@ export default function ProfileScreen({ navigation }: any) {
             </View>
             <View style={styles.privacyCopy}>
               <Text style={[styles.privacyTitle, { color: T.text }]}>Anonymous analytics</Text>
-              <Text style={[styles.privacyDescription, { color: T.subText }]}>
-                Bilang ng scans lang ang naka-tabay sa server, at naka-hash ang install ID. Naka-off = walang itatabi ang server.
+              <Text style={[styles.privacyDescription, { color: T.subText }]}> Bilang ng scans lang ang naka-tabay sa server, at naka-hash ang install ID. Naka-off = hindi ka mabibilang sa usage stats; may daily limit pa rin.
               </Text>
             </View>
             <Switch
@@ -608,9 +610,9 @@ export default function ProfileScreen({ navigation }: any) {
             <View style={styles.privacyCopy}>
               <Text style={[styles.privacyTitle, { color: T.text }]}>Natitirang scan ngayong araw</Text>
               <Text style={[styles.privacyDescription, { color: T.subText }]} numberOfLines={2}>
-                {analyticsOn
-                  ? (usage ? `Bumabalik ang quota sa ${usage.resetAt || 'gabi'}.` : 'Hindi ma-verify ang quota ngayon.')
-                  : 'Hindi nabibilang habang naka-off ang analytics.'}
+                {usage
+                  ? `Bumabalik ang quota sa ${formatQuotaResetAt(usage.resetAt)}.`
+                  : 'Hindi ma-verify ang quota ngayon.'}
               </Text>
             </View>
             <Text style={[styles.privacyValue, { color: T.text }]}>
@@ -735,7 +737,7 @@ export default function ProfileScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      <Modal visible={isFeedbackVisible} transparent animationType="fade" onRequestClose={() => { if (!isSubmittingFeedback) { setIsFeedbackVisible(false); setShareContact(false); } }} statusBarTranslucent>
+      <Modal visible={isFeedbackVisible} transparent animationType="fade" onRequestClose={() => { if (!isSubmittingFeedback) { setIsFeedbackVisible(false); setFeedbackContact(''); } }} statusBarTranslucent>
         <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setIsDropdownOpen(false); }}>
           <View style={[styles.feedbackOverlay, { backgroundColor: T.overlay }]}>
             <KeyboardAvoidingView behavior="padding" style={styles.feedbackKeyboardArea}>
@@ -748,7 +750,7 @@ export default function ProfileScreen({ navigation }: any) {
                         icon="close"
                         size={34}
                         disabled={isSubmittingFeedback}
-                        onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}
+                        onPress={() => { setIsFeedbackVisible(false); setFeedbackContact(''); }}
                         accessibilityLabel="Close"
                       />
                     </View>
@@ -817,16 +819,17 @@ export default function ProfileScreen({ navigation }: any) {
                       onFocus={() => setIsDropdownOpen(false)}
                     />
 
-                    <View style={styles.shareContactRow}>
-                      <Switch
-                        value={shareContact}
-                        onValueChange={setShareContact}
-                        disabled={isSubmittingFeedback}
-                        trackColor={{ false: T.border, true: T.brand }}
-                        thumbColor={T.card}
-                      />
-                      <Text style={[styles.shareContactLabel, { color: T.subText }]}>Isama ang palayaw ko (opsyonal) para masagot ninyo ako.</Text>
-                    </View>
+                    <Text style={[styles.feedbackLabel, { color: T.subText }]}>Contact (email o number)</Text>
+                    <TextInput
+                      style={[styles.feedbackInput, { backgroundColor: T.bg, color: T.text, borderColor: T.ink }]}
+                      value={feedbackContact}
+                      onChangeText={setFeedbackContact}
+                      placeholder="Opsyonal — kung gusto mong masagot ka namin"
+                      placeholderTextColor={T.subText}
+                      maxLength={200}
+                      autoCorrect={false}
+                      onFocus={() => setIsDropdownOpen(false)}
+                    />
 
                     <View style={styles.feedbackActions}>
                       <NeoButton
@@ -835,7 +838,7 @@ export default function ProfileScreen({ navigation }: any) {
                         size="md"
                         disabled={isSubmittingFeedback}
                         style={styles.flexOne}
-                        onPress={() => { setIsFeedbackVisible(false); setShareContact(false); }}
+                        onPress={() => { setIsFeedbackVisible(false); setFeedbackContact(''); }}
                       />
                       <Pressable
                         onPress={submitFeedback}

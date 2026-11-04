@@ -1080,15 +1080,16 @@ def analyze_legal_text(ocr_text: str):
             document_summary=document_summary,
         )
 
-        # Store only a non-sensitive trace instead of duplicating the full
-        # sanitized document in the AI transaction log.
-        trace = (
-            f"sha256={combined_result['processingMeta']['documentHash']};"
-            f"characters={len(normalized_ocr)};"
-            f"pages={combined_result['processingMeta']['pageCount']};"
-            f"chunks={len(chunks)}"
+        # Task B1 (L1): audit log is metadata-only — hash, pages, chunks,
+        # status, score. Never the document text or the AI response.
+        meta = combined_result.get("processingMeta", {})
+        log_ai_transaction(
+            document_hash=str(meta.get("documentHash") or ""),
+            page_count=int(meta.get("pageCount") or 1),
+            chunk_count=len(chunks),
+            status="success",
+            score=combined_result.get("safety_score"),
         )
-        log_ai_transaction(trace, json.dumps(combined_result))
 
         return {
             "status": "success",

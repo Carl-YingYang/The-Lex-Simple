@@ -1,14 +1,5 @@
-import os
 import re
 import unicodedata
-
-# Optional override for local Windows development.
-# Example in .env or the operating-system environment:
-# TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
-#
-# Do not force a Windows path in production/Linux. When this variable is not
-# set, pytesseract uses the Tesseract executable available on the system PATH.
-TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
 
 
 REDACTION_EMAIL = "[REDACTED_EMAIL]"
@@ -170,6 +161,10 @@ def sanitize_legal_text(text: str) -> str:
     - preserves existing frontend [REDACTED_*] tokens;
     - applies a second conservative PII masking pass;
     - never performs OCR or uploads an image.
+
+    Task B1 (L3): the legacy image-OCR helper (clean_and_extract_image)
+    and its OpenCV/Tesseract wiring were removed — the mobile app runs
+    OCR on-device and raw images are no longer accepted by the API.
     """
     if not isinstance(text, str) or not text:
         return ""
@@ -180,96 +175,3 @@ def sanitize_legal_text(text: str) -> str:
     # Re-normalize only horizontal spacing introduced by replacements while
     # retaining all page and paragraph boundaries.
     return _normalize_text_without_destroying_pages(sanitized)
-
-
-def clean_and_extract_image(
-    image_bytes: bytes,
-    filter_type: str,
-) -> str:
-    """
-    Legacy/local utility for OpenCV preprocessing and Tesseract OCR.
-
-    The privacy-safe mobile scan pipeline does not call this function because
-    raw scan images are no longer accepted by `/simplify_batch`.
-    """
-    if not image_bytes:
-        return ""
-
-    try:
-        import cv2
-        import numpy as np
-        import pytesseract
-    except ImportError as error:
-        raise RuntimeError(
-            "Legacy image OCR dependencies are not installed."
-        ) from error
-
-    if TESSERACT_CMD:
-        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-
-    image_array = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-
-    if image is None:
-        return ""
-
-    height, width = image.shape[:2]
-    maximum_dimension = 1_500
-
-    if max(height, width) > maximum_dimension:
-        scale = maximum_dimension / float(max(height, width))
-        image = cv2.resize(
-            image,
-            None,
-            fx=scale,
-            fy=scale,
-            interpolation=cv2.INTER_AREA,
-        )
-
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    if filter_type == "grayscale":
-        processed_image = gray
-    elif filter_type == "bw":
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, processed_image = cv2.threshold(
-            blurred,
-            0,
-            255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-        )
-    elif filter_type == "magic":
-        dilated_image = cv2.dilate(
-            gray,
-            np.ones((7, 7), np.uint8),
-        )
-        background_image = cv2.medianBlur(dilated_image, 21)
-        difference_image = 255 - cv2.absdiff(
-            gray,
-            background_image,
-        )
-        normalized_image = cv2.normalize(
-            difference_image,
-            None,
-            alpha=0,
-            beta=255,
-            norm_type=cv2.NORM_MINMAX,
-            dtype=cv2.CV_8UC1,
-        )
-        processed_image = cv2.adaptiveThreshold(
-            normalized_image,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            51,
-            15,
-        )
-    else:
-        processed_image = gray
-
-    extracted_text = pytesseract.image_to_string(
-        processed_image,
-        config=r"--oem 3 --psm 6",
-    )
-
-    return extracted_text.strip()

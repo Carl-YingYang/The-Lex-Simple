@@ -21,7 +21,17 @@ from core.database import get_db_connection
 from core.rate_limit import (
     INSTALL_ID_PATTERN, LIMIT_AI, LIMIT_CHAT, LIMIT_IP_CEILING, client_ip_key, limiter,
 )
-from db.usage_store import DAILY_DOC_LIMIT, consume_daily_quota, get_usage, usage_reset_at
+from db.usage_store import (
+    DAILY_DOC_LIMIT,
+    DAILY_IP_DOC_LIMIT,
+    GLOBAL_DAILY_DOC_LIMIT,
+    GLOBAL_QUOTA_KEY,
+    consume_daily_quota,
+    get_usage,
+    install_quota_key,
+    ip_quota_key,
+    usage_reset_at,
+)
 from services.dictionary_repository import get_dictionary_entry
 from services.knowledge_catalog import find_verified_reference_context
 from services.chat_grounding import (
@@ -54,22 +64,38 @@ def _valid_install_id(request: Request) -> Optional[str]:
     return None
 
 
-def _ensure_daily_quota(request: Request) -> None:
-    """Task A1: daily quota per install para sa /simplify at /extract_text.
+def _client_ip(request: Request) -> str:
+    """Totoong client IP — X-Forwarded-For muna (ngrok/reverse proxy),
+    fallback sa socket address."""
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return request.client.host if request.client else "unknown"
 
-    - Walang valid X-Install-Id: hindi mabibilang, hindi haharangan.
-    - X-Analytics: 0: walang itatabi ang server, kaya hindi rin binibilang.
+
+def _quota_plan(request: Request) -> Tuple[str, int]:
+    """Task B1: (quota_key, limit) — install key kapag valid ang
+    X-Install-Id, IP-fallback key (may sariling limit) kapag wala."""
+    install_id = _valid_install_id(request)
+    if install_id:
+        return install_quota_key(install_id), DAILY_DOC_LIMIT
+    return ip_quota_key(_client_ip(request)), DAILY_IP_DOC_LIMIT
+
+
+def _enforce_daily_quota(request: Request) -> None:
+    """Task B1: daily quota — LAGING naka-enforce, hiwalay sa analytics.
+
+    - Valid X-Install-Id → sha256(salt+install_id) key sa DAILY_DOC_LIMIT.
+    - Walang valid id → sha256(salt+"ip:"+client_ip) key sa DAILY_IP_DOC_LIMIT.
+    - X-Analytics: 0 ay HINDI lumalaktaw sa quota; ang laktawan lang ay ang
+      pag-write sa installs table (touch_install middleware sa main.py).
+    - Pagkatapos ng per-install check, tinitingnan ang global daily cap
+      (GLOBAL_DAILY_DOC_LIMIT) na may espesyal na key sa daily_usage.
     - Error sa usage DB: fail-open (hindi sagabal ang tracking outage).
     """
-    install_id = _valid_install_id(request)
-    if not install_id:
-        return
-    if (request.headers.get("X-Analytics") or "").strip() == "0":
-        return
-    if DAILY_DOC_LIMIT <= 0:
-        return
     try:
-        quota = consume_daily_quota(install_id)
+        quota_key, limit = _quota_plan(request)
+        quota = consume_daily_quota(quota_key, limit)
     except Exception as error:
         print(f"[QUOTA] Usage store unavailable ({type(error).__name__}); fail-open.")
         return
@@ -79,11 +105,28 @@ def _ensure_daily_quota(request: Request) -> None:
             detail={
                 "code": "daily_limit_reached",
                 "message": (
-                    f"Abot na ang pang-araw-araw na limit na "
-                    f"{quota.get('limit')} scans. Babalik ang iyong quota "
-                    f"sa {quota.get('resetAt')}."
+                    "Abot na ang pang-araw-araw na limit sa scans. "
+                    "Bumabalik ang quota bukas ng 12:00 AM (Philippine time)."
                 ),
                 "resetAt": str(quota.get("resetAt") or ""),
+            },
+        )
+
+    try:
+        global_quota = consume_daily_quota(GLOBAL_QUOTA_KEY, GLOBAL_DAILY_DOC_LIMIT)
+    except Exception as error:
+        print(f"[QUOTA] Global cap unavailable ({type(error).__name__}); fail-open.")
+        return
+    if not global_quota.get("allowed"):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "global_limit_reached",
+                "message": (
+                    "Abot na ang kabuuang pang-araw-araw na limit ng server. "
+                    "Subukan ulit bukas ng 12:00 AM (Philippine time)."
+                ),
+                "resetAt": str(global_quota.get("resetAt") or ""),
             },
         )
 
@@ -400,7 +443,7 @@ def _analyze_and_attach_input_meta(text: str, input_meta: dict) -> dict:
 @limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
 def simplify_text(request: Request, payload: LegalRequest):
     combined_text, input_meta = _prepare_legal_input(payload)
-    _ensure_daily_quota(request)
+    _enforce_daily_quota(request)
     return _analyze_and_attach_input_meta(combined_text, input_meta)
 
 
@@ -635,14 +678,6 @@ async def extract_uploaded_text(request: Request, file: UploadFile = File(...)):
                 ),
             )
         
-        _ensure_daily_quota(request)
-
-        return {
-            "status": "success",
-            "extractedText": extracted_text,
-            "pageCount": extracted_text.count("--- Page ") or 1,
-        }
-
         return {
             "status": "success",
             "extractedText": extracted_text,
@@ -665,36 +700,20 @@ def usage_status(
     request: Request,
     x_analytics: Optional[str] = Header(default=None, alias="X-Analytics"),
 ):
-    """Task A1: natitirang daily scan quota ng install na ito (para sa app).
+    """Task B1: totoong used/remaining kahit naka-off ang analytics.
 
-    Counts lang ang sagot — walang laman ng dokumento na bumabalik dito.
-    Kapag X-Analytics: 0, walang binabasa o binabago sa usage DB.
+    Pareho pa rin ang response shape. Read-only — walang binabago sa
+    usage DB dito. Install hash key kapag may valid X-Install-Id,
+    IP-fallback key (sariling limit) kung wala.
     """
-    limit = DAILY_DOC_LIMIT
-
-    if (x_analytics or "").strip() == "0":
-        return {
-            "status": "success",
-            "limit": limit,
-            "used": 0,
-            "remaining": limit,
-            "resetAt": usage_reset_at(),
-            "analyticsEnabled": False,
-        }
-
     install_id = _valid_install_id(request)
-    if not install_id:
-        return {
-            "status": "success",
-            "limit": limit,
-            "used": 0,
-            "remaining": limit,
-            "resetAt": usage_reset_at(),
-            "analyticsEnabled": True,
-        }
+    if install_id:
+        quota_key, limit = install_quota_key(install_id), DAILY_DOC_LIMIT
+    else:
+        quota_key, limit = ip_quota_key(_client_ip(request)), DAILY_IP_DOC_LIMIT
 
     try:
-        data = get_usage(install_id)
+        data = get_usage(quota_key, limit)
     except Exception as error:
         print(f"[QUOTA] Usage store unavailable ({type(error).__name__}).")
         data = {"used": 0, "resetAt": usage_reset_at()}
@@ -706,7 +725,7 @@ def usage_status(
         "used": used,
         "remaining": max(0, limit - used),
         "resetAt": data.get("resetAt") or usage_reset_at(),
-        "analyticsEnabled": True,
+        "analyticsEnabled": (x_analytics or "").strip() != "0",
     }
 
 @router.post("/simplify_batch")

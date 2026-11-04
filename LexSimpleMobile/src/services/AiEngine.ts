@@ -1,6 +1,8 @@
-// AI ENGINE VERSION: 2.1.0
-// A2: 429 responses now surface the server's Filipino message (daily scan
+// AI ENGINE VERSION: 2.2.0
+// A2: 429 responses surface the server's Filipino message (daily scan
 // quota) with resetAt inside detail, at may fetchUsage() para sa GET /usage.
+// B2: daily/global quota codes get a friendly reset-time message (hindi raw
+// ISO), tanggal ang API-host console.log at ang ngrok header.
 import type {
     SanitizedDocumentApiPayload,
 } from '../utils/sanitizer';
@@ -37,8 +39,6 @@ if (
             'localhost only works when the API is reachable from the same device/emulator.'
     );
 }
-
-console.log(`[AI Engine] API host: ${BASE_URL}`);
 
 
 export type ApiErrorDetail = {
@@ -293,6 +293,56 @@ const readResponseBody = async (
     }
 };
 
+// --- Task B2: friendly quota limit messages (hindi raw ISO) ---
+
+const QUOTA_RESET_FALLBACK = '12:00 AM (PH time)';
+
+const QUOTA_LIMIT_CODES = new Set([
+    'daily_limit_reached',
+    'global_limit_reached',
+]);
+
+/**
+ * Ini-format ang server resetAt (ISO) bilang "12:00 AM (PH time)".
+ * Fixed UTC+8 (PHT, walang DST) para deterministic kahit walang Intl
+ * sa device. Kapag hindi ma-parse, ang fallback ay PH midnight —
+ * laging iyon ang reset time ng daily quota.
+ */
+export const formatQuotaResetAt = (resetAt?: string | null): string => {
+    const raw = (resetAt || '').trim();
+    if (raw) {
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            const phTime = new Date(parsed.getTime() + 8 * 60 * 60 * 1000);
+            let hour = phTime.getUTCHours();
+            const minute = String(phTime.getUTCMinutes()).padStart(2, '0');
+            const period = hour >= 12 ? 'PM' : 'AM';
+            hour %= 12;
+            if (hour === 0) hour = 12;
+            return `${hour}:${minute} ${period} (PH time)`;
+        }
+    }
+    return QUOTA_RESET_FALLBACK;
+};
+
+const buildQuotaLimitMessage = (info: {
+    message: string;
+    code?: string;
+    detail?: ApiErrorDetail | string;
+}): string => {
+    const detail =
+        info.detail && typeof info.detail === 'object'
+            ? (info.detail as ApiErrorDetail)
+            : {};
+    const resetAt = typeof detail.resetAt === 'string' ? detail.resetAt : '';
+    const resetLabel = formatQuotaResetAt(resetAt);
+
+    if (info.code === 'global_limit_reached') {
+        return `Abot na ang kabuuang pang-araw-araw na limit ng server ngayong araw. Subukan ulit bukas ng ${resetLabel}.`;
+    }
+    return `Abot na ang pang-araw-araw na limit mo sa scans. Bumabalik ang quota bukas ng ${resetLabel}.`;
+};
+
 const request = async <TResponse>(
     endpoint: string,
     options: RequestInit,
@@ -312,7 +362,6 @@ const request = async <TResponse>(
                 ...options,
                 headers: {
                     Accept: 'application/json',
-                    'ngrok-skip-browser-warning': 'true',
                     ...(await getApiIdentityHeaders()),
                     ...(options.headers ?? {}),
                 },
@@ -324,12 +373,28 @@ const request = async <TResponse>(
 
         if (!response.ok) {
             if (response.status === 429) {
-                // Rate limit o daily scan quota (A1) — gamitin ang totoong
-                // mensahe ng server (may resetAt sa detail) kapag meron.
+                // Rate limit o daily scan quota (A1/B1) — gamitin ang
+                // totoong mensahe ng server (may resetAt sa detail) kapag meron.
                 const rateLimitInfo = extractErrorInformation(
                     responseBody,
                     'Masyadong maraming request. Subukan ulit sa ilang minuto.'
                 );
+
+                // Task B2: daily/global quota — friendly na mensahe na may
+                // oras ng reset, hindi raw ISO timestamp.
+                if (
+                    rateLimitInfo.code &&
+                    QUOTA_LIMIT_CODES.has(rateLimitInfo.code)
+                ) {
+                    throw new ApiError(
+                        buildQuotaLimitMessage(rateLimitInfo),
+                        {
+                            status: 429,
+                            code: rateLimitInfo.code,
+                            detail: rateLimitInfo.detail,
+                        }
+                    );
+                }
 
                 throw new ApiError(rateLimitInfo.message, {
                     status: 429,
@@ -483,6 +548,7 @@ export async function getEndpoint<TResponse = any>(
 /**
  * GET /usage (Task A1) — natitirang daily scan quota ng install na ito.
  * Counts lang ang sagot ng server; walang laman ng dokumento.
+ * Task B1: totoong used/remaining ito kahit naka-off ang analytics.
  */
 export type UsageStatus = {
     status: 'success' | string;

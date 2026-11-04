@@ -40,8 +40,9 @@ export const keepProfileImage = (sourceUri: string, owner = getLocalOwner()): st
 };
 
 /**
- * Task A2 / Privacy section: binubura ang LAHAT ng local user data —
- * scan history, chat history, at profile (kasama ang avatar files).
+ * Task A2 / B2 / Privacy section: binubura ang LAHAT ng local user data —
+ * scan history, chat history, profile (kasama ang avatar files), AT ang
+ * buong scans folder ng mga naka-save na scan images.
  * Kasama rin ang mga legacy key para hindi na sila bumalik sa susunod
  * na migration. Hindi kasama ang install id — iyon ay random token para
  * sa quota/abuse protection at hindi personal data.
@@ -55,6 +56,16 @@ export const clearLocalData = async (): Promise<void> => {
         LEGACY_KEYS.chatHistory,
         LEGACY_KEYS.profile,
     ]);
+
+    // Task B2: burahin din ang buong SCANS_ROOT. Dynamic import dito para
+    // maiwasan ang circular import — ang scanFileStorage.ts ay may static
+    // import mula sa module na ito (getLocalOwner).
+    try {
+        const { clearAllScanFiles } = await import('./scanFileStorage');
+        clearAllScanFiles();
+    } catch (error) {
+        console.warn('[LocalData] Scan files clear skipped', error);
+    }
 
     try {
         const folder = profileFolder('guest');

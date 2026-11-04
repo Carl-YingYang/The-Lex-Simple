@@ -7,8 +7,7 @@ load_dotenv()
 class Settings:
     PROJECT_NAME: str = "Lex-Simple Backend"
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "") # Optional na
-    
+
     # 🆕 CENTRALIZED DATABASE PATHS
     DB_PATH: str = "./lex_metadata.db"
     GUIDES_DB_PATH: str = "./lex_guides.db"

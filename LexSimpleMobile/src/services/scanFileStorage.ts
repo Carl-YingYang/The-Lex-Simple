@@ -316,3 +316,7 @@ export const deleteScanSession = (sessionId: string, owner = getLocalOwner()): v
     const directory = sessionRoot(sessionId, owner);
     if (directory.exists) directory.delete();
 };
+
+export const clearAllScanFiles = (): void => {
+    if (SCANS_ROOT.exists) SCANS_ROOT.delete();
+};

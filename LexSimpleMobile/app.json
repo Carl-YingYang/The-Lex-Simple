@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/Lex-Simpe-Logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#7C3AED"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true
@@ -42,9 +42,6 @@
         }
       ],
       "react-native-document-scanner-plugin"
-    ],
-    "extra": {
-      "apiUrl": "https://presuppurative-unconceitedly-peyton.ngrok-free.dev"
-    }
+    ]
   }
 }
