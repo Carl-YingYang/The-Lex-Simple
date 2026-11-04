@@ -27,11 +27,14 @@ import { NeoButton, NeoCard, NeoIconButton, NeoSectionHeader, getNeoShadow } fro
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
 import { BORDER, RADIUS, SHADOW, SPACING, type ThemeColors } from '../../../theme/tokens';
-import { getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
-import { getApiIdentityHeaders } from '../../../services/installId';
+import { clearLocalData, getLocalOwner, keepProfileImage, localDataKey } from '../../../services/localDataScope';
+import { getApiIdentityHeaders, isAnalyticsEnabled, setAnalyticsEnabled } from '../../../services/installId';
+import { fetchUsage, type UsageStatus } from '../../../services/AiEngine';
 
-// PROFILE SCREEN VERSION: 6.1.0 — PURPLE NEO-BRUTALISM SPEC
-// (UI lang ang nagbago; walang binagong logic/state/network)
+// PROFILE SCREEN VERSION: 6.2.0 — PURPLE NEO-BRUTALISM SPEC
+// A2/P1: email removed from profile (name = optional nickname), at bagong
+// Privacy section: analytics toggle, natitirang scan ngayong araw (GET /usage),
+// clear local data, Privacy Policy link, at app version.
 // Spec: purple system, 1.5px standard borders, 2px sa CTA/hero,
 // 2–6px radius (squared), predominantly FLAT — 2px hard shadow lang
 // sa mga focal element (hero card, modals, CTA buttons).
@@ -50,9 +53,15 @@ const APP_FEATURES = [
   'Other / UI Issues',
 ];
 
+// PALITAN: ilagay dito ang totoong Privacy Policy URL bago ang release.
+const PRIVACY_POLICY_URL = 'https://example.com/lex-simple-privacy-policy';
+// I-sync ito sa "version" sa app.json kapag may bagong release.
+const APP_VERSION = '1.0.0';
+
+// P1: walang default email at walang default name — opsyonal na lang ang
+// palayaw, at hindi na hinihingi ang email sa profile.
 const DEFAULT_PROFILE = {
-  name: 'Lex User',
-  email: 'user@lexsimple.com',
+  name: '',
   avatar: null as string | null,
   city: '',
   province: '',
@@ -128,7 +137,6 @@ export default function ProfileScreen({ navigation }: any) {
   const scanHistoryKey = localDataKey('scanHistory', owner);
   const [totalScanned, setTotalScanned] = useState(0);
   const [name, setName] = useState(DEFAULT_PROFILE.name);
-  const [email, setEmail] = useState(DEFAULT_PROFILE.email);
   const [avatarUri, setAvatarUri] = useState<string | null>(DEFAULT_PROFILE.avatar);
   const [city, setCity] = useState(DEFAULT_PROFILE.city);
   const [province, setProvince] = useState(DEFAULT_PROFILE.province);
@@ -136,9 +144,12 @@ export default function ProfileScreen({ navigation }: any) {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
   const [editCity, setEditCity] = useState('');
   const [editProvince, setEditProvince] = useState('');
+
+  // Privacy section (A2)
+  const [analyticsOn, setAnalyticsOn] = useState(true);
+  const [usage, setUsage] = useState<UsageStatus | null>(null);
 
   const [isLocationVisible, setIsLocationVisible] = useState(false);
   const [isFeedbackVisible, setIsFeedbackVisible] = useState(false);
@@ -173,6 +184,7 @@ export default function ProfileScreen({ navigation }: any) {
     useCallback(() => {
       loadProfileData();
       loadScanStats();
+      loadPrivacyInfo();
     }, []),
   );
 
@@ -193,7 +205,6 @@ export default function ProfileScreen({ navigation }: any) {
       const profile = await AsyncStorage.getItem(profileKey);
       if (!profile) {
         setName(DEFAULT_PROFILE.name);
-        setEmail(DEFAULT_PROFILE.email);
         setAvatarUri(null);
         setCity('');
         setProvince('');
@@ -201,7 +212,6 @@ export default function ProfileScreen({ navigation }: any) {
       }
       const parsed = JSON.parse(profile);
       setName(parsed.name || DEFAULT_PROFILE.name);
-      setEmail(parsed.email || DEFAULT_PROFILE.email);
       setAvatarUri(parsed.avatar || null);
       setCity(parsed.city || DEFAULT_PROFILE.city);
       setProvince(parsed.province || DEFAULT_PROFILE.province);
@@ -212,26 +222,18 @@ export default function ProfileScreen({ navigation }: any) {
 
   const openEditModal = () => {
     setEditName(name);
-    setEditEmail(email);
     setEditCity(city);
     setEditProvince(province);
     setIsEditing(true);
   };
 
   const saveProfileData = async () => {
+    // P1: opsyonal na ang palayaw at wala nang email — location lang ang
+    // may validation (parehong puno o parehong blanko).
     const cleanName = editName.trim();
-    const cleanEmail = editEmail.trim().toLowerCase();
     const cleanCity = editCity.trim();
     const cleanProvince = editProvince.trim();
 
-    if (!cleanName || !cleanEmail) {
-      showAlert('Incomplete Profile', 'Complete your name and email address.', 'warning');
-      return;
-    }
-    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
-      showAlert('Invalid Email', 'Please enter a valid email address.', 'warning');
-      return;
-    }
     if ((cleanCity && !cleanProvince) || (!cleanCity && cleanProvince)) {
       showAlert('Incomplete Location', 'Enter both city and province, or leave both blank to use Philippines.', 'warning');
       return;
@@ -240,14 +242,12 @@ export default function ProfileScreen({ navigation }: any) {
     try {
       const nextProfile = {
         name: cleanName,
-        email: cleanEmail,
         avatar: avatarUri,
         city: cleanCity,
         province: cleanProvince,
       };
       await AsyncStorage.setItem(profileKey, JSON.stringify(nextProfile));
       setName(cleanName);
-      setEmail(cleanEmail);
       setCity(cleanCity);
       setProvince(cleanProvince);
       setMapLoadFailed(false);
@@ -272,6 +272,65 @@ export default function ProfileScreen({ navigation }: any) {
     } catch {
       showAlert('Gallery Error', 'Unable to open your gallery. Please try again.', 'error');
     }
+  };
+
+  // --- Privacy section (A2) ---
+  const loadPrivacyInfo = async () => {
+    try {
+      setAnalyticsOn(await isAnalyticsEnabled());
+    } catch {
+      setAnalyticsOn(true);
+    }
+    try {
+      setUsage(await fetchUsage());
+    } catch {
+      setUsage(null);
+    }
+  };
+
+  const toggleAnalytics = async (next: boolean) => {
+    setAnalyticsOn(next);
+    await setAnalyticsEnabled(next);
+    if (next) {
+      try {
+        setUsage(await fetchUsage());
+      } catch {
+        setUsage(null);
+      }
+    } else {
+      setUsage(null);
+    }
+  };
+
+  const clearAllLocalData = async () => {
+    try {
+      await clearLocalData();
+      setTotalScanned(0);
+      setName(DEFAULT_PROFILE.name);
+      setAvatarUri(null);
+      setCity('');
+      setProvince('');
+      setMapLoadFailed(false);
+      showAlert('Na-clear na', 'Burado na ang scan history, chat, at profile sa device na ito.', 'success');
+    } catch {
+      showAlert('Clear Failed', 'May hindi na-clear. Subukan ulit.', 'error');
+    }
+  };
+
+  const confirmClearLocalData = () => {
+    showAlert(
+      'I-clear ang local data?',
+      'Buburahin ang scan history, chat history, at profile na naka-save sa device na ito. Hindi ito maibabalik.',
+      'warning',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'I-clear',
+          style: 'destructive',
+          onPress: () => { void clearAllLocalData(); },
+        },
+      ],
+    );
   };
 
   const openGoogleMaps = async () => {
@@ -314,7 +373,6 @@ export default function ProfileScreen({ navigation }: any) {
     };
     if (shareContact) {
       if (name.trim() && name !== DEFAULT_PROFILE.name) feedbackBody.name = name;
-      if (email.trim() && email !== DEFAULT_PROFILE.email) feedbackBody.email = email;
     }
 
     try {
@@ -454,8 +512,7 @@ export default function ProfileScreen({ navigation }: any) {
             </TouchableOpacity>
 
             <View style={styles.identityArea}>
-              <Text style={[styles.profileName, { color: T.bg }]} numberOfLines={1}>{name}</Text>
-              <Text style={[styles.profileEmail, { color: T.bg }]} numberOfLines={1}>{email}</Text>
+              <Text style={[styles.profileName, { color: T.bg }]} numberOfLines={1}>{name || 'Guest'}</Text>
 
               {/* EDIT PROFILE — mini split-button (spec: main section + black arrow square) */}
               <Pressable
@@ -519,6 +576,89 @@ export default function ProfileScreen({ navigation }: any) {
           icon="chatbubble-ellipses-outline"
           onPress={openFeedbackModal}
         />
+
+        {/* PRIVACY — flat rows card (spec: 1.5px border, walang shadow) */}
+        <NeoSectionHeader title="Privacy" marker={false} style={[styles.sectionGap, styles.supportGap]} />
+
+        <View style={[styles.privacyCard, { backgroundColor: T.card, borderColor: T.ink }]}>
+          <View style={styles.privacyRow}>
+            <View style={[styles.menuIcon, { backgroundColor: T.brandVivid, borderColor: T.ink }]}>
+              <Ionicons name="analytics-outline" size={20} color={T.brandText} />
+            </View>
+            <View style={styles.privacyCopy}>
+              <Text style={[styles.privacyTitle, { color: T.text }]}>Anonymous analytics</Text>
+              <Text style={[styles.privacyDescription, { color: T.subText }]}>
+                Bilang ng scans lang ang naka-tabay sa server, at naka-hash ang install ID. Naka-off = walang itatabi ang server.
+              </Text>
+            </View>
+            <Switch
+              value={analyticsOn}
+              onValueChange={(value) => { void toggleAnalytics(value); }}
+              trackColor={{ false: T.border, true: T.brand }}
+              thumbColor={T.card}
+            />
+          </View>
+
+          <View style={[styles.privacyDivider, { backgroundColor: T.border }]} />
+
+          <View style={styles.privacyRow}>
+            <View style={[styles.menuIcon, { backgroundColor: T.brandVivid, borderColor: T.ink }]}>
+              <Ionicons name="speedometer-outline" size={20} color={T.brandText} />
+            </View>
+            <View style={styles.privacyCopy}>
+              <Text style={[styles.privacyTitle, { color: T.text }]}>Natitirang scan ngayong araw</Text>
+              <Text style={[styles.privacyDescription, { color: T.subText }]} numberOfLines={2}>
+                {analyticsOn
+                  ? (usage ? `Bumabalik ang quota sa ${usage.resetAt || 'gabi'}.` : 'Hindi ma-verify ang quota ngayon.')
+                  : 'Hindi nabibilang habang naka-off ang analytics.'}
+              </Text>
+            </View>
+            <Text style={[styles.privacyValue, { color: T.text }]}>
+              {usage ? (usage.limit > 0 ? `${usage.remaining}/${usage.limit}` : '—') : '—'}
+            </Text>
+          </View>
+
+          <View style={[styles.privacyDivider, { backgroundColor: T.border }]} />
+
+          <View style={styles.privacyRow}>
+            <View style={[styles.menuIcon, { backgroundColor: T.bg, borderColor: T.ink }]}>
+              <Ionicons name="information-circle-outline" size={20} color={T.subText} />
+            </View>
+            <View style={styles.privacyCopy}>
+              <Text style={[styles.privacyTitle, { color: T.text }]}>App version</Text>
+            </View>
+            <Text style={[styles.privacyValue, { color: T.subText }]}>{APP_VERSION}</Text>
+          </View>
+        </View>
+
+        <MenuItem
+          title="Privacy Policy"
+          description="Basahin kung ano lang ang kinokolekta at paano ito ginagamit."
+          icon="shield-checkmark-outline"
+          onPress={() => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => {}); }}
+        />
+
+        <Pressable
+          onPress={confirmClearLocalData}
+          accessibilityRole="button"
+          accessibilityLabel="Clear local data"
+        >
+          {({ pressed }) => (
+            <View style={[styles.clearDataCard, { backgroundColor: T.card, borderColor: T.ink }, pressed ? styles.dimmed : null]}>
+              <View style={styles.privacyRow}>
+                <View style={[styles.menuIcon, { backgroundColor: T.danger, borderColor: T.ink }]}>
+                  <Ionicons name="trash-outline" size={20} color={T.card} />
+                </View>
+                <View style={styles.privacyCopy}>
+                  <Text style={[styles.privacyTitle, { color: T.danger }]}>I-clear ang local data</Text>
+                  <Text style={[styles.privacyDescription, { color: T.subText }]}>
+                    Buburahin ang scan history, chat, at profile sa device na ito. Hindi maibabalik.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </Pressable>
       </ScrollView>
 
       <Modal visible={isLocationVisible} transparent animationType="fade" onRequestClose={() => setIsLocationVisible(false)} statusBarTranslucent>
@@ -570,11 +710,8 @@ export default function ProfileScreen({ navigation }: any) {
                     <Text style={[styles.changePhotoText, { color: T.brand }]}>Change photo</Text>
                   </TouchableOpacity>
 
-                  <Text style={[styles.inputLabel, { color: T.subText }]}>FULL NAME</Text>
+                  <Text style={[styles.inputLabel, { color: T.subText }]}>NICKNAME (OPTIONAL)</Text>
                   <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
-
-                  <Text style={[styles.inputLabel, { color: T.subText }]}>EMAIL ADDRESS</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
 
                   <View style={styles.twoColumnRow}>
                     <View style={styles.halfField}>
@@ -688,7 +825,7 @@ export default function ProfileScreen({ navigation }: any) {
                         trackColor={{ false: T.border, true: T.brand }}
                         thumbColor={T.card}
                       />
-                      <Text style={[styles.shareContactLabel, { color: T.subText }]}>Isama ang pangalan at email ko (opsyonal) para masagot ninyo ako.</Text>
+                      <Text style={[styles.shareContactLabel, { color: T.subText }]}>Isama ang palayaw ko (opsyonal) para masagot ninyo ako.</Text>
                     </View>
 
                     <View style={styles.feedbackActions}>
@@ -846,4 +983,14 @@ const styles = StyleSheet.create({
   submitButton: { flex: 1, minHeight: 48, borderRadius: RADIUS.md, borderWidth: BORDER.thick, alignItems: 'center', justifyContent: 'center' },
   submitButtonText: { fontSize: 14, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
   feedbackDisabled: { opacity: 0.55 },
+
+  // --- PRIVACY SECTION (flat rows, 1.5px borders — spec) ---
+  privacyCard: { borderWidth: BORDER.thin, borderRadius: RADIUS.lg, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 10 },
+  privacyRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingRight: 4 },
+  privacyCopy: { flex: 1, minWidth: 0, paddingRight: 10 },
+  privacyTitle: { fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 2 },
+  privacyDescription: { fontSize: 11, lineHeight: 15 },
+  privacyValue: { fontSize: 16, fontWeight: '900', minWidth: 40, textAlign: 'right' },
+  privacyDivider: { height: BORDER.thin, marginLeft: 54 },
+  clearDataCard: { borderWidth: BORDER.thin, borderRadius: RADIUS.lg, paddingHorizontal: 12, marginBottom: 10 },
 });

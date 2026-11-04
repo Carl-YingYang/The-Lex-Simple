@@ -1,14 +1,17 @@
 """Lex-Simple API: knowledge intake v6.3.2."""
-
 import os
+import re
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 
 from api.routes import router as api_router
-from core.rate_limit import limiter, rate_limit_exceeded_handler
+from core.rate_limit import INSTALL_ID_PATTERN, limiter, rate_limit_exceeded_handler
+from db.usage_store import touch_install
 from db.sqlite_store import init_db
 from services.knowledge_catalog import ensure_schema, recover_interrupted_indexes
 
@@ -61,6 +64,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def track_install_activity(request: Request, call_next):
+    """Task A1: anonymous install tracking (bilang lang, walang laman).
+
+    - May valid X-Install-Id at HINDI X-Analytics: 0 → i-upsert ang
+      last_seen ng install (hashed lang ang id sa DB).
+    - X-Analytics: 0 → huwag mag-store ng kahit ano.
+    - Best-effort: kahit anong error sa tracking, tuloy pa rin ang request.
+    """
+    install_id = (request.headers.get("X-Install-Id") or "").strip()
+    opted_out = (request.headers.get("X-Analytics") or "").strip() == "0"
+    if not opted_out and install_id and re.fullmatch(INSTALL_ID_PATTERN, install_id):
+        try:
+            touch_install(install_id)
+        except Exception:
+            pass
+    return await call_next(request)
 
 app.include_router(api_router)
 

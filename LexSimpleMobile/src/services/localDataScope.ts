@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 
-export type LocalOwner = 'guest' | `user:${string}`;
+// P1: guest-only na ang local data scope — lahat ng data ay naka-namespace
+// sa 'guest'. Tinanggal ang user:<uuid> branch dahil walang account system
+// na umuugma dito.
+export type LocalOwner = 'guest';
 const LEGACY_KEYS = {
     scanHistory: '@lex_scan_history',
     chatHistory: '@lex_chat_history',
@@ -12,18 +15,13 @@ type DataKind = keyof typeof LEGACY_KEYS;
 let currentOwner: LocalOwner = 'guest';
 export const getLocalOwner = (): LocalOwner => currentOwner;
 export const setLocalOwner = (owner: LocalOwner): void => {
-    if (owner !== 'guest' && !/^user:[0-9a-f-]{36}$/i.test(owner)) {
-        throw new Error('Invalid local owner');
-    }
     currentOwner = owner;
 };
 export const localDataKey = (kind: DataKind, owner = currentOwner): string =>
     `@lex_v2:${owner}:${kind}`;
 
 const profileFolder = (owner: LocalOwner): Directory =>
-    owner === 'guest'
-        ? new Directory(Paths.document, 'lexsimple', 'profiles', 'guest')
-        : new Directory(Paths.document, 'lexsimple', 'profiles', 'users', owner.slice(5));
+    new Directory(Paths.document, 'lexsimple', 'profiles', 'guest');
 
 /** Keep picked avatars outside the temporary image-picker cache. */
 export const keepProfileImage = (sourceUri: string, owner = getLocalOwner()): string => {
@@ -39,6 +37,33 @@ export const keepProfileImage = (sourceUri: string, owner = getLocalOwner()): st
     const destination = new File(folder, `avatar_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${extension}`);
     source.copy(destination);
     return destination.uri;
+};
+
+/**
+ * Task A2 / Privacy section: binubura ang LAHAT ng local user data —
+ * scan history, chat history, at profile (kasama ang avatar files).
+ * Kasama rin ang mga legacy key para hindi na sila bumalik sa susunod
+ * na migration. Hindi kasama ang install id — iyon ay random token para
+ * sa quota/abuse protection at hindi personal data.
+ */
+export const clearLocalData = async (): Promise<void> => {
+    await AsyncStorage.multiRemove([
+        localDataKey('scanHistory', 'guest'),
+        localDataKey('chatHistory', 'guest'),
+        localDataKey('profile', 'guest'),
+        LEGACY_KEYS.scanHistory,
+        LEGACY_KEYS.chatHistory,
+        LEGACY_KEYS.profile,
+    ]);
+
+    try {
+        const folder = profileFolder('guest');
+        if (folder.exists) folder.delete();
+    } catch (error) {
+        // Avatar files lang ang di-umaabot dito; hindi hadlang ang FS error
+        // sa pag-clear ng AsyncStorage data.
+        console.warn('[LocalData] Avatar folder clear skipped', error);
+    }
 };
 
 /** Copy once, without removing the old data. Each category can migrate separately. */

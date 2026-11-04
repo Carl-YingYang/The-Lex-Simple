@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import docx
 import fitz
 import pdfplumber
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from db.chroma_store import query_vector_db
@@ -18,7 +18,10 @@ from orchestrator.pipeline import Orchestrator, ProcessRequest
 from services.chat_service import generate_chat_reply
 from services.llm_service import explain_raw_statutory_text
 from core.database import get_db_connection
-from core.rate_limit import LIMIT_AI, LIMIT_CHAT, LIMIT_IP_CEILING, client_ip_key, limiter
+from core.rate_limit import (
+    INSTALL_ID_PATTERN, LIMIT_AI, LIMIT_CHAT, LIMIT_IP_CEILING, client_ip_key, limiter,
+)
+from db.usage_store import DAILY_DOC_LIMIT, consume_daily_quota, get_usage, usage_reset_at
 from services.dictionary_repository import get_dictionary_entry
 from services.knowledge_catalog import find_verified_reference_context
 from services.chat_grounding import (
@@ -43,6 +46,46 @@ MAX_EXPLAIN_TITLE_CHARACTERS = 300
 MAX_EXPLAIN_TEXT_CHARACTERS = 60_000
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
 
+def _valid_install_id(request: Request) -> Optional[str]:
+    """Return ang X-Install-Id kapag valid ang format, kung hindi man None."""
+    install_id = (request.headers.get("X-Install-Id") or "").strip()
+    if install_id and re.fullmatch(INSTALL_ID_PATTERN, install_id):
+        return install_id
+    return None
+
+
+def _ensure_daily_quota(request: Request) -> None:
+    """Task A1: daily quota per install para sa /simplify at /extract_text.
+
+    - Walang valid X-Install-Id: hindi mabibilang, hindi haharangan.
+    - X-Analytics: 0: walang itatabi ang server, kaya hindi rin binibilang.
+    - Error sa usage DB: fail-open (hindi sagabal ang tracking outage).
+    """
+    install_id = _valid_install_id(request)
+    if not install_id:
+        return
+    if (request.headers.get("X-Analytics") or "").strip() == "0":
+        return
+    if DAILY_DOC_LIMIT <= 0:
+        return
+    try:
+        quota = consume_daily_quota(install_id)
+    except Exception as error:
+        print(f"[QUOTA] Usage store unavailable ({type(error).__name__}); fail-open.")
+        return
+    if not quota.get("allowed"):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "daily_limit_reached",
+                "message": (
+                    f"Abot na ang pang-araw-araw na limit na "
+                    f"{quota.get('limit')} scans. Babalik ang iyong quota "
+                    f"sa {quota.get('resetAt')}."
+                ),
+                "resetAt": str(quota.get("resetAt") or ""),
+            },
+        )
 
 class SanitizedPageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -357,6 +400,7 @@ def _analyze_and_attach_input_meta(text: str, input_meta: dict) -> dict:
 @limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
 def simplify_text(request: Request, payload: LegalRequest):
     combined_text, input_meta = _prepare_legal_input(payload)
+    _ensure_daily_quota(request)
     return _analyze_and_attach_input_meta(combined_text, input_meta)
 
 
@@ -590,6 +634,14 @@ async def extract_uploaded_text(request: Request, file: UploadFile = File(...)):
                     "selectable text at hindi lamang scanned images."
                 ),
             )
+        
+        _ensure_daily_quota(request)
+
+        return {
+            "status": "success",
+            "extractedText": extracted_text,
+            "pageCount": extracted_text.count("--- Page ") or 1,
+        }
 
         return {
             "status": "success",
@@ -608,6 +660,54 @@ async def extract_uploaded_text(request: Request, file: UploadFile = File(...)):
         if os.path.exists(file_location):
             os.remove(file_location)
 
+@router.get("/usage")
+def usage_status(
+    request: Request,
+    x_analytics: Optional[str] = Header(default=None, alias="X-Analytics"),
+):
+    """Task A1: natitirang daily scan quota ng install na ito (para sa app).
+
+    Counts lang ang sagot — walang laman ng dokumento na bumabalik dito.
+    Kapag X-Analytics: 0, walang binabasa o binabago sa usage DB.
+    """
+    limit = DAILY_DOC_LIMIT
+
+    if (x_analytics or "").strip() == "0":
+        return {
+            "status": "success",
+            "limit": limit,
+            "used": 0,
+            "remaining": limit,
+            "resetAt": usage_reset_at(),
+            "analyticsEnabled": False,
+        }
+
+    install_id = _valid_install_id(request)
+    if not install_id:
+        return {
+            "status": "success",
+            "limit": limit,
+            "used": 0,
+            "remaining": limit,
+            "resetAt": usage_reset_at(),
+            "analyticsEnabled": True,
+        }
+
+    try:
+        data = get_usage(install_id)
+    except Exception as error:
+        print(f"[QUOTA] Usage store unavailable ({type(error).__name__}).")
+        data = {"used": 0, "resetAt": usage_reset_at()}
+
+    used = int(data.get("used", 0))
+    return {
+        "status": "success",
+        "limit": limit,
+        "used": used,
+        "remaining": max(0, limit - used),
+        "resetAt": data.get("resetAt") or usage_reset_at(),
+        "analyticsEnabled": True,
+    }
 
 @router.post("/simplify_batch")
 async def simplify_batch_files():

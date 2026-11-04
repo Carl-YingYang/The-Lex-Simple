@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/Lex-Simpe-Logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#7C3AED"
     },
     "ios": {
       "supportsTablet": true

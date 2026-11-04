@@ -37,9 +37,8 @@ const SCANS_ROOT = new Directory(
     'scans'
 );
 const ownerRoot = (owner: LocalOwner): Directory =>
-    owner === 'guest'
-        ? new Directory(SCANS_ROOT, 'guest')
-        : new Directory(SCANS_ROOT, 'users', owner.slice(5));
+    new Directory(SCANS_ROOT, 'guest');
+
 const sessionRoot = (sessionId: string, owner: LocalOwner): Directory => {
     // Old scans remain in their original location for the guest.
     const legacy = new Directory(SCANS_ROOT, sessionId);

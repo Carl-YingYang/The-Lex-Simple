@@ -15,6 +15,9 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from core.config import settings
+
+from db.usage_store import usage_snapshot
+
 from services.knowledge_catalog import (
     MAX_BYTES, activate_approved_file, activation_preview, create_draft,
     disable_file, discard_draft, ensure_schema,
@@ -290,3 +293,10 @@ def audit_log_status():
     with sqlite3.connect(settings.DB_PATH) as db:
         count = db.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
     return {"status": "success", "audit_log_count": count}
+
+@router.get("/admin/stats", tags=[ADVANCED],
+            summary="Anonymous usage stats: installs, DAU/WAU/MAU, requests ngayon",
+            description="Bilang lang. Walang laman ng dokumento o personal data ang iniimbak o ibinabalik.")
+def admin_usage_stats():
+    """Task A1: aggregate na usage snapshot mula sa db/usage_store.py."""
+    return {"status": "success", "data": usage_snapshot()}

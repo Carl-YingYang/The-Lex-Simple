@@ -1,4 +1,6 @@
-// AI ENGINE VERSION: 2.0.0
+// AI ENGINE VERSION: 2.1.0
+// A2: 429 responses now surface the server's Filipino message (daily scan
+// quota) with resetAt inside detail, at may fetchUsage() para sa GET /usage.
 import type {
     SanitizedDocumentApiPayload,
 } from '../utils/sanitizer';
@@ -322,13 +324,18 @@ const request = async <TResponse>(
 
         if (!response.ok) {
             if (response.status === 429) {
-                throw new ApiError(
-                    'Masyadong maraming request. Subukan ulit sa ilang minuto.',
-                    {
-                        status: 429,
-                        code: 'rate_limited',
-                    }
+                // Rate limit o daily scan quota (A1) — gamitin ang totoong
+                // mensahe ng server (may resetAt sa detail) kapag meron.
+                const rateLimitInfo = extractErrorInformation(
+                    responseBody,
+                    'Masyadong maraming request. Subukan ulit sa ilang minuto.'
                 );
+
+                throw new ApiError(rateLimitInfo.message, {
+                    status: 429,
+                    code: rateLimitInfo.code || 'rate_limited',
+                    detail: rateLimitInfo.detail,
+                });
             }
 
             const errorInfo = extractErrorInformation(
@@ -471,6 +478,25 @@ export async function getEndpoint<TResponse = any>(
         { method: 'GET' },
         signal
     );
+}
+
+/**
+ * GET /usage (Task A1) — natitirang daily scan quota ng install na ito.
+ * Counts lang ang sagot ng server; walang laman ng dokumento.
+ */
+export type UsageStatus = {
+    status: 'success' | string;
+    limit: number;
+    used: number;
+    remaining: number;
+    resetAt?: string;
+    analyticsEnabled?: boolean;
+};
+
+export async function fetchUsage(
+    signal?: AbortSignal
+): Promise<UsageStatus> {
+    return getEndpoint<UsageStatus>('/usage', signal);
 }
 
 const validateSanitizedPayload = (
