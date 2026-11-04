@@ -38,7 +38,8 @@ import * as Network from 'expo-network';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import ImageViewer from 'react-native-image-zoom-viewer';
 
-import { postEndpoint, postFileEndpoint } from '../../../services/AiEngine';
+import { postEndpoint } from '../../../services/AiEngine';
+import { analyzeUploadedDocument } from '../../../services/uploadedDocumentAnalysis';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import ClauseCard from '../../../components/ClauseCard';
@@ -532,30 +533,38 @@ export default function OfflineDetailScreen({
                     throw new Error('Hindi mahanap ang document file.');
                 }
 
+                // v7.0.1 (U4): hindi na dumadaan sa /simplify_file na
+                // nagse-send ng RAW text sa server. Extraction lang
+                // (/extract_text), LOKAL na sanitization, tapos /simplify
+                // ang sanitized pages — pareho ng BatchEditScreen. Ang
+                // extractedText na naka-save sa history ay mula sa raw
+                // extraction (lokal lang); ang sanitizedText ay ang
+                // sanitized na bersyon.
                 setAnalysisProgress('Ina-upload ang document');
-                const formData = new FormData();
-                formData.append('file', {
-                    uri: documentUri,
-                    name: scanItem.title || 'document',
-                    type: 'application/octet-stream',
-                } as any);
-
-                const response = await postFileEndpoint(
-                    '/simplify_file',
-                    formData
+                const {
+                    response,
+                    extractedText,
+                    sanitizedText,
+                } = await analyzeUploadedDocument(
+                    {
+                        uri: documentUri,
+                        name: scanItem.title || 'document',
+                        mimeType: 'application/octet-stream',
+                    },
+                    scanItem.id
                 );
 
                 if (response?.status !== 'success') {
                     throw new Error(
-                        response?.message ||
+                        (response as any)?.message ||
                             'Hindi na-process ang document.'
                     );
                 }
 
                 analysis = normalizeAnalysisResult(
                     response,
-                    String(response.extractedText || scanItem.ocrText || ''),
-                    String(response.sanitizedText || '')
+                    extractedText || scanItem.ocrText || '',
+                    sanitizedText
                 );
             } else {
                 const localText = await analyzeImagePages();

@@ -55,8 +55,11 @@ export const REDACTION = {
     UNKNOWN_SENSITIVE: '[REDACTED_SENSITIVE_DATA]',
 } as const;
 
-export const SANITIZER_VERSION = '2.6.2';
 
+/* v2.7.0 (S3): mga bagong redaction modules — walang ibang external
+ * import ang sanitizer para panatilihing dependency-free. */
+import { normalizeOcrNoise, redactExtraPatterns } from './extraRedaction';
+import { collectNameCandidates, applyNameRegistry } from './nameRedaction';
 
 /* ============================================================
  * BASIC HELPERS
@@ -368,7 +371,39 @@ const replaceContextualPersonName = (
  * CORE SANITIZER
  * ============================================================ */
 
-export const sanitizeLocalText = (rawText: string): string => {
+/**
+ * v2.7.0 (S3) pipeline wrapper — LAHAT ng raw-text entry point dadaan
+ * dito nang isang beses lang:
+ *   normalizeOcrNoise → collectNameCandidates(raw) → umiiral na
+ *   sanitizing (core callback) → redactExtraPatterns → applyNameRegistry.
+ * Isang wrapper lang para hindi madoble ang pagpoproseso sa maraming
+ * return path ng mga core function.
+ */
+const runPrivacyPipeline = (
+    rawText: string,
+    sanitizeStep: (text: string) => string
+): string => {
+    if (!rawText || typeof rawText !== 'string') {
+        return '';
+    }
+
+    const noiseFreeText = normalizeOcrNoise(rawText);
+    const nameRegistry = collectNameCandidates(noiseFreeText);
+    const sanitized = sanitizeStep(noiseFreeText);
+
+    return applyNameRegistry(
+        redactExtraPatterns(sanitized),
+        nameRegistry
+    );
+};
+
+/**
+ * v2.7.0 — dating laman ng sanitizeLocalText; tinatawag na lang ng
+ * runPrivacyPipeline (at ng sanitizeDocumentTextCore) para hindi
+ * ma-double ang extraRedaction/name-registry passes.
+ */
+
+const sanitizeLocalTextCore = (rawText: string): string => {
     if (!rawText || typeof rawText !== 'string') {
         return '';
     }
@@ -474,9 +509,9 @@ export const sanitizeLocalText = (rawText: string): string => {
      */
 
     sanitized = sanitized.replace(
-        /\b(?:NPS|I\.?S\.?|INV|COMPLAINT|DOCKET|CASE)\s*(?:NO\b\.?|NUMBER\b|#)\s*[:#.-]?\s*([A-Z0-9][A-Z0-9./-]*(?:[ \t]*\n[ \t]*[A-Z0-9][A-Z0-9./-]*)?)/giu,
-        (match, identifier: string) =>
-            /\d/.test(identifier) ? REDACTION.ID : match
+        /\b((?:NPS|I\.?S\.?|INV|COMPLAINT|DOCKET|CASE)\s*(?:NO\b\.?|NUMBER\b|#)\s*[:#.-]?\s*)([A-Z0-9][A-Z0-9./-]*(?:[ \t]*\n[ \t]*[A-Z0-9][A-Z0-9./-]*)?)/giu,
+        (match, label: string, identifier: string) =>
+            /\d/.test(identifier) ? `${label}${REDACTION.ID}` : match
     );
 
 
@@ -830,6 +865,14 @@ export const sanitizeLocalText = (rawText: string): string => {
         sanitized = sanitized.replace(
             pattern,
             (match) => {
+                // v2.7.0 (S3 guard): huwag tumugma sa loob ng umiiral na
+                // [REDACTED_*] token (hal. "[REDACTED_EMAIL] or ...") —
+                // kung hindi, makakain ng pattern ang sumunod na text sa
+                // parehong linya at mabubuo ang "[REDACTED_[REDACTED_EMAIL]".
+                if (match.includes('[REDACTED_')) {
+                    return match;
+                }
+
                 const lower = match.toLowerCase();
 
                 if (
@@ -974,6 +1017,8 @@ export const sanitizeLocalText = (rawText: string): string => {
     return sanitized;
 };
 
+export const sanitizeLocalText = (rawText: string): string =>
+    runPrivacyPipeline(rawText, sanitizeLocalTextCore);
 
 /* ============================================================
  * DOCUMENT-SPECIFIC SANITIZER
@@ -985,12 +1030,12 @@ export const sanitizeLocalText = (rawText: string): string => {
  * It applies the normal sanitizer and then performs an
  * additional aggressive pass.
  */
-export const sanitizeDocumentText = (rawText: string): string => {
+const sanitizeDocumentTextCore = (rawText: string): string => {
     if (!rawText || typeof rawText !== 'string') {
         return '';
     }
 
-    let sanitized = sanitizeLocalText(rawText);
+    let sanitized = sanitizeLocalTextCore(rawText);
 
 
     /*
@@ -1005,21 +1050,50 @@ export const sanitizeDocumentText = (rawText: string): string => {
              * Don't destroy the entire legal clause.
              * Only aggressively remove obvious personal fields inside it.
              */
-            return sanitizeLocalText(match);
+            return sanitizeLocalTextCore(match);
         }
     );
 
 
-    // Witness / signatory details
+    // Witness / signatory details — v2.7.0 (S4): kinakailangan ng malinaw
+    // na separator ("Witness:", "Signatory -") o tunay na signature
+    // field ("Signature over printed name", "(Signed)", linyang puro
+    // underscore/tuldok/gitling). Hindi na tinatamaan ang mga ordinaryong
+    // legal na pangungusap tulad ng "IN WITNESS WHEREOF, the parties
+    // signed."
     sanitized = sanitized.replace(
-        /(?:witness|signatory|signed\s+in\s+the\s+presence\s+of)\s*[:#-]?\s*[^\n]{2,150}/giu,
+        /\b(?:witness|signatory)\s*[:#-]\s*[^\n]{2,150}/giu,
         REDACTION.SIGNATURE
     );
 
+    sanitized = sanitized.replace(
+        /\bsigned\s+in\s+the\s+presence\s+of\b\s*[:#-]?\s*[^\n]{2,150}/giu,
+        REDACTION.SIGNATURE
+    );
+
+    // "Signature over printed name" na tunay na signature field.
+    sanitized = sanitized.replace(
+        /\bsignature\s+over\s+printed\s+name\b[ \t]*[^\n]{0,100}/giu,
+        REDACTION.SIGNATURE
+    );
+
+    // "(Signed) ..." marker sa mismong signature line.
+    sanitized = sanitized.replace(
+        /\(\s*signed\s*\)[ \t]*[^\n]{0,100}/giu,
+        REDACTION.SIGNATURE
+    );
+
+    // Linyang puro underscore/tuldok/gitling (signature blank).
+    sanitized = sanitized.replace(
+        /^[ \t]*[_\-.]{4,}[ \t]*$/gm,
+        REDACTION.SIGNATURE
+    );
 
     return sanitized.trim();
 };
 
+export const sanitizeDocumentText = (rawText: string): string =>
+    runPrivacyPipeline(rawText, sanitizeDocumentTextCore);
 
 /* ============================================================
  * HIGH-RISK DETECTOR
@@ -1581,12 +1655,31 @@ export const buildSanitizedDocumentForAI = (
 
     assertOrderedCompletePages(pages);
 
+    /*
+     * v2.7.0 (S3) — Phase 1: cross-page name registry. Pinagsasama ang
+     * mga pangalan mula sa LAHAT ng page (raw text bago mag-sanitize)
+     * para mahuli ang pangalang lumalagpas sa page boundary.
+     */
+    const crossPageNameRegistry: string[] = [
+        ...new Set(
+            pages.flatMap((page) => collectNameCandidates(page.text))
+        ),
+    ];
+
     const blockedPageNumbers: number[] = [];
     const sanitizedPages: SanitizedPageSummary[] = [];
 
     for (const page of pages) {
         const privacyResult = sanitizeDocumentForAI(page.text);
-        const sanitizedText = privacyResult.safeText.trim();
+        /*
+         * v2.7.0 (S3) — Phase 2: pagkatapos ng sanitizeDocumentForAI,
+         * i-apply ang cross-page registry BAGO ang trim, hash, at
+         * redactionCount. Panatilihin ang blocked logic.
+         */
+        const sanitizedText = applyNameRegistry(
+            privacyResult.safeText,
+            crossPageNameRegistry
+        ).trim();
 
         if (
             privacyResult.blocked ||

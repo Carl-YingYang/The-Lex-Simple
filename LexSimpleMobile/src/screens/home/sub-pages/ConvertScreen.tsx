@@ -21,7 +21,7 @@ import {
 } from '../../../services/scanHistoryStorage';
 import * as Network from 'expo-network';
 
-import { postFileEndpoint } from '../../../services/AiEngine';
+import { analyzeUploadedDocument } from '../../../services/uploadedDocumentAnalysis';
 import ScreenLayout from '../../../components/ScreenLayout';
 import { useCustomAlert } from '../../../components/CustomAlert';
 import { useTheme } from '../../../theme/ThemeContext';
@@ -155,38 +155,42 @@ export default function ConvertScreen({ navigation }: any) {
         historyId: string
     ): void => {
         triggerBackgroundProcess(async (signal: AbortSignal) => {
-            const formData = new FormData();
-
-            formData.append('file', {
-                uri: file.uri,
-                name: file.name || 'document',
-                type: file.mimeType || 'application/octet-stream',
-            } as any);
-
-            const response = await postFileEndpoint(
-                '/simplify_file',
-                formData,
+            // v1.0.1 (U3): hindi na dumaan sa /simplify_file na nagse-send
+            // ng RAW text sa server. Extraction lang (/extract_text),
+            // LOKAL na sanitization, tapos /simplify ang sanitized pages —
+            // pareho ng BatchEditScreen. Ang naka-save na extractedText sa
+            // history ay ang raw extraction (lokal lang); ang
+            // sanitizedText ay ang sanitized na bersyon.
+            const {
+                response,
+                extractedText,
+                sanitizedText,
+            } = await analyzeUploadedDocument(
+                {
+                    uri: file.uri,
+                    name: file.name || 'document',
+                    mimeType: file.mimeType || 'application/octet-stream',
+                },
+                historyId,
                 signal
             );
 
             if (!response || response.status !== 'success' || !response.data) {
                 throw new Error(
-                    response?.message || 'Hindi nakumpleto ang document analysis.'
+                    (response as any)?.message || 'Hindi nakumpleto ang document analysis.'
                 );
             }
 
             const combinedAnalysisResult = {
                 ...response.data,
-                rag_context_used: response.rag_context_used,
-                sanitizedText: response.sanitizedText,
+                rag_context_used: (response as any).rag_context_used,
+                sanitizedText,
             };
-            const extractedText =
-                response.extractedText || `File Content from: ${file.name}`;
 
             await updateHistoryToScanned(
                 historyId,
                 combinedAnalysisResult,
-                extractedText
+                extractedText || `File Content from: ${file.name}`
             );
 
             return combinedAnalysisResult;

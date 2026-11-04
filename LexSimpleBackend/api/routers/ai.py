@@ -1,4 +1,4 @@
-# AI ROUTER VERSION: 6.3.4
+# AI ROUTER VERSION: 6.3.5
 import copy
 import hashlib
 import hmac
@@ -475,6 +475,131 @@ async def simplify_uploaded_file(request: Request, file: UploadFile = File(...))
         raise
     except Exception as error:
         print(f"/simplify_file Error: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="Server error processing file.",
+        ) from error
+    finally:
+        if os.path.exists(file_location):
+            os.remove(file_location)
+
+
+@router.post("/extract_text")
+@limiter.limit(LIMIT_AI)
+@limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
+async def extract_uploaded_text(request: Request, file: UploadFile = File(...)):
+    """
+    Text extraction only (v6.3.5 / U1).
+
+    Same extraction logic, limits, and temp-file handling as
+    /simplify_file — pero WALANG LLM call at WALANG sanitize: ang mobile
+    app ang gagawa ng lokal na sanitization bago ipadala ang text sa
+    /simplify. Walang pag-log o pag-print ng laman ng file.
+    """
+    temp_dir = "temp_uploads"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    safe_filename = os.path.basename(file.filename or "uploaded_file")
+    ext = os.path.splitext(safe_filename)[1]
+    file_location = os.path.join(temp_dir, f"{uuid.uuid4().hex}{ext}")
+
+    try:
+        max_upload_bytes = MAX_UPLOAD_MB * 1024 * 1024
+        bytes_written = 0
+        with open(file_location, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={
+                            "code": "upload_too_large",
+                            "message": (
+                                f"The uploaded file exceeds the "
+                                f"{MAX_UPLOAD_MB} MB limit."
+                            ),
+                        },
+                    )
+                buffer.write(chunk)
+
+        extracted_text = ""
+        filename_lower = safe_filename.casefold()
+
+        if filename_lower.endswith(".pdf"):
+            try:
+                with pdfplumber.open(file_location) as pdf:
+                    page_texts = []
+
+                    for page_number, page in enumerate(pdf.pages, start=1):
+                        page_text = _normalize_document_text(
+                            page.extract_text() or ""
+                        )
+                        if page_text:
+                            page_texts.append(
+                                f"--- Page {page_number} ---\n{page_text}"
+                            )
+
+                    extracted_text = "\n\n".join(page_texts)
+            except Exception as error:
+                print(f"PDFPlumber Error: {error}")
+
+            if not extracted_text.strip():
+                try:
+                    document = fitz.open(file_location)
+                    page_texts = []
+
+                    for page_number, page in enumerate(document, start=1):
+                        page_text = _normalize_document_text(page.get_text())
+                        if page_text:
+                            page_texts.append(
+                                f"--- Page {page_number} ---\n{page_text}"
+                            )
+
+                    document.close()
+                    extracted_text = "\n\n".join(page_texts)
+                except Exception as error:
+                    print(f"PyMuPDF Error: {error}")
+
+        elif filename_lower.endswith(".docx"):
+            document = docx.Document(file_location)
+            extracted_text = "\n".join(
+                paragraph.text
+                for paragraph in document.paragraphs
+                if paragraph.text.strip()
+            )
+
+        elif filename_lower.endswith(".txt"):
+            with open(file_location, "r", encoding="utf-8") as text_file:
+                extracted_text = text_file.read()
+        else:
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file type.",
+            )
+
+        extracted_text = _normalize_document_text(extracted_text)
+
+        if len(extracted_text) < MIN_DOCUMENT_CHARACTERS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Hindi mabasa ang file. Siguraduhing mayroon itong "
+                    "selectable text at hindi lamang scanned images."
+                ),
+            )
+
+        return {
+            "status": "success",
+            "extractedText": extracted_text,
+            "pageCount": extracted_text.count("--- Page ") or 1,
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"/extract_text Error: {error}")
         raise HTTPException(
             status_code=500,
             detail="Server error processing file.",
