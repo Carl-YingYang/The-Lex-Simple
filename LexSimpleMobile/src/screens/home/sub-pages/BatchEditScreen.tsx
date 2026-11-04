@@ -1162,7 +1162,7 @@ export default function BatchEditScreen({
                         <View style={[styles.markerSquareBrand, { backgroundColor: T.brand, borderColor: T.ink }]} />
                     </View>
                     <Text style={[styles.processingHeaderTitle, { color: T.text }]}>
-                        Sinusuri ang Document
+                        Sinusuri ang Documento
                     </Text>
                 </View>
                 <View style={styles.processingBody}>
@@ -1307,8 +1307,6 @@ export default function BatchEditScreen({
                     {/* SPLIT CTA — purple main + black arrow square (focal) */}
                     <SplitCta
                         label="Ipagpatuloy sa Background"
-                        icon="arrow-undo-outline"
-                        arrowIcon="arrow-redo-outline"
                         onPress={() =>
                             navigation.navigate('Main', {
                                 screen: 'Scan',

@@ -389,7 +389,6 @@ export default function LibraryScreen({ navigation }: any) {
                     method: 'GET',
                     headers: {
                         Accept: 'application/json',
-                        'ngrok-skip-browser-warning': 'true',
                         ...(await getApiIdentityHeaders()),
                     },
                 }

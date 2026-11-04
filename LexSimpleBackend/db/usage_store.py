@@ -9,6 +9,9 @@ PRIVACY CONTRACT:
   X-Analytics: 0 (opt-out) o walang install id (IP-fallback key).
   Ang laktawan lang ng opt-out ay ang installs table (first_seen/last_seen)
   — tanging ang middleware sa main.py (touch_install) ang sumusulat doon.
+- Task C1: SA BAWAT request ay binibilang ang install key AT ang ip key
+  (dual counting), plus ang global cap. May release_daily_quota() na
+  nag-rerefund ng slot kapag nag-fail ang processing (hal. LLM error).
 - Walang IP address na naka-store: ang IP-fallback key ay sha256 din.
 - Ang DB path ay galing sa env (USAGE_DB_PATH) para madaling ilipat sa
   persistent storage.
@@ -40,10 +43,10 @@ except ValueError:
     DAILY_DOC_LIMIT = 10
 
 try:
-    DAILY_IP_DOC_LIMIT = int(os.getenv("DAILY_IP_DOC_LIMIT", "30"))
+    DAILY_IP_DOC_LIMIT = int(os.getenv("DAILY_IP_DOC_LIMIT", "50"))
 except ValueError:
-    print("[usage_store] WARNING: invalid DAILY_IP_DOC_LIMIT; using 30.")
-    DAILY_IP_DOC_LIMIT = 30
+    print("[usage_store] WARNING: invalid DAILY_IP_DOC_LIMIT; using 50.")
+    DAILY_IP_DOC_LIMIT = 50
 
 try:
     GLOBAL_DAILY_DOC_LIMIT = int(os.getenv("GLOBAL_DAILY_DOC_LIMIT", "200"))
@@ -78,9 +81,12 @@ def install_quota_key(install_id: str) -> str:
 
 
 def ip_quota_key(client_ip: str) -> str:
-    """Quota key kapag walang valid install id — sha256(salt + "ip:" + ip).
+    """Quota key ng client IP — sha256(salt + "ip:" + ip).
 
-    Hindi iniimbak ang IP mismo; hash lang ang pumapasok sa daily_usage.
+    Task C1: binibilang ito SA BAWAT request (may o walang valid install
+    id), kaya kahit mag-imbento ang attacker ng bagong install id kada
+    request, may sarili pa ring ceiling ang IP. Hindi iniimbak ang IP
+    mismo; hash lang ang pumapasok sa daily_usage.
     """
     return hashlib.sha256(
         (INSTALL_ID_SALT + f"ip:{client_ip}").encode("utf-8")
@@ -198,7 +204,8 @@ def consume_daily_quota(quota_key: str, limit: int) -> dict:
     (walang INSERT/UPDATE sa installs kahit kailan). Ang analytics writes
     ay nasa middleware touch_install lang, kaya:
     - opt-out (X-Analytics: 0): may quota pa rin, walang installs row;
-    - IP-fallback key: may quota (sariling limit), walang installs row.
+    - ip key: may quota (sariling limit) SA BAWAT request, walang
+      installs row (Task C1 dual counting).
 
     Returns: {allowed: bool, used: int, limit: int, resetAt: str}
     """
@@ -239,6 +246,27 @@ def consume_daily_quota(quota_key: str, limit: int) -> dict:
             "limit": limit,
             "resetAt": usage_reset_at(),
         }
+    finally:
+        conn.close()
+
+
+def release_daily_quota(quota_key: str) -> None:
+    """Task C1.3: i-refund ang isang na-consume na quota slot.
+
+    I-decrement ang count ng quota_key para sa kasalukuyang araw (PH time),
+    na hindi bababa sa 0. Tawagin ito kapag nag-fail ang processing
+    (hal. LLM exception o 5xx) para hindi masayang ang quota slot ng user
+    sa isang request na hindi naman natuloy.
+    """
+    day = _ph_today()
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE daily_usage SET count = MAX(count - 1, 0) "
+            "WHERE quota_key = ? AND day = ?",
+            (quota_key, day),
+        )
+        conn.commit()
     finally:
         conn.close()
 

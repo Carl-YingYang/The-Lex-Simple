@@ -793,7 +793,7 @@ export default function OfflineDetailScreen({
                             { color: T.text },
                         ]}
                     >
-                        Sinusuri ang document
+                        Sinusuri ang Documento
                     </Text>
                     <Text
                         style={[

@@ -142,11 +142,6 @@ export default function ProfileScreen({ navigation }: any) {
   const [province, setProvince] = useState(DEFAULT_PROFILE.province);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editCity, setEditCity] = useState('');
-  const [editProvince, setEditProvince] = useState('');
-
   // Privacy section (A2)
   const [analyticsOn, setAnalyticsOn] = useState(true);
   const [usage, setUsage] = useState<UsageStatus | null>(null);
@@ -220,44 +215,9 @@ export default function ProfileScreen({ navigation }: any) {
     }
   };
 
-  const openEditModal = () => {
-    setEditName(name);
-    setEditCity(city);
-    setEditProvince(province);
-    setIsEditing(true);
-  };
-
-  const saveProfileData = async () => {
-    // P1: opsyonal na ang palayaw at wala nang email — location lang ang
-    // may validation (parehong puno o parehong blanko).
-    const cleanName = editName.trim();
-    const cleanCity = editCity.trim();
-    const cleanProvince = editProvince.trim();
-
-    if ((cleanCity && !cleanProvince) || (!cleanCity && cleanProvince)) {
-      showAlert('Incomplete Location', 'Enter both city and province, or leave both blank to use Philippines.', 'warning');
-      return;
-    }
-
-    try {
-      const nextProfile = {
-        name: cleanName,
-        avatar: avatarUri,
-        city: cleanCity,
-        province: cleanProvince,
-      };
-      await AsyncStorage.setItem(profileKey, JSON.stringify(nextProfile));
-      setName(cleanName);
-      setCity(cleanCity);
-      setProvince(cleanProvince);
-      setMapLoadFailed(false);
-      setIsEditing(false);
-      showAlert('Profile Saved', 'Your profile and location have been updated.', 'success');
-    } catch {
-      showAlert('Save Error', 'Your profile could not be saved. Please try again.', 'error');
-    }
-  };
-
+  // C2: tinanggal ang Edit profile (openEditModal + saveProfileData).
+  // Ang pagpalit ng profile photo ay dito na mismo nagse-save — hindi na
+  // dumadaan sa "Save changes" ng modal.
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -267,7 +227,18 @@ export default function ProfileScreen({ navigation }: any) {
         quality: 0.75,
       });
       if (!result.canceled && result.assets?.[0]?.uri) {
-        setAvatarUri(keepProfileImage(result.assets[0].uri, owner));
+        const nextUri = keepProfileImage(result.assets[0].uri, owner);
+        setAvatarUri(nextUri);
+        try {
+          const existingProfile = await AsyncStorage.getItem(profileKey);
+          const parsedProfile = existingProfile ? JSON.parse(existingProfile) : {};
+          await AsyncStorage.setItem(
+            profileKey,
+            JSON.stringify({ ...parsedProfile, avatar: nextUri }),
+          );
+        } catch {
+          // Hindi kritiko: mananatili ang lumang photo sa susunod na bukas.
+        }
       }
     } catch {
       showAlert('Gallery Error', 'Unable to open your gallery. Please try again.', 'error');
@@ -383,7 +354,6 @@ export default function ProfileScreen({ navigation }: any) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
           ...(await getApiIdentityHeaders()),
         },
         body: JSON.stringify(feedbackBody),
@@ -485,8 +455,7 @@ export default function ProfileScreen({ navigation }: any) {
             <View style={[styles.locationWatermark, { backgroundColor: T.card, borderColor: T.ink }]}>
               <Ionicons name="location-outline" size={13} color={T.text} />
               <View style={styles.locationCopy}>
-                <Text style={[styles.locationCity, { color: T.text }]} numberOfLines={1}>{city || 'Philippines'}</Text>
-                <Text style={[styles.locationProvince, { color: T.subText }]} numberOfLines={1}>{province || 'Tap to add city and province'}</Text>
+                <Text style={[styles.locationCity, { color: T.text }]} numberOfLines={1}>{city || 'Philippines'}</Text><Text style={[styles.locationProvince, { color: T.subText }]} numberOfLines={1}>{province || 'Tap to view location'}</Text><Text style={[styles.locationProvince, { color: T.subText }]} numberOfLines={1}>{province || 'Tap to add city and province'}</Text>
               </View>
             </View>
             <View style={[styles.mapHint, { backgroundColor: T.ink }]}>
@@ -516,46 +485,43 @@ export default function ProfileScreen({ navigation }: any) {
 
             <View style={styles.identityArea}>
               <Text style={[styles.profileName, { color: T.bg }]} numberOfLines={1}>{name || 'Guest'}</Text>
-
-              {/* EDIT PROFILE — mini split-button (spec: main section + black arrow square) */}
-              <Pressable
-                style={styles.editProfilePress}
-                onPress={openEditModal}
-                accessibilityRole="button"
-                accessibilityLabel="Edit profile"
-              >
-                {({ pressed }) => (
-                  <View
-                    style={[
-                      styles.editProfileButton,
-                      { borderColor: T.ink },
-                      pressed ? styles.dimmed : null,
-                    ]}
-                  >
-                    <View style={[styles.editProfileMain, { backgroundColor: T.card }]}>
-                      <Ionicons name="pencil-outline" size={13} color={T.text} />
-                      <Text style={[styles.editProfileText, { color: T.text }]}>Edit profile</Text>
-                    </View>
-                    <View style={[styles.editProfileArrow, { backgroundColor: T.ink }]}>
-                      <Ionicons name="arrow-forward" size={13} color={T.bg} />
-                    </View>
-                  </View>
-                )}
-              </Pressable>
             </View>
           </View>
         </View>
 
-        {/* STATS — flat white card, 1.5px outline, itim na malaking numero (spec) */}
+        {/* STATS — flat card, 1.5px outline, dalawang stat magkatabi
+            (C2: ang "Natitirang scan ngayong araw" ay galing sa Privacy
+            section, may mas simpleng wording) */}
         <NeoCard variant="flat" padding={false} style={styles.statsCard}>
-          <View style={styles.statsIconWrap}>
-            <Image source={require('../../../../assets/icons/files.png')} style={[styles.statsIcon, { tintColor: T.text }]} resizeMode="contain" />
+          <View style={styles.statBlock}>
+            <View style={styles.statsIconWrap}>
+              <Image source={require('../../../../assets/icons/files.png')} style={[styles.statsIcon, { tintColor: T.text }]} resizeMode="contain" />
+            </View>
+            <View style={styles.statsCopy}>
+              <Text style={[styles.statsTitle, { color: T.text }]} numberOfLines={2}>Documents analyzed</Text>
+              <Text style={[styles.statsDescription, { color: T.subText }]} numberOfLines={2}>Saved privately on this device.</Text>
+            </View>
+            <Text style={[styles.statValue, { color: T.text }]}>{totalScanned}</Text>
           </View>
-          <View style={styles.statsCopy}>
-            <Text style={[styles.statsTitle, { color: T.text }]}>Documents analyzed</Text>
-            <Text style={[styles.statsDescription, { color: T.subText }]}>Saved privately in your local scan history.</Text>
+
+          <View style={[styles.statsDivider, { backgroundColor: T.border }]} />
+
+          <View style={styles.statBlock}>
+            <View style={styles.statsIconWrap}>
+              <Ionicons name="scan-outline" size={22} color={T.text} />
+            </View>
+            <View style={styles.statsCopy}>
+              <Text style={[styles.statsTitle, { color: T.text }]} numberOfLines={2}>Natitirang scan ngayong araw</Text>
+              <Text style={[styles.statsDescription, { color: T.subText }]} numberOfLines={2}>
+                {usage
+                  ? `Bumabalik ang scans bukas ng ${formatQuotaResetAt(usage.resetAt)}.`
+                  : 'Hindi pa ma-check ngayon.'}
+              </Text>
+            </View>
+            <Text style={[styles.statValue, { color: T.text }]}>
+              {usage ? (usage.limit > 0 ? `${usage.remaining}/${usage.limit}` : '—') : '—'}
+            </Text>
           </View>
-          <Text style={[styles.statsCount, { color: T.text }]}>{totalScanned}</Text>
         </NeoCard>
 
         <NeoSectionHeader title="General" marker={false} style={styles.sectionGap} />
@@ -599,25 +565,6 @@ export default function ProfileScreen({ navigation }: any) {
               trackColor={{ false: T.border, true: T.brand }}
               thumbColor={T.card}
             />
-          </View>
-
-          <View style={[styles.privacyDivider, { backgroundColor: T.border }]} />
-
-          <View style={styles.privacyRow}>
-            <View style={[styles.menuIcon, { backgroundColor: T.brandVivid, borderColor: T.ink }]}>
-              <Ionicons name="speedometer-outline" size={20} color={T.brandText} />
-            </View>
-            <View style={styles.privacyCopy}>
-              <Text style={[styles.privacyTitle, { color: T.text }]}>Natitirang scan ngayong araw</Text>
-              <Text style={[styles.privacyDescription, { color: T.subText }]} numberOfLines={2}>
-                {usage
-                  ? `Bumabalik ang quota sa ${formatQuotaResetAt(usage.resetAt)}.`
-                  : 'Hindi ma-verify ang quota ngayon.'}
-              </Text>
-            </View>
-            <Text style={[styles.privacyValue, { color: T.text }]}>
-              {usage ? (usage.limit > 0 ? `${usage.remaining}/${usage.limit}` : '—') : '—'}
-            </Text>
           </View>
 
           <View style={[styles.privacyDivider, { backgroundColor: T.border }]} />
@@ -679,61 +626,11 @@ export default function ProfileScreen({ navigation }: any) {
             <Text style={[styles.locationPrivacy, { color: T.subText }]}>
               {hasCustomLocation
                 ? 'Only your city and province are shown—not your exact address.'
-                : 'Philippines is shown by default. Add a city and province from Edit profile when you are ready.'}
+                : 'Philippines is shown by default.'}
             </Text>
 
             <NeoButton label="Open in Google Maps" variant="accent" size="md" icon="map-outline" onPress={openGoogleMaps} />
           </View>
-        </View>
-      </Modal>
-
-      <Modal visible={isEditing} transparent animationType="fade" onRequestClose={() => setIsEditing(false)} statusBarTranslucent>
-        <View style={[styles.modalOverlay, { backgroundColor: T.overlay }]}>
-          <KeyboardAvoidingView style={styles.keyboardArea} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-              <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled" bounces={false}>
-                <View style={[styles.formModal, { backgroundColor: T.card, borderColor: T.ink }, getNeoShadow(T, 'sm')]}>
-                  <View style={styles.modalHeader}>
-                    <View style={styles.modalHeaderCopy}>
-                      <Text style={[styles.modalTitle, { color: T.text }]}>Edit profile</Text>
-                      <Text style={[styles.modalSubtitle, { color: T.subText }]}>Update your public profile details.</Text>
-                    </View>
-                    <NeoIconButton icon="close" size={34} onPress={() => setIsEditing(false)} accessibilityLabel="Close" />
-                  </View>
-
-                  <TouchableOpacity style={styles.editAvatarButton} onPress={pickImage} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Change photo">
-                    {avatarUri ? (
-                      <Image source={{ uri: avatarUri }} style={[styles.editAvatarImage, { borderColor: T.ink }]} />
-                    ) : (
-                      <View style={[styles.editAvatarPlaceholder, { backgroundColor: T.bg, borderColor: T.ink }]}>
-                        <Ionicons name="person-outline" size={26} color={T.subText} />
-                      </View>
-                    )}
-                    <Text style={[styles.changePhotoText, { color: T.brand }]}>Change photo</Text>
-                  </TouchableOpacity>
-
-                  <Text style={[styles.inputLabel, { color: T.subText }]}>NICKNAME (OPTIONAL)</Text>
-                  <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editName} onChangeText={setEditName} autoCorrect={false} returnKeyType="next" />
-
-                  <View style={styles.twoColumnRow}>
-                    <View style={styles.halfField}>
-                      <Text style={[styles.inputLabel, { color: T.subText }]}>CITY</Text>
-                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editCity} onChangeText={setEditCity} autoCorrect={false} returnKeyType="next" />
-                    </View>
-                    <View style={styles.halfField}>
-                      <Text style={[styles.inputLabel, { color: T.subText }]}>PROVINCE</Text>
-                      <TextInput style={[styles.input, { backgroundColor: T.bg, borderColor: T.ink, color: T.text }]} value={editProvince} onChangeText={setEditProvince} autoCorrect={false} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
-                    </View>
-                  </View>
-
-                  <View style={styles.actionRow}>
-                    <NeoButton label="Cancel" variant="secondary" size="md" style={styles.flexOne} onPress={() => setIsEditing(false)} />
-                    <NeoButton label="Save changes" variant="accent" size="md" style={styles.flexOne} onPress={saveProfileData} />
-                  </View>
-                </View>
-              </ScrollView>
-            </TouchableWithoutFeedback>
-          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -911,21 +808,16 @@ const styles = StyleSheet.create({
   profileName: { fontSize: 20, lineHeight: 25, fontWeight: '900', marginBottom: 2 },
   profileEmail: { fontSize: 12, lineHeight: 16, marginBottom: 10, opacity: 0.85 },
 
-  // EDIT PROFILE — mini split-button (main + black arrow square)
-  editProfilePress: { alignSelf: 'flex-start' },
-  editProfileButton: { flexDirection: 'row', alignItems: 'stretch', borderWidth: BORDER.thick, borderRadius: RADIUS.md, overflow: 'hidden' },
-  editProfileMain: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9 },
-  editProfileText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  editProfileArrow: { width: 32, alignItems: 'center', justifyContent: 'center' },
-
-  // --- STATS (flat, 1.5px outline, walang filled icon bg — spec) ---
-  statsCard: { flexDirection: 'row', alignItems: 'center', padding: 14, marginBottom: 16 },
+  // --- STATS (flat, 1.5px outline; dalawang stat magkatabi — C2) ---
+  statsCard: { marginBottom: 16 },
+  statBlock: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  statsDivider: { height: BORDER.thin, marginHorizontal: 14 },
   statsIconWrap: { width: 30, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   statsIcon: { width: 22, height: 22 },
   statsCopy: { flex: 1, minWidth: 0, marginRight: 12 },
   statsTitle: { fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 2 },
   statsDescription: { fontSize: 11, lineHeight: 15 },
-  statsCount: { minWidth: 40, textAlign: 'center', fontSize: 28, fontWeight: '900' },
+  statValue: { minWidth: 44, textAlign: 'center', fontSize: 22, fontWeight: '900' },
 
   // --- SECTIONS ---
   sectionGap: { marginBottom: 10 },
@@ -943,25 +835,13 @@ const styles = StyleSheet.create({
 
   // --- MODALS (2px outline + 2px hard shadow — focal surfaces) ---
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  keyboardArea: { flex: 1, width: '100%' },
-  modalScrollContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 24 },
   locationModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: BORDER.thick, borderRadius: RADIUS.lg, padding: 16 },
-  formModal: { width: '100%', maxWidth: 410, alignSelf: 'center', borderWidth: BORDER.thick, borderRadius: RADIUS.lg, padding: 18 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   modalHeaderCopy: { flex: 1, minWidth: 0, marginRight: 12 },
   modalTitle: { fontSize: 17, lineHeight: 22, fontWeight: '900', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 3 },
   modalSubtitle: { fontSize: 11, lineHeight: 16 },
   locationMapFrame: { height: 230, overflow: 'hidden', borderRadius: RADIUS.md, borderWidth: BORDER.thin, marginBottom: 10 },
   locationPrivacy: { fontSize: 10, lineHeight: 15, marginBottom: 15 },
-  editAvatarButton: { alignSelf: 'center', alignItems: 'center', marginBottom: 18 },
-  editAvatarImage: { width: 70, height: 70, borderRadius: 35, borderWidth: BORDER.thin, marginBottom: 7 },
-  editAvatarPlaceholder: { width: 70, height: 70, borderRadius: 35, borderWidth: BORDER.thin, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
-  changePhotoText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  inputLabel: { fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.7, marginLeft: 1, marginBottom: 6 },
-  input: { minHeight: 46, borderWidth: BORDER.thin, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, marginBottom: 14 },
-  twoColumnRow: { flexDirection: 'row', marginHorizontal: -4 },
-  halfField: { flex: 1, marginHorizontal: 4 },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   flexOne: { flex: 1 },
 
   // --- FEEDBACK MODAL ---

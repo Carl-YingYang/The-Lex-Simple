@@ -1,4 +1,7 @@
-# AI ROUTER VERSION: 6.3.5
+# AI ROUTER VERSION: 6.3.6
+# Task C1: iisa ang client IP source (request.client.host, pareho ng
+# slowapi), dual quota counting (install + ip + global sa bawat request),
+# at refund ng quota slots kapag nag-fail ang analysis.
 import copy
 import hashlib
 import hmac
@@ -30,6 +33,7 @@ from db.usage_store import (
     get_usage,
     install_quota_key,
     ip_quota_key,
+    release_daily_quota,
     usage_reset_at,
 )
 from services.dictionary_repository import get_dictionary_entry
@@ -65,70 +69,115 @@ def _valid_install_id(request: Request) -> Optional[str]:
 
 
 def _client_ip(request: Request) -> str:
-    """Totoong client IP — X-Forwarded-For muna (ngrok/reverse proxy),
-    fallback sa socket address."""
-    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
+    """Client IP mula sa socket — iisa ang pinagkukunan ng IP (Task C1).
+
+    Pareho ito ng ginagamit ng slowapi (get_remote_address =
+    request.client.host), kaya pantay ang IP ng slowapi rate limits at ng
+    daily quota. Tanggal na ang X-Forwarded-For na pagbasa — spoofable
+    iyon, at sa deployment ang `uvicorn --proxy-headers` (may
+    forwarded-allow-ips) ang bahalang itakda ang request.client mula sa
+    pinagkakatiwalaang proxy (hal. ngrok).
+    """
     return request.client.host if request.client else "unknown"
 
 
-def _quota_plan(request: Request) -> Tuple[str, int]:
-    """Task B1: (quota_key, limit) — install key kapag valid ang
-    X-Install-Id, IP-fallback key (may sariling limit) kapag wala."""
-    install_id = _valid_install_id(request)
-    if install_id:
-        return install_quota_key(install_id), DAILY_DOC_LIMIT
-    return ip_quota_key(_client_ip(request)), DAILY_IP_DOC_LIMIT
+def _quota_limit_error(quota: dict, code: str) -> HTTPException:
+    """429 na may code + Filipino message + resetAt (pareho ng Task B1)."""
+    messages = {
+        "daily_limit_reached": (
+            "Abot na ang pang-araw-araw na limit sa scans. "
+            "Bumabalik ang quota bukas ng 12:00 AM (Philippine time)."
+        ),
+        "global_limit_reached": (
+            "Abot na ang kabuuang pang-araw-araw na limit ng server. "
+            "Subukan ulit bukas ng 12:00 AM (Philippine time)."
+        ),
+    }
+    return HTTPException(
+        status_code=429,
+        detail={
+            "code": code,
+            "message": messages[code],
+            "resetAt": str(quota.get("resetAt") or ""),
+        },
+    )
 
 
-def _enforce_daily_quota(request: Request) -> None:
-    """Task B1: daily quota — LAGING naka-enforce, hiwalay sa analytics.
+def _bump_quota(quota_key: str, limit: int) -> Optional[dict]:
+    """Check-and-increment ng isang quota key (may fail-open).
 
-    - Valid X-Install-Id → sha256(salt+install_id) key sa DAILY_DOC_LIMIT.
-    - Walang valid id → sha256(salt+"ip:"+client_ip) key sa DAILY_IP_DOC_LIMIT.
-    - X-Analytics: 0 ay HINDI lumalaktaw sa quota; ang laktawan lang ay ang
-      pag-write sa installs table (touch_install middleware sa main.py).
-    - Pagkatapos ng per-install check, tinitingnan ang global daily cap
-      (GLOBAL_DAILY_DOC_LIMIT) na may espesyal na key sa daily_usage.
-    - Error sa usage DB: fail-open (hindi sagabal ang tracking outage).
+    Kapag down ang usage DB, fail-open (Task B1): hindi sagabal sa user
+    ang tracking outage, at walang key na ma-consume (wala ring refund).
     """
     try:
-        quota_key, limit = _quota_plan(request)
-        quota = consume_daily_quota(quota_key, limit)
+        return consume_daily_quota(quota_key, limit)
     except Exception as error:
         print(f"[QUOTA] Usage store unavailable ({type(error).__name__}); fail-open.")
-        return
-    if not quota.get("allowed"):
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "daily_limit_reached",
-                "message": (
-                    "Abot na ang pang-araw-araw na limit sa scans. "
-                    "Bumabalik ang quota bukas ng 12:00 AM (Philippine time)."
-                ),
-                "resetAt": str(quota.get("resetAt") or ""),
-            },
-        )
+        return None
 
-    try:
-        global_quota = consume_daily_quota(GLOBAL_QUOTA_KEY, GLOBAL_DAILY_DOC_LIMIT)
-    except Exception as error:
-        print(f"[QUOTA] Global cap unavailable ({type(error).__name__}); fail-open.")
-        return
-    if not global_quota.get("allowed"):
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "global_limit_reached",
-                "message": (
-                    "Abot na ang kabuuang pang-araw-araw na limit ng server. "
-                    "Subukan ulit bukas ng 12:00 AM (Philippine time)."
-                ),
-                "resetAt": str(global_quota.get("resetAt") or ""),
-            },
-        )
+
+def _refund_quota_keys(quota_keys: List[str]) -> None:
+    """Task C1.3: isauli ang mga quota slot ng request na hindi natuloy.
+
+    Best-effort lang — ang bumagsak na refund ay hindi na hahadlang pa sa
+    request (nag-fail na nga ang processing).
+    """
+    for quota_key in quota_keys:
+        try:
+            release_daily_quota(quota_key)
+        except Exception as error:
+            print(f"[QUOTA] Refund skipped for a key ({type(error).__name__}).")
+
+
+def _enforce_daily_quota(request: Request) -> List[str]:
+    """Task C1: dual counting + refundable daily quota.
+
+    SA BAWAT request (Task C1.2), tatlong key ang binibilang — hindi na
+    'install OR ip' kundi 'install (kapag may valid id) AND ip AND global':
+    - install key = sha256(salt + install_id) sa DAILY_DOC_LIMIT
+      (kapag may valid na X-Install-Id);
+    - ip key      = sha256(salt + "ip:" + client_ip) sa DAILY_IP_DOC_LIMIT
+      — PALAGI, may o walang install id;
+    - global key  = espesyal na key sa GLOBAL_DAILY_DOC_LIMIT.
+
+    Kapag may bumagsak na check, ang mga key na na-consume na bago pa ito
+    ay nirerefund agad (Task C1.3): hal. pumasa ang install check pero
+    puno na ang ip o global slot — maisasauli ang install slot.
+
+    X-Analytics: 0 ay HINDI lumalaktaw sa quota; ang laktawan lang ay ang
+    pag-write sa installs table (touch_install middleware sa main.py).
+
+    Returns: listahan ng mga quota key na na-consume ng request na ito —
+    gagamitin ng caller (/simplify) para i-refund kung mag-fail ang LLM
+    call. Walang laman ang listahan kapag fail-open (down ang usage DB).
+    """
+    consumed_keys: List[str] = []
+
+    install_id = _valid_install_id(request)
+    if install_id:
+        install_key = install_quota_key(install_id)
+        install_quota = _bump_quota(install_key, DAILY_DOC_LIMIT)
+        if install_quota is not None:
+            if not install_quota.get("allowed"):
+                raise _quota_limit_error(install_quota, "daily_limit_reached")
+            consumed_keys.append(install_key)
+
+    ip_key = ip_quota_key(_client_ip(request))
+    ip_quota = _bump_quota(ip_key, DAILY_IP_DOC_LIMIT)
+    if ip_quota is not None:
+        if not ip_quota.get("allowed"):
+            _refund_quota_keys(consumed_keys)  # Task C1.3: isauli ang install slot
+            raise _quota_limit_error(ip_quota, "daily_limit_reached")
+        consumed_keys.append(ip_key)
+
+    global_quota = _bump_quota(GLOBAL_QUOTA_KEY, GLOBAL_DAILY_DOC_LIMIT)
+    if global_quota is not None:
+        if not global_quota.get("allowed"):
+            _refund_quota_keys(consumed_keys)  # Task C1.3: install + ip slots
+            raise _quota_limit_error(global_quota, "global_limit_reached")
+        consumed_keys.append(GLOBAL_QUOTA_KEY)
+
+    return consumed_keys
 
 class SanitizedPageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -443,8 +492,15 @@ def _analyze_and_attach_input_meta(text: str, input_meta: dict) -> dict:
 @limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
 def simplify_text(request: Request, payload: LegalRequest):
     combined_text, input_meta = _prepare_legal_input(payload)
-    _enforce_daily_quota(request)
-    return _analyze_and_attach_input_meta(combined_text, input_meta)
+    consumed_keys = _enforce_daily_quota(request)
+    try:
+        return _analyze_and_attach_input_meta(combined_text, input_meta)
+    except Exception:
+        # Task C1.3: nag-fail ang analysis (LLM exception/5xx) — isauli
+        # ang install, ip, at global slots na na-consume ng request na
+        # ito, tapos ipasa ang error nang hindi binabago ang response.
+        _refund_quota_keys(consumed_keys)
+        raise
 
 
 @router.post("/simplify_file")
