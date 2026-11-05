@@ -45,7 +45,17 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
   const { colors: T } = useTheme();
 
   const shouldTruncate = item.foundText.length > 120;
-  const hasRelatedContext = Boolean(ragContext?.trim() && !ragContext.includes('NO VERIFIED LEGAL CONTEXT FOUND'));
+  // v7.1.0 — per-chunk na ang check (hindi buong string). Dati, kahit
+  // ISANG "NO VERIFIED..." chunk lang ang nakahalo sa naka-save na
+  // context, nagtatago na agad ang buong button kahit may totoong
+  // sanggunian. Ngayon: sapat na na may KAHIT ISANG totoong chunk.
+  const relatedChunks = (ragContext ?? '')
+      .split(/\n\s*---\s*\n/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean);
+  const hasRelatedContext = relatedChunks.some(
+      (chunk) => !chunk.includes('NO VERIFIED LEGAL CONTEXT FOUND')
+  );
   const confidence = typeof item.confidence === 'string' && /^(?:100|[1-9]?\d)%$/.test(item.confidence.trim())
     ? item.confidence.trim()
     : null;

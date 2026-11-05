@@ -660,7 +660,10 @@ export default function ResultScreen({ route, navigation }: any) {
         const chunks = context
             .split(/\n\s*---\s*\n/g)
             .map((chunk) => chunk.trim())
-            .filter(Boolean);
+            .filter(Boolean)
+            // Huwag isama ang mga "walang nahanap" marker chunk sa
+            // pagpili ng pinaka-kaugnay na sanggunian.
+            .filter((chunk) => !chunk.includes('NO VERIFIED LEGAL CONTEXT FOUND'));
         const keywords = `${finding.title} ${finding.description} ${finding.foundText}`
             .toLocaleLowerCase()
             .replace(/[^a-z0-9\s]/g, ' ')
@@ -969,18 +972,33 @@ export default function ResultScreen({ route, navigation }: any) {
 
                     {noFindings ? (
                         <View style={styles.noFindingsRow}>
-                            <Ionicons
-                                name="document-text-outline"
-                                size={25}
-                                color={riskConfig.mainColor}
-                            />
+                            <View
+                                style={[
+                                    styles.noFindingsIconBox,
+                                    { backgroundColor: T.brandSoft },
+                                ]}
+                            >
+                                <Ionicons
+                                    name="shield-checkmark-outline"
+                                    size={22}
+                                    color={riskConfig.mainColor}
+                                />
+                            </View>
                             <Text
                                 style={[
                                     styles.noFindingsValue,
                                     { color: T.text },
                                 ]}
                             >
-                                0 na-flag
+                                Walang na-flag
+                            </Text>
+                            <Text
+                                style={[
+                                    styles.noFindingsSub,
+                                    { color: T.subText },
+                                ]}
+                            >
+                                Walang nakitang clause na kailangang bantayan sa dokumento
                             </Text>
                         </View>
                     ) : (
@@ -1007,9 +1025,7 @@ export default function ResultScreen({ route, navigation }: any) {
                     )}
 
                     {/* v8.0.0 — score meter (flat, proportional: walang
-                        gradient, solid fill lang) + quick stats row: kita
-                        agad ang basehan ng score bago pa pumasok sa
-                        findings. */}
+                        gradient, solid fill lang). */}
                     {!noFindings && result.score !== null && (
                         <View
                             style={[
@@ -1026,37 +1042,6 @@ export default function ResultScreen({ route, navigation }: any) {
                             <View style={{ flex: Math.max(0, 100 - result.score) }} />
                         </View>
                     )}
-                    <View style={styles.scoreStatsRow}>
-                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
-                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
-                                FINDINGS
-                            </Text>
-                            <Text style={[styles.scoreStatValue, { color: T.text }]}>
-                                {result.findings.length}
-                            </Text>
-                        </View>
-                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
-                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
-                                BAWAS
-                            </Text>
-                            <Text
-                                style={[
-                                    styles.scoreStatValue,
-                                    { color: result.score === null ? T.subText : T.danger },
-                                ]}
-                            >
-                                {result.score === null ? '—' : `-${totalDeduction}`}
-                            </Text>
-                        </View>
-                        <View style={[styles.scoreStatBox, { backgroundColor: T.bg, borderColor: T.border }]}>
-                            <Text style={[styles.scoreStatLabel, { color: T.subText }]}>
-                                DETALYE
-                            </Text>
-                            <Text style={[styles.scoreStatValue, { color: T.text }]}>
-                                {result.keyClauses.length}
-                            </Text>
-                        </View>
-                    </View>
 
                     <Text
                         style={[
@@ -1324,7 +1309,6 @@ export default function ResultScreen({ route, navigation }: any) {
                 visible={scoreModalVisible}
                 transparent
                 animationType="fade"
-                statusBarTranslucent
                 onRequestClose={() => setScoreModalVisible(false)}
             >
                 <View style={[styles.modalBackdrop, { backgroundColor: T.overlay }]}>
@@ -1967,15 +1951,29 @@ const styles = StyleSheet.create({
     },
     noFindingsRow: {
         minHeight: 73,
-        flexDirection: 'row',
-        justifyContent: 'center',
         alignItems: 'center',
-        gap: 10,
+        paddingTop: 5,
+    },
+    noFindingsIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: RADIUS.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 8,
     },
     noFindingsValue: {
         fontSize: 24,
         lineHeight: 31,
         fontWeight: '900',
+        textAlign: 'center',
+    },
+    noFindingsSub: {
+        marginTop: 3,
+        fontSize: 12,
+        lineHeight: 16,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     scoreValue: {
         fontSize: 68,
@@ -2001,7 +1999,7 @@ const styles = StyleSheet.create({
         lineHeight: 15,
         fontWeight: '800',
     },
-    // v8.0.0 — flat score meter + quick stats row ng hero card.
+    // v8.0.0 — flat score meter ng hero card (tanggal na ang quick stats row).
     scoreMeterTrack: {
         marginTop: 14,
         height: 12,
@@ -2009,31 +2007,6 @@ const styles = StyleSheet.create({
         borderRadius: RADIUS.sm,
         overflow: 'hidden',
         flexDirection: 'row',
-    },
-    scoreStatsRow: {
-        marginTop: 13,
-        flexDirection: 'row',
-        gap: 8,
-    },
-    scoreStatBox: {
-        flex: 1,
-        borderWidth: BORDER.thin,
-        borderRadius: RADIUS.sm,
-        alignItems: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 4,
-    },
-    scoreStatLabel: {
-        fontSize: 9,
-        lineHeight: 12,
-        fontWeight: '800',
-        letterSpacing: 0.8,
-    },
-    scoreStatValue: {
-        marginTop: 2,
-        fontSize: 15,
-        lineHeight: 19,
-        fontWeight: '900',
     },
     privacyCard: {
         marginTop: 12,

@@ -924,7 +924,12 @@ def _request_chunk_json(
 
 
 def _deduplicate_clauses(clauses: List[dict]) -> List[dict]:
-    deduplicated: Dict[str, dict] = {}
+    # Fix: tinatanggap na rin ang PAREHONG title bilang duplicate kahit
+    # magkaiba ang quoted text (hal. hati ang clause sa dalawang page o
+    # muling in-quote ng LLM nang bahagyang iba). Dati, kapag magkaiba ang
+    # original_text, lumulusot ang halos kambal na finding (hal. dalawang
+    # "Landlord Entry Rights") sa result list at sa score modal.
+    deduplicated: List[dict] = []
 
     for clause in clauses:
         source_text = _normalize_comparison_text(
@@ -933,23 +938,40 @@ def _deduplicate_clauses(clauses: List[dict]) -> List[dict]:
         title = _normalize_comparison_text(
             str(clause.get("clause_title", ""))
         )
-        key = source_text or f"title:{title}"
 
-        if not key:
+        # Walang text at walang title = walang silbing finding, laktawan.
+        if not source_text and not title:
             continue
 
-        existing = deduplicated.get(key)
-        if not existing:
-            deduplicated[key] = clause
-            continue
+        duplicate = next(
+            (
+                existing
+                for existing in deduplicated
+                if (
+                    source_text
+                    and source_text == _normalize_comparison_text(
+                        str(existing.get("original_text", ""))
+                    )
+                )
+                or (
+                    title
+                    and title == _normalize_comparison_text(
+                        str(existing.get("clause_title", ""))
+                    )
+                )
+            ),
+            None,
+        )
 
-        if clause.get("score_deduction", 0) > existing.get(
+        if duplicate is None:
+            deduplicated.append(clause)
+        elif clause.get("score_deduction", 0) > duplicate.get(
             "score_deduction",
             0,
         ):
-            deduplicated[key] = clause
+            duplicate.update(clause)
 
-    return list(deduplicated.values())
+    return deduplicated
 
 
 def _combine_chunk_results(
@@ -1032,6 +1054,10 @@ def _combine_chunk_results(
                 result.get("ragContext", "")
                 for result in chunk_results
                 if result.get("ragContext")
+                # Huwag isama ang "walang nahanap" marker sa naka-save
+                # na string — dahil nagtatago ang mobile na button
+                # kapag nakikita ang marker kahit may totoong laman.
+                and "NO VERIFIED LEGAL CONTEXT FOUND" not in result["ragContext"]
             )
         ),
     }
