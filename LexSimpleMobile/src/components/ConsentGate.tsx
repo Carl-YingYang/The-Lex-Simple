@@ -38,9 +38,9 @@ const CONSENT_KEY = '@lex_privacy_consent_v1';
 const PRIVACY_POLICY_URL = 'https://example.com/lex-simple-privacy-policy';
 
 const CONSENT_POINTS = [
-    'Nananatili sa device mo ang mga na-scan na imahe.',
-    'Kapag nagpa-analyze, teksto lang ang ipinapadala — hindi ang imahe o buong dokumento.',
-    'Bilang ng scans lang ang naitatala sa server (naka-hash na install ID) para sa daily limit.',
+    'Nananatili sa phone mo ang mga larawang na-scan. Sa phone din binabasa at nililinis ang text.',
+    'Kapag ipinasuri mo sa AI, ang nilinis na text lang ang ipinapadala sa AI service. Kapag nag-upload ka ng PDF o DOCX, pansamantalang ipinapadala ang file sa server namin para mabasa ang text, at binubura ito pagkatapos.',
+    'May naitatalang bilang ng paggamit (naka-hash na ID, hindi ang laman ng dokumento) para sa daily limit. Pwede mong i-off ang analytics sa Settings. Walang account o email na hinihingi.',
 ];
 
 export default function ConsentGate() {
@@ -87,7 +87,7 @@ export default function ConsentGate() {
     const handleDecline = useCallback((): void => {
         showGlobalAlert(
             'Hindi pa tayo makatuloy',
-            'Kailangang sumang-ayon ka muna sa privacy notice bago magamit ang app. Walang hinihinging personal na impormasyon ang pag-sang-ayon.',
+            'Kailangang sumang-ayon ka muna sa privacy notice bago magamit ang app. Walang hinihinging personal na impormasyon ang pagsang-ayon.',
             'info',
             [{ text: 'OK', style: 'cancel' }]
         );

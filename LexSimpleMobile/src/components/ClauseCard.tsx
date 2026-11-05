@@ -57,7 +57,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
     const t = item.title.toLowerCase();
     if (t.match(/payment|fee|interest|rent|bayad|price|cost|penalty/)) return ["May hidden charges ba rito?", "Ano mangyayari kung ma-late ako ng bayad?", "Pwede ba itong i-negotiate?"];
     if (t.match(/terminate|cancel|end|alis|evict|rescind/)) return ["May penalty ba kung i-cancel ko ito?", "Ilang days ang kailangang notice?", "Paano ko ito tatapusin nang legal?"];
-    if (t.match(/liability|damage|risk|sira|indemnify|responsibility/)) return ["Sino ang magbabayad kapag may nasira?", "Ano ang worst-case scenario rito?", "Paano ko lilimitahan ang risk ko?"];
+    if (t.match(/liability|damage|risk|sira|indemnify|responsibility/)) return ["Sino ang magbabayad kapag may nasira?", "Ano ang worst-case scenario rito?", "Paano ko ito maiiwasan?"];
     if (t.match(/confidential|data|privacy|secret/)) return ["Ligtas ba ang personal info ko rito?", "Kanino nila pwedeng i-share ang data ko?", "Pwede ko ba itong ipabura?"];
     if (t.match(/default|breach|violation|labag|entry|access/)) return ["Ano ang mangyayari kung lumabag ako rito?", "Legal ba ang ginagawa nilang ito?", "Paano ko ito maiiwasan?"];
     return [`Ano ang ibig sabihin ng ${item.title}?`, "Ano ang dapat kong linawin?", "Paki-explain nang mas simple."];
@@ -87,7 +87,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
         <Text style={[styles.adviceText, { color: T.text }]}>{item.advice}</Text>
       </View>
 
-      <Text style={[styles.label, { color: T.subText }]}>Original Clause (OCR)</Text>
+      <Text style={[styles.label, { color: T.subText }]}>Original Clause (nabasang text)</Text>
       <View style={[styles.snippetBox, { backgroundColor: T.bg, borderColor: T.ink }]}>
         <Text style={[styles.snippetText, { color: T.subText }]}>"{displaySnippet}"</Text>
         {shouldTruncate && (
@@ -111,7 +111,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
 
       {/* ASK AI SECTION */}
       <View style={[styles.askAiSection, { borderTopColor: T.border }]}>
-        <Text style={[styles.askAiLabel, { color: T.subText }]}>Tanungin ang Lex Insight tungkol dito</Text>
+        <Text style={[styles.askAiLabel, { color: T.subText }]}>Tanungin ang Lexie tungkol dito</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptsScroll}>
           {dynamicPrompts.map((prompt, i) => (
@@ -136,7 +136,7 @@ export default function ClauseCard({ item, themeConfig, ragContext, onShowLegalB
           onPress={() => onAskAiDeepDive(item, undefined, dynamicPrompts)}
         >
           <Image source={MessageAiIcon} style={[styles.btnIcon, { tintColor: T.brandText }]} resizeMode="contain" />
-          <Text style={[styles.discussBtnText, { color: T.brandText }]}>Buksan sa Lex Insight</Text>
+          <Text style={[styles.discussBtnText, { color: T.brandText }]}>Buksan sa Lexie</Text>
         </TouchableOpacity>
       </View>
     </View>

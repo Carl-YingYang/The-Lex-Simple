@@ -340,7 +340,7 @@ const buildQuotaLimitMessage = (info: {
     if (info.code === 'global_limit_reached') {
         return `Abot na ang kabuuang pang-araw-araw na limit ng server ngayong araw. Subukan ulit bukas ng ${resetLabel}.`;
     }
-    return `Abot na ang pang-araw-araw na limit mo sa scans. Bumabalik ang quota bukas ng ${resetLabel}.`;
+    return `Abot na ang pang-araw-araw na limit mo sa pagsusuri. Bumabalik ang quota bukas ng ${resetLabel}.`;
 };
 
 const request = async <TResponse>(
