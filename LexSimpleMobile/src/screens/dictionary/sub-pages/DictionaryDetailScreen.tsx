@@ -1,7 +1,19 @@
-// DICTIONARY DETAIL SCREEN VERSION: 8.0.0 — PURPLE NEO-BRUTALISM SPEC
+// DICTIONARY DETAIL SCREEN VERSION: 8.1.0 — PURPLE NEO-BRUTALISM SPEC
 // (UI-flow lang ang nagbago; walang binagong AI/storage/network logic)
 // Spec: purple system (zero na ang asul/dilaw/gold/orange), 1.5px standard
 // borders, 2px sa CTA, 2–6px radius (squared), predominantly FLAT.
+// Pagbabago sa UI (v8.1.0):
+//   - FIX sa nakikita sa screenshot: habang kumukuha pa lang ng AI
+//     paliwanag, ang CTA ay may ITIM na fill (open state na kasi agad ang
+//     setActiveAiKey) tapos ITIM ding spinner ang laman — itim sa itim,
+//     kaya blangkong itim na pindutan ang nakikita ng user. Ngayon:
+//     loading = nananatiling purple ang fill (kita ang itim na spinner),
+//     open = ink fill, idle = purple fill. Walang binago sa flow.
+//   - Ang "System Notification" entry (Welcome sa Lex-Simple) ay hindi na
+//     nire-render na parang legal term (may "LEGAL TEXT" box at AI CTA
+//     pa dati). May sarili na siyang welcome notice card: lavender
+//     surface, sparkle chip, mensahe + paalala — walang AI CTA dahil
+//     hindi naman ito legal term na ipapaliwanag sa AI.
 // Pagbabago sa UI (v8.0.0):
 //   - "Simpleng paliwanag" (AI explanation) — dating inline box sa card,
 //     NGAYON: centered modal (RN Modal transparent + scrim na T.overlay).
@@ -309,6 +321,83 @@ export default function DictionaryDetailScreen({
         const isLoading = loadingAiKey === itemKey;
         const isAiOpen = activeAiKey === itemKey;
         const definition = legalText(item) || 'Walang legal text na available.';
+
+        // "System Notification" (Welcome sa Lex-Simple) — hindi ito legal
+        // term, kaya hindi dapat may "LEGAL TEXT" box at AI CTA. Maikling
+        // welcome notice card lang ang tamang itsura nito.
+        const isWelcomeNotice =
+            String(item.legal_basis || '')
+                .trim()
+                .toLowerCase() === 'system notification';
+
+        if (isWelcomeNotice) {
+            return (
+                <View
+                    style={[
+                        styles.welcomeCard,
+                        {
+                            backgroundColor: T.brandSoft,
+                            borderColor: T.ink,
+                        },
+                        getNeoShadow(T, 'sm'),
+                    ]}
+                >
+                    <View style={styles.welcomeHeader}>
+                        <View
+                            style={[
+                                styles.welcomeChip,
+                                {
+                                    backgroundColor: T.card,
+                                    borderColor: T.ink,
+                                },
+                            ]}
+                        >
+                            <Ionicons
+                                name="sparkles-outline"
+                                size={15}
+                                color={T.brandDeep}
+                            />
+                        </View>
+                        <View style={styles.welcomeHeading}>
+                            <Text
+                                style={[styles.welcomeTitle, { color: T.text }]}
+                                selectable
+                            >
+                                {item.term || 'Welcome'}
+                            </Text>
+                            <Text
+                                style={[
+                                    styles.welcomeBadge,
+                                    { color: T.brandDeep },
+                                ]}
+                            >
+                                {item.legal_basis || 'System Notification'}
+                            </Text>
+                        </View>
+                    </View>
+
+                    <View
+                        style={[styles.welcomeRule, { backgroundColor: T.ink }]}
+                    />
+
+                    <Text
+                        style={[styles.welcomeBody, { color: T.text }]}
+                        selectable
+                    >
+                        {definition}
+                    </Text>
+
+                    {item.example ? (
+                        <Text
+                            style={[styles.welcomeHint, { color: T.brandDeep }]}
+                        >
+                            {String(item.example)}
+                        </Text>
+                    ) : null}
+                </View>
+            );
+        }
+
         const shouldTruncate = definition.length > 350;
         const displayText =
             !isExpanded && shouldTruncate
@@ -387,18 +476,21 @@ export default function DictionaryDetailScreen({
                         )}
 
                         {/* AI CTA — purple fill + itim na label (spec CTA,
-                            2px ink border). Open state = ink fill na may
-                            baligtad na kulay ng content. Loading =
-                            spinner sa loob ng purple fill. Kapag may
-                            laman na ang paliwanag, dito bumubukas ang
-                            centered modal. */}
+                            2px ink border). Loading = nananatiling purple
+                            ang fill para KITA ang itim na spinner (dating
+                            itim sa itim — blangkong itim na pindutan ang
+                            nakikita ng user habang kumukuha pa). Open =
+                            ink fill na may baligtad na kulay ng content.
+                            Kapag may laman na ang paliwanag, dito
+                            bumubukas ang centered modal. */}
                         <TouchableOpacity
                             style={[
                                 styles.aiButton,
                                 {
-                                    backgroundColor: isAiOpen
-                                        ? T.ink
-                                        : T.brand,
+                                    backgroundColor:
+                                        isAiOpen && !isLoading
+                                            ? T.ink
+                                            : T.brand,
                                     borderColor: T.ink,
                                 },
                                 Boolean(loadingAiKey) &&
@@ -903,6 +995,60 @@ const styles = StyleSheet.create({
     },
     disabledButton: {
         opacity: 0.45,
+    },
+
+    // --- WELCOME NOTICE CARD ("System Notification" entry — hindi legal
+    //     term kaya walang LEGAL TEXT box at walang AI CTA; focal na
+    //     surface kaya may 2px hard shadow, pareho ng AI modal) ---
+    welcomeCard: {
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
+        padding: SPACING.md,
+    },
+    welcomeHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    welcomeChip: {
+        width: 30,
+        height: 30,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    welcomeHeading: {
+        flex: 1,
+        minWidth: 0,
+    },
+    welcomeTitle: {
+        fontSize: 16,
+        lineHeight: 21,
+        fontWeight: '900',
+    },
+    welcomeBadge: {
+        marginTop: 1,
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '800',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
+    },
+    welcomeRule: {
+        height: BORDER.thick,
+        marginTop: 10,
+        marginBottom: 10,
+    },
+    welcomeBody: {
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    welcomeHint: {
+        marginTop: SPACING.sm,
+        fontSize: 12,
+        lineHeight: 18,
+        fontWeight: '700',
     },
 
     // --- AI PALIWANAG MODAL (centered; scrim tap = sarado; card = 2px

@@ -116,7 +116,7 @@ const CANVAS = {
 // String to double"), kaya pixels ang unit ng buong sweep animation.
 const PROGRESS_SWEEP_WIDTH = 76;
 
-const AI_NOTICE_KEY = '@lex_ai_notice_v1';
+const AI_NOTICE_KEY = '@lex_ai_notice_v2';
 const makeGroupResult = (ocrPages: OcrPageResult[]): BatchOcrResult => {
     const successfulPages = ocrPages.map((page, index) => ({
         ...page,
@@ -1613,6 +1613,22 @@ export default function BatchEditScreen({
                         <Text style={[styles.noticeBody, { color: T.subText }]}>
                             Nilinis na text lang ang ipapadala sa AI, hindi ang larawan. Gabay sa pag-unawa ang resulta; hindi ito legal advice. Tingnan pa rin ang orihinal na dokumento bago magdesisyon.
                         </Text>
+                        <View
+                            style={[
+                                styles.noticeWarn,
+                                { backgroundColor: T.warningSoft, borderColor: T.ink },
+                            ]}
+                        >
+                            <Ionicons
+                                name="warning-outline"
+                                size={16}
+                                color={T.warning}
+                            />
+                            <Text style={[styles.noticeWarnText, { color: T.text }]}>
+                                Itinago na ang mga personal na detalye na nakita namin. Laging e double check muna bago ipa scan.
+                            </Text>
+                        </View>
+
                         <Pressable
                             onPress={() => { void acceptAiNotice(); }}
                             accessibilityRole="button"
@@ -2080,7 +2096,23 @@ const styles = StyleSheet.create({
     noticeBody: {
         fontSize: 14,
         lineHeight: 21,
+        marginBottom: 16,
+    },
+    // --- PAALALA SA PAGLILINIS (warning strip sa loob ng notice modal) ---
+    noticeWarn: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        borderWidth: BORDER.thin,
+        borderRadius: RADIUS.sm,
+        padding: 10,
         marginBottom: 22,
+    },
+    noticeWarnText: {
+        flex: 1,
+        fontSize: 13,
+        lineHeight: 18,
+        fontWeight: '600',
     },
     noticeProceed: {
         minHeight: 50,

@@ -4,6 +4,7 @@ import {
     Image,
     LogBox,
     Pressable,
+    StatusBar,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -19,7 +20,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { BackgroundProcessProvider } from '../context/BackgroundProcessContext';
+import ConsentGate from '../components/ConsentGate';
 import FloatingProcessIndicator from '../components/FloatingProcessIndicator';
+import GlobalAlertHost from '../components/GlobalAlertHost';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
 import { navigationRef } from './RootNavigation';
 import { migrateLegacyDataToGuest } from '../services/localDataScope';
@@ -41,9 +44,17 @@ import AboutScreen from '../screens/profile/sub-pages/AboutScreen';
 import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
 import BatchEditScreen from '../screens/home/sub-pages/BatchEditScreen';
 
-// APP NAVIGATOR VERSION: 3.0.0 — PURPLE NEO-BRUTALISM SPEC
+// APP NAVIGATOR VERSION: 3.1.0 — PURPLE NEO-BRUTALISM SPEC
 // (Routing, startup sequence, tab structure, at screen registry 1:1 pa
 // rin — UI lang ang binago.)
+// Pagbabago sa UI (v3.1.0):
+//   - Root StatusBar na naka-theme (dark-content sa light, light-content
+//     sa dark) — dati, walang global StatusBar kaya madilim pa rin ang
+//     status bar icons sa light mode (invisible sa ilang screen). Ang mga
+//     screen na may sariling StatusBar (camera canvas atbp.) ay nananatili
+//     — sadya silang madilim na media surfaces.
+//   - GlobalAlertHost: iisang themed popup style sa buong app.
+//   - ConsentGate: first-launch privacy consent modal.
 // Pagbabago sa UI (v3.0.0):
 //   - Landing loading ("Inihahanda ang saved scans…"): bare spinner sa
 //     hard-coded na asul-puting bg → branded boot state (LEX-SIMPLE
@@ -245,37 +256,53 @@ function NavigationContent() {
     };
 
     return (
-        <BackgroundProcessProvider>
-            <NavigationContainer
-                ref={navigationRef}
-                theme={navigationTheme}
-            >
-                <FloatingProcessIndicator />
-                <Stack.Navigator
-                    initialRouteName="Main"
-                    screenOptions={{ headerShown: false }}
+        <>
+            {/* Root StatusBar — theme-aware. Ang mga screen na may sariling
+                StatusBar (hal. camera canvas, process screens) ay nagtataas
+                pa rin ng sarili nila kapag mounted na sila. */}
+            <StatusBar
+                barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+            />
+            <BackgroundProcessProvider>
+                <NavigationContainer
+                    ref={navigationRef}
+                    theme={navigationTheme}
                 >
-                    <Stack.Screen name="Main" component={MainTabs} />
-                    <Stack.Screen name="ScannerScreen" component={ScannerScreen} />
-                    <Stack.Screen name="ResultScreen" component={ResultScreen} />
-                    <Stack.Screen name="DictionaryDetailScreen" component={DictionaryDetailScreen} />
-                    <Stack.Screen name="ConvertScreen" component={ConvertScreen} />
-                    <Stack.Screen name="AskAiScreen" component={AskAiScreen} />
-                    <Stack.Screen name="UploadImageScreen" component={UploadImageScreen} />
-                    <Stack.Screen name="OfflineDetailScreen" component={OfflineDetailScreen} />
-                    <Stack.Screen name="AboutScreen" component={AboutScreen} />
-                    <Stack.Screen name="LegalAidScreen" component={LegalAidScreen} />
-                    <Stack.Screen name="SanitizedOcrScreen" component={SanitizedOcrScreen} />
-                    <Stack.Screen name="BatchEditScreen" component={BatchEditScreen} />
-                </Stack.Navigator>
-            </NavigationContainer>
-        </BackgroundProcessProvider>
+                    <FloatingProcessIndicator />
+                    <Stack.Navigator
+                        initialRouteName="Main"
+                        screenOptions={{ headerShown: false }}
+                    >
+                        <Stack.Screen name="Main" component={MainTabs} />
+                        <Stack.Screen name="ScannerScreen" component={ScannerScreen} />
+                        <Stack.Screen name="ResultScreen" component={ResultScreen} />
+                        <Stack.Screen name="DictionaryDetailScreen" component={DictionaryDetailScreen} />
+                        <Stack.Screen name="ConvertScreen" component={ConvertScreen} />
+                        <Stack.Screen name="AskAiScreen" component={AskAiScreen} />
+                        <Stack.Screen name="UploadImageScreen" component={UploadImageScreen} />
+                        <Stack.Screen name="OfflineDetailScreen" component={OfflineDetailScreen} />
+                        <Stack.Screen name="AboutScreen" component={AboutScreen} />
+                        <Stack.Screen name="LegalAidScreen" component={LegalAidScreen} />
+                        <Stack.Screen name="SanitizedOcrScreen" component={SanitizedOcrScreen} />
+                        <Stack.Screen name="BatchEditScreen" component={BatchEditScreen} />
+                    </Stack.Navigator>
+                </NavigationContainer>
+            </BackgroundProcessProvider>
+        </>
     );
 }
 
 export default function AppNavigator() {
     return (
         <ThemeProvider>
+            {/* First-launch privacy consent — harangan hanggang sumang-ayon. */}
+            <ConsentGate />
+            {/* Iisang themed popup para sa buong app (showGlobalAlert).
+                Nakalagay pagkatapos ng ConsentGate para ang mga alert
+                (hal. "Hindi pa tayo makatuloy") ay lumilitaw SA IBABAW ng
+                consent modal — ang huling naka-mount na Modal ang nasa
+                taas sa modal stacking. */}
+            <GlobalAlertHost />
             <NavigationContent />
         </ThemeProvider>
     );

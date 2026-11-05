@@ -19,11 +19,27 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { COLORS } from '../theme/globalStyles';
+import { getNeoShadow } from './Neo';
 import { useTheme } from '../theme/ThemeContext';
+import { BORDER, RADIUS, SPACING, type ThemeColors } from '../theme/tokens';
 
-// CUSTOM ALERT VERSION: 1.0.0
-// Sharp, accessible notification modal with safe action handling.
+// CUSTOM ALERT VERSION: 2.0.0
+// 2.0.0: TUNAY NA NEO-BRUTALISM (purple spec) — hindi na "soft dialog".
+// Iisang popup itsura ang buong app dahil lahat ng popup (useCustomAlert
+// hook + GlobalAlertHost) ay dumadaan sa component na ito:
+//   - Card: 2px ink border (BORDER.thick), squared 6px radius
+//     (RADIUS.lg), HARD shadow na walang blur (getNeoShadow 'md') —
+//     pareho ng AI paliwanag modal ng DictionaryDetailScreen.
+//   - Ink rule divider sa ilalim ng header (signature na pattern).
+//   - Icon chip: squared (3px), 1.5px ink border, soft bg mula sa tokens.
+//   - Title: ALL-CAPS via textTransform, weight 900.
+//   - Buttons: squared (4px), 2px borders — primary = purple fill +
+//     itim na label (spec CTA), cancel = card fill + ink border,
+//     destructive = dangerSoft fill + danger border.
+//   - Lahat ng kulay galing sa theme tokens — light/dark auto-adjust.
+// WALANG binago sa API: { visible, title, message, type, buttons, onClose }
+// at ang useCustomAlert() hook — 1:1 pa rin lahat ng existing callsites.
+// (1.1.0: theme tokens re-skin; 1.0.0: orihinal na soft dialog.)
 export type AlertType =
     | 'success'
     | 'error'
@@ -52,32 +68,41 @@ type AlertConfig = {
     backgroundColor: string;
 };
 
-const ALERT_CONFIG: Record<AlertType, AlertConfig> = {
-    success: {
-        icon: 'checkmark',
-        color: COLORS.success,
-        backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    },
-    error: {
-        icon: 'close',
-        color: COLORS.danger,
-        backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    },
-    warning: {
-        icon: 'alert-outline',
-        color: COLORS.warning,
-        backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    },
-    info: {
-        icon: 'information-outline',
-        color: COLORS.primaryLight,
-        backgroundColor: 'rgba(52, 120, 246, 0.12)',
-    },
-    loading: {
-        icon: 'hourglass-outline',
-        color: COLORS.primaryLight,
-        backgroundColor: 'rgba(52, 120, 246, 0.12)',
-    },
+// Theme-aware na config — galing lahat sa tokens (walang hardcoded hex).
+const getAlertConfig = (type: AlertType, T: ThemeColors): AlertConfig => {
+    switch (type) {
+        case 'success':
+            return {
+                icon: 'checkmark',
+                color: T.success,
+                backgroundColor: T.successSoft,
+            };
+        case 'error':
+            return {
+                icon: 'close',
+                color: T.danger,
+                backgroundColor: T.dangerSoft,
+            };
+        case 'warning':
+            return {
+                icon: 'alert-outline',
+                color: T.warning,
+                backgroundColor: T.warningSoft,
+            };
+        case 'loading':
+            return {
+                icon: 'hourglass-outline',
+                color: T.info,
+                backgroundColor: T.infoSoft,
+            };
+        case 'info':
+        default:
+            return {
+                icon: 'information-outline',
+                color: T.info,
+                backgroundColor: T.infoSoft,
+            };
+    }
 };
 
 const cleanLabel = (value: unknown, fallback: string): string => {
@@ -154,7 +179,10 @@ export default function CustomAlert({
 }: CustomAlertProps) {
     const { colors: T } = useTheme();
     const actionLockedRef = useRef(false);
-    const alertConfig = ALERT_CONFIG[type] ?? ALERT_CONFIG.info;
+    const alertConfig = useMemo(
+        () => getAlertConfig(type, T),
+        [type, T]
+    );
     const isLoading = type === 'loading';
     const displayTitle = cleanLabel(title, 'Abiso');
     const displayMessage = cleanLabel(
@@ -220,7 +248,10 @@ export default function CustomAlert({
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <TouchableOpacity
-                    style={styles.overlay}
+                    style={[
+                        styles.overlay,
+                        { backgroundColor: T.overlay },
+                    ]}
                     activeOpacity={1}
                     onPress={isLoading ? undefined : closeAlert}
                     accessibilityRole="button"
@@ -230,16 +261,18 @@ export default function CustomAlert({
                 >
                     <TouchableWithoutFeedback>
                         <View
-                            testID="custom-alert-v1"
+                            testID="custom-alert-v2"
                             accessibilityViewIsModal
                             style={[
                                 styles.card,
                                 {
                                     backgroundColor: T.card,
-                                    borderColor: T.border,
+                                    borderColor: T.ink,
                                 },
+                                getNeoShadow(T, 'md'),
                             ]}
                         >
+                            {/* HEADER — icon chip + ALL-CAPS title */}
                             <View style={styles.header}>
                                 <View
                                     style={[
@@ -247,6 +280,7 @@ export default function CustomAlert({
                                         {
                                             backgroundColor:
                                                 alertConfig.backgroundColor,
+                                            borderColor: T.ink,
                                         },
                                     ]}
                                 >
@@ -259,7 +293,7 @@ export default function CustomAlert({
                                     ) : (
                                         <Ionicons
                                             name={alertConfig.icon}
-                                            size={21}
+                                            size={19}
                                             color={alertConfig.color}
                                         />
                                     )}
@@ -274,6 +308,14 @@ export default function CustomAlert({
                                     {displayTitle}
                                 </Text>
                             </View>
+
+                            {/* INK RULE — signature divider ng neo modal */}
+                            <View
+                                style={[
+                                    styles.rule,
+                                    { backgroundColor: T.ink },
+                                ]}
+                            />
 
                             <ScrollView
                                 style={styles.messageScroll}
@@ -323,15 +365,30 @@ export default function CustomAlert({
                                                     isCancel && [
                                                         styles.secondaryButton,
                                                         {
-                                                            backgroundColor: T.bg,
-                                                            borderColor: T.border,
+                                                            backgroundColor:
+                                                                T.card,
+                                                            borderColor: T.ink,
                                                         },
                                                     ],
-                                                    isDestructive &&
+                                                    isDestructive && [
                                                         styles.destructiveButton,
+                                                        {
+                                                            backgroundColor:
+                                                                T.dangerSoft,
+                                                            borderColor:
+                                                                T.danger,
+                                                        },
+                                                    ],
                                                     !isCancel &&
-                                                        !isDestructive &&
-                                                        styles.primaryButton,
+                                                        !isDestructive && [
+                                                            styles.primaryButton,
+                                                            {
+                                                                backgroundColor:
+                                                                    T.brand,
+                                                                borderColor:
+                                                                    T.ink,
+                                                            },
+                                                        ],
                                                 ]}
                                                 onPress={() =>
                                                     handleAction(button)
@@ -346,11 +403,13 @@ export default function CustomAlert({
                                                         isCancel && {
                                                             color: T.text,
                                                         },
-                                                        isDestructive &&
-                                                            styles.destructiveText,
+                                                        isDestructive && {
+                                                            color: T.danger,
+                                                        },
                                                         !isCancel &&
-                                                            !isDestructive &&
-                                                            styles.primaryText,
+                                                            !isDestructive && {
+                                                                color: T.brandText,
+                                                            },
                                                     ]}
                                                 >
                                                     {cleanLabel(
@@ -378,52 +437,54 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         paddingHorizontal: 18,
-        backgroundColor: 'rgba(0,0,0,0.66)',
         justifyContent: 'center',
         alignItems: 'center',
     },
+    // Focal element: 2px ink border + hard shadow (getNeoShadow sa JSX).
+    // Walang padding dito — bawat seksyon may sariling padding para
+    // edge-to-edge ang ink rule (pareho ng AI modal).
     card: {
         width: '100%',
         maxWidth: 390,
         maxHeight: '80%',
-        padding: 18,
-        borderWidth: 1,
-        borderRadius: 9,
-        elevation: 6,
-        shadowColor: '#000000',
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
+        borderWidth: BORDER.thick,
+        borderRadius: RADIUS.lg,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
+        paddingHorizontal: SPACING.lg - 2,
+        paddingTop: 14,
+        paddingBottom: 10,
     },
     iconBox: {
-        width: 38,
-        height: 38,
-        borderRadius: 8,
+        width: 32,
+        height: 32,
+        borderRadius: RADIUS.sm,
+        borderWidth: BORDER.thin,
         alignItems: 'center',
         justifyContent: 'center',
     },
     title: {
         flex: 1,
         minWidth: 0,
-        marginLeft: 11,
-        fontSize: 17,
-        lineHeight: 22,
+        marginLeft: SPACING.sm + 2,
+        fontSize: 14,
+        lineHeight: 19,
         fontWeight: '900',
-        letterSpacing: 0.1,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+    },
+    rule: {
+        height: BORDER.thick,
     },
     messageScroll: {
         maxHeight: 190,
-        marginTop: 13,
     },
     messageContent: {
         flexGrow: 1,
+        paddingHorizontal: SPACING.lg - 2,
+        paddingTop: SPACING.md,
     },
     message: {
         fontSize: 13,
@@ -432,18 +493,22 @@ const styles = StyleSheet.create({
     },
     actions: {
         width: '100%',
-        marginTop: 20,
         flexDirection: 'row',
+        paddingHorizontal: SPACING.lg - 2,
+        paddingTop: SPACING.lg - 2,
+        paddingBottom: SPACING.lg - 2,
     },
     actionsStacked: {
         flexDirection: 'column',
     },
+    // CTA-grade buttons: 2px border (BORDER.thick), squared 4px radius.
     button: {
         flex: 1,
         minHeight: 44,
         paddingHorizontal: 12,
         paddingVertical: 10,
-        borderRadius: 7,
+        borderRadius: RADIUS.md,
+        borderWidth: BORDER.thick,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -452,32 +517,26 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     rowButtonSpacing: {
-        marginLeft: 9,
+        marginLeft: SPACING.sm,
     },
     stackedButtonSpacing: {
-        marginTop: 8,
+        marginTop: SPACING.sm,
     },
     primaryButton: {
-        backgroundColor: COLORS.primary,
+        // Kulay (T.brand fill + T.ink border) naka-inline sa JSX.
     },
     secondaryButton: {
-        borderWidth: 1,
+        // Kulay (T.card fill + T.ink border) naka-inline sa JSX.
     },
     destructiveButton: {
-        borderWidth: 1,
-        borderColor: 'rgba(239, 68, 68, 0.45)',
-        backgroundColor: 'rgba(239, 68, 68, 0.10)',
+        // Kulay (T.dangerSoft fill + T.danger border) naka-inline sa JSX.
     },
     buttonText: {
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: 12,
+        lineHeight: 17,
         fontWeight: '800',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
         textAlign: 'center',
-    },
-    primaryText: {
-        color: '#FFFFFF',
-    },
-    destructiveText: {
-        color: COLORS.danger,
     },
 });

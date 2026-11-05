@@ -1,11 +1,21 @@
-// THEMECONTEXT VERSION: 2.0.0
-// Nag-derive na ngayon mula sa theme/tokens.ts. Ang pampublikong API ay hindi nagbago:
-// { isDarkMode, toggleTheme, colors } — may dagdag na semantic tokens sa colors.
-// Ang mga umiiral na screen na gumagamit ng T.bg / T.card / T.text / T.subText / T.border
-// ay magpapatuloy nang WALANG PAGBABAGO (sila pa rin ang parehong mga susi sa tema).
-import React, { createContext, useContext, useMemo, useState } from 'react';
+// THEMECONTEXT VERSION: 2.1.0
+// Default ay LIGHT mode sa fresh install (dating dark), at naka-persist na
+// ang napiling tema sa AsyncStorage (@lex_theme_mode_v1) — ibinabalik ito
+// sa susunod na bukas ng app. Ang pampublikong API ay hindi nagbago:
+// { isDarkMode, toggleTheme, colors }.
+import React, {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { darkTheme, lightTheme, type ThemeColors } from './tokens';
+
+const THEME_MODE_KEY = '@lex_theme_mode_v1';
 
 interface ThemeContextValue {
     isDarkMode: boolean;
@@ -14,14 +24,52 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-    isDarkMode: true,
+    isDarkMode: false,
     toggleTheme: () => { },
-    colors: darkTheme,
+    colors: lightTheme,
 });
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
-    const [isDarkMode, setIsDarkMode] = useState(true);
-    const toggleTheme = () => setIsDarkMode(prev => !prev);
+    // Light mode muna ang default (fresh install). Kapag may na-save na
+    // pili noong nakaraang session, ibabalik iyon pagkatapos ng load.
+    const [isDarkMode, setIsDarkMode] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const loadSavedMode = async (): Promise<void> => {
+            try {
+                const saved = await AsyncStorage.getItem(THEME_MODE_KEY);
+
+                if (mounted && saved === 'dark') {
+                    setIsDarkMode(true);
+                }
+            } catch {
+                // Hindi mabasa ang saved theme — mananatiling light.
+            }
+        };
+
+        void loadSavedMode();
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    const toggleTheme = useCallback((): void => {
+        setIsDarkMode((prev) => {
+            const next = !prev;
+
+            void AsyncStorage
+                .setItem(THEME_MODE_KEY, next ? 'dark' : 'light')
+                .catch(() => {
+                    // Hindi kritikal kung mabigo ang save — tumutuloy pa rin
+                    // ang toggle sa session na ito.
+                });
+
+            return next;
+        });
+    }, []);
 
     const colors = useMemo(
         () => (isDarkMode ? darkTheme : lightTheme),
@@ -30,7 +78,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
     const value = useMemo(
         () => ({ isDarkMode, toggleTheme, colors }),
-        [isDarkMode, colors]
+        [isDarkMode, colors, toggleTheme]
     );
 
     return (
