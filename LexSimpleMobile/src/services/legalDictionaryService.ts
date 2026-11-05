@@ -1,5 +1,6 @@
 // LEGAL DICTIONARY SERVICE VERSION: 6.2.7
-import { ApiError, postEndpoint } from './AiEngine';
+import { postEndpoint } from './AiEngine';
+import { toUserMessage } from '../utils/userFacingError';
 
 export type LegalEntry = {
     id?: number;
@@ -28,12 +29,8 @@ export const legalEntryKey = (entry: LegalEntry): string => {
     return `${entry.id ?? 'local'}:${identity.length}:${hash >>> 0}`;
 };
 
-export const explanationErrorMessage = (error: unknown): string => {
-    if (error instanceof ApiError) {
-        return error.message;
-    }
-    return 'Hindi makuha ang paliwanag. Subukan ulit mamaya.';
-};
+export const explanationErrorMessage = (error: unknown): string =>
+    toUserMessage(error, 'Hindi makuha ang paliwanag. Subukan ulit mamaya.');
 
 export const explainLegalEntry = async (entry: LegalEntry): Promise<string> => {
     const rawText = legalText(entry);

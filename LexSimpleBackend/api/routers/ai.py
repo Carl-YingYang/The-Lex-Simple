@@ -502,130 +502,27 @@ def simplify_text(request: Request, payload: LegalRequest):
         _refund_quota_keys(consumed_keys)
         raise
 
-
 @router.post("/simplify_file")
 @limiter.limit(LIMIT_AI)
 @limiter.limit(LIMIT_IP_CEILING, key_func=client_ip_key)
-async def simplify_uploaded_file(request: Request, file: UploadFile = File(...)):
-    temp_dir = "temp_uploads"
-    os.makedirs(temp_dir, exist_ok=True)
+async def simplify_uploaded_file(request: Request):
+    """
+    Direct file upload for analysis is intentionally no longer accepted
+    (Task U5 - kapareho ng /simplify_batch).
 
-    safe_filename = os.path.basename(file.filename or "uploaded_file")
-    ext = os.path.splitext(safe_filename)[1]
-    file_location = os.path.join(temp_dir, f"{uuid.uuid4().hex}{ext}")
-
-    try:
-        max_upload_bytes = MAX_UPLOAD_MB * 1024 * 1024
-        bytes_written = 0
-        with open(file_location, "wb") as buffer:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                bytes_written += len(chunk)
-                if bytes_written > max_upload_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail={
-                            "code": "upload_too_large",
-                            "message": (
-                                f"The uploaded file exceeds the "
-                                f"{MAX_UPLOAD_MB} MB limit."
-                            ),
-                        },
-                    )
-                buffer.write(chunk)
-
-        extracted_text = ""
-        filename_lower = safe_filename.casefold()
-
-        if filename_lower.endswith(".pdf"):
-            try:
-                with pdfplumber.open(file_location) as pdf:
-                    page_texts = []
-
-                    for page_number, page in enumerate(pdf.pages, start=1):
-                        page_text = _normalize_document_text(
-                            page.extract_text() or ""
-                        )
-                        if page_text:
-                            page_texts.append(
-                                f"--- Page {page_number} ---\n{page_text}"
-                            )
-
-                    extracted_text = "\n\n".join(page_texts)
-            except Exception as error:
-                print(f"PDFPlumber Error: {error}")
-
-            if not extracted_text.strip():
-                try:
-                    document = fitz.open(file_location)
-                    page_texts = []
-
-                    for page_number, page in enumerate(document, start=1):
-                        page_text = _normalize_document_text(page.get_text())
-                        if page_text:
-                            page_texts.append(
-                                f"--- Page {page_number} ---\n{page_text}"
-                            )
-
-                    document.close()
-                    extracted_text = "\n\n".join(page_texts)
-                except Exception as error:
-                    print(f"PyMuPDF Error: {error}")
-
-        elif filename_lower.endswith(".docx"):
-            document = docx.Document(file_location)
-            extracted_text = "\n".join(
-                paragraph.text
-                for paragraph in document.paragraphs
-                if paragraph.text.strip()
-            )
-
-        elif filename_lower.endswith(".txt"):
-            with open(file_location, "r", encoding="utf-8") as text_file:
-                extracted_text = text_file.read()
-        else:
-            raise HTTPException(
-                status_code=415,
-                detail="Unsupported file type.",
-            )
-
-        extracted_text = _normalize_document_text(extracted_text)
-
-        if len(extracted_text) < MIN_DOCUMENT_CHARACTERS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Hindi mabasa ang file. Siguraduhing mayroon itong "
-                    "selectable text at hindi lamang scanned images."
-                ),
-            )
-
-        input_meta = {
-            "documentId": None,
-            "inputMode": "uploaded_file_text",
-            "pageCount": extracted_text.count("--- Page ") or 1,
-            "receivedCharacters": len(extracted_text),
-            "documentHash": _sha256_text(extracted_text),
-        }
-
-        return _analyze_and_attach_input_meta(
-            extracted_text,
-            input_meta,
-        )
-    except HTTPException:
-        raise
-    except Exception as error:
-        print(f"/simplify_file Error: {error}")
-        raise HTTPException(
-            status_code=500,
-            detail="Server error processing file.",
-        ) from error
-    finally:
-        if os.path.exists(file_location):
-            os.remove(file_location)
-
+    The mobile app must extract text via /extract_text, run privacy
+    sanitization locally, then send the sanitized page array to /simplify.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "raw_file_upload_disabled",
+            "message": (
+                "Hindi na tinatanggap ang direktang pag-upload ng file "
+                "para sa pagsusuri. I-update ang app."
+            ),
+        },
+    )
 
 @router.post("/extract_text")
 @limiter.limit(LIMIT_AI)

@@ -45,6 +45,7 @@ import { postEndpoint } from '../../../services/AiEngine';
 import { useTheme } from '../../../theme/ThemeContext';
 import { BORDER, RADIUS } from '../../../theme/tokens';
 import { localDataKey } from '../../../services/localDataScope';
+import { sanitizeLocalText } from '../../../utils/sanitizer';
 
 interface Message {
     id: string;
@@ -53,6 +54,7 @@ interface Message {
     isError?: boolean;
     attachedFileName?: string;
     hiddenData?: string;
+    redactedNote?: boolean;
 }
 
 type AttachedFile = {
@@ -80,7 +82,7 @@ const DEFAULT_PROMPTS = [
     'Ipaliwanag ito sa simpleng Taglish.',
     'Ano ang mahahalagang bahagi nito?',
     'May kailangan ba akong bantayan?',
-    'I-summarize ang document.',
+    'Buodin ang dokumento.',
 ];
 
 let messageSequence = 0;
@@ -114,12 +116,22 @@ const MessageBubble = ({
 
     return (
         <View style={styles.messageBlock}>
+            {isUser && item.redactedNote && (
+                <Text
+                    style={[
+                        styles.redactedNoteText,
+                        { color: T.subText },
+                    ]}
+                >
+                    May personal na detalye sa mensahe mo na itinago bago
+                    ipadala.
+                </Text>
+            )}
             <View
                 style={[
                     styles.messageRow,
-                    isUser
-                        ? styles.userMessageRow
-                        : styles.lexieMessageRow,
+                    isUser && styles.userMessageRow,
+                    !isUser && styles.lexieMessageRow,
                 ]}
             >
                 {!isUser && (
@@ -429,14 +441,22 @@ export default function AskAiScreen({ route }: any) {
             )
             .slice(-15)
             .map((message) => {
+                // Task S6: i-sanitize ang text ng user messages bago ito
+                // ipadala sa /chat. Ang hiddenData ay galing na sa nilinis
+                // na text (Result/OfflineDetail), kaya hindi na galawin.
+                // Ang mga mensahe sa device ay nananatiling original.
+                const outboundText =
+                    message.sender === 'user'
+                        ? sanitizeLocalText(message.text)
+                        : message.text;
+
                 const content = message.hiddenData
                     ? `[PREVIOUSLY ATTACHED DOCUMENT: ${
                           message.attachedFileName || 'document'
                       }]\n${message.hiddenData}\n\nUSER MESSAGE:\n${
-                          message.text
+                          outboundText
                       }`
-                    : message.text;
-
+                    : outboundText;
                 return {
                     role:
                         message.sender === 'ai'
@@ -467,6 +487,27 @@ export default function AskAiScreen({ route }: any) {
         const baseDisplayHistory = options.displayHistory || messages;
         const contextHistory =
             options.contextHistory || baseDisplayHistory;
+        // Task S6: i-sanitize ang text ng user bago buuin ang payload.
+        // Ang ipinapakitang mensahe at ang naka-save sa device ay
+        // nananatiling original — ang safeUserText ay para sa pagpapadala
+        // lang.
+        const safeUserText = sanitizeLocalText(userText);
+
+        // Kung puro redaction ang natira sa mensahe, huwag nang ipadala.
+        if (userText && !safeUserText.trim()) {
+            const blockedMessage: Message = {
+                id: createMessageId('lexie'),
+                text: 'Walang maipapadala. Subukang alisin ang personal na detalye sa mensahe.',
+                sender: 'ai',
+                isError: true,
+            };
+
+            setMessages([...baseDisplayHistory, blockedMessage]);
+            return;
+        }
+
+        const messageWasRedacted =
+            Boolean(userText) && safeUserText !== userText;
 
         const userMessage: Message = {
             id: createMessageId('user'),
@@ -474,6 +515,7 @@ export default function AskAiScreen({ route }: any) {
             sender: 'user',
             attachedFileName: fileName,
             hiddenData,
+            redactedNote: messageWasRedacted,
         };
 
         const pendingMessages =
@@ -500,7 +542,7 @@ export default function AskAiScreen({ route }: any) {
 
         payloadSections.push(
             `[CURRENT USER QUESTION]\n${
-                userText || 'Pakisuri ang document na ito.'
+                safeUserText || 'Pakisuri ang document na ito.'
             }`
         );
 
@@ -542,15 +584,25 @@ export default function AskAiScreen({ route }: any) {
         } catch (error) {
             console.error('[Lexie] Send failed:', error);
 
+            // Task S6: ang daily-limit na mensahe ng server (nagsisimula sa
+            // "Abot na ang...") ay para mismo sa user — ipakita iyon nang
+            // buo. Para sa ibang error, panatilihin ang generic na mensahe.
+            const rawErrorMessage =
+                error instanceof Error ? error.message : '';
+            const outboundErrorText = rawErrorMessage.startsWith(
+                'Abot na ang'
+            )
+                ? rawErrorMessage
+                : 'Hindi ako makakonekta ngayon. Suriin ang internet at subukan ulit.';
+
             const errorMessage: Message = {
                 id: createMessageId('lexie'),
-                text:
-                    'Hindi ako makakonekta ngayon. Suriin ang internet at subukan ulit.',
+                text: outboundErrorText,
                 sender: 'ai',
                 isError: true,
             };
-            const failedMessages = [...pendingMessages, errorMessage];
 
+            const failedMessages = [...pendingMessages, errorMessage];
             await persistMessages(failedMessages);
 
             if (isMountedRef.current) {
@@ -1178,6 +1230,13 @@ const styles = StyleSheet.create({
         minWidth: 0,
         fontSize: 10,
         fontWeight: '800',
+    },
+    redactedNoteText: {
+        fontSize: 11,
+        lineHeight: 15,
+        fontStyle: 'italic',
+        marginTop: 4,
+        alignSelf: 'flex-end',
     },
     messageText: {
         fontSize: 13,
