@@ -5,7 +5,14 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from test_ocr_quality import SAMPLE_MIXED_BATCH
+# Task CH2: may test/__init__.py na ngayon (para gumana ang
+# python -m unittest test.test_... nang hindi dinadaya ng built-in na
+# "test" package ng Python), kaya package-mode ang import ng pytest.
+# Sinusuportahan din dito ang lumang top-level na import.
+try:
+    from test.test_ocr_quality import SAMPLE_MIXED_BATCH
+except ImportError:
+    from test_ocr_quality import SAMPLE_MIXED_BATCH
 
 
 # Import the orchestration logic without loading the Groq/Chroma dependencies.

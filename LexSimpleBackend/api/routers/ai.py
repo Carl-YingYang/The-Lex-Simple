@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from db.chroma_store import query_vector_db
 from orchestrator.pipeline import Orchestrator, ProcessRequest
 from services.chat_service import generate_chat_reply
+from services.score_chat import resolve_score_reply
 from services.llm_service import explain_raw_statutory_text
 from core.database import get_db_connection
 from core.rate_limit import (
@@ -803,23 +804,15 @@ def chat_with_ai(request: Request, payload: ChatRequest):
             )
 
         history = normalize_chat_history(payload.history or [])
-        # The app owns its scoring state. A question about the missing score
-        # needs that state, not a vector search for unrelated legal articles.
         question = payload.message.rsplit("[CURRENT USER QUESTION]", 1)[-1].strip()
-        if re.search(r"\bscore\b", question, re.I) and re.search(
-            r"bakit|walang|wala|hindi\s+ibinigay|why|no\s+score",
-            question, re.I,
-        ):
-            score_context = "\n".join(
-                [payload.message] + [item["content"] for item in reversed(history)]
-            )
-            match = re.search(r"(?m)^SCORE STATUS REASON:\s*([^\n]+)", score_context)
-            if match:
-                return {"status": "success", "reply": match.group(1).strip()}
-            return {
-                "status": "success",
-                "reply": "Hindi ko makita ang dahilan sa kasalukuyang chat. Buksan ang Resulta at i-tap ang ‘Bakit walang score?’ para makita ang status ng scan.",
-            }
+        # Task CH2: deterministic na mga sagot tungkol sa score (walang LLM
+        # call). Ang direktang "SCORE STATUS REASON" ay para LANG sa "walang
+        # score" na sitwasyon — hindi sa "bakit ganito ang score"; ang tanong
+        # tungkol sa score na may "Score: N/100" sa attachment ay sinasagot
+        # mula sa attachment mismo. Tignan ang services/score_chat.py.
+        score_shortcut_reply = resolve_score_reply(payload.message, history)
+        if score_shortcut_reply is not None:
+            return {"status": "success", "reply": score_shortcut_reply}
 
         has_document = (
             "[ATTACHED DOCUMENT CONTEXT:" in payload.message

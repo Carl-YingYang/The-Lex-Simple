@@ -37,7 +37,7 @@ class FakeVectors:
 
 class ScopeTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.old_db = settings.DB_PATH
         self.old_root = catalog.ROOT
         settings.DB_PATH = str(Path(self.temp.name) / "knowledge.db")
