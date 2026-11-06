@@ -1,7 +1,26 @@
-# VALIDATOR VERSION: 6.3.21
+# VALIDATOR VERSION: 6.4.0
+# Task SC1: i-validate ang "severity" at "category" ng bawat finding.
+# - Valid na severity -> ang scoreDeduction ay kinakalkula mula sa
+#   SEVERITY_DEDUCTIONS (hindi na pinapaniwalaan ang numero ng modelo).
+# - Severity na present pero invalid -> fallback na "medium"; category na
+#   invalid -> fallback na "other".
+# - Lumang format (walang severity key) -> gamitin ang kasalukuyang
+#   score_deduction at mag-log ng warning na walang nilalamang dokumento.
+# - Ang compound caps (>=1 critical -> 49; >=3 high -> 59) ay inilalapat
+#   sa calculated score. Ang severity/category ay HINDI isinama sa final
+#   API response keys.
 import logging
 import re
 from typing import List, Optional, Tuple
+
+from services.scoring import (
+    DEFAULT_CATEGORY,
+    DEFAULT_SEVERITY,
+    apply_compound_caps,
+    normalize_category,
+    normalize_severity,
+    severity_deduction,
+)
 
 
 logger = logging.getLogger("lex.validator")
@@ -138,21 +157,49 @@ def _validate_finding(
             f"findings[{index}].foundText is only a placeholder.",
         )
 
-    score_deduction = _parse_integer(
-        item.get(
-            "score_deduction",
+    # Task SC1: severity ang bagong pinagkukunan ng numeric na bawas.
+    has_severity_key = "severity" in item or "riskSeverity" in item
+    severity = normalize_severity(item.get("severity", item.get("riskSeverity")))
+    category = normalize_category(item.get("category", item.get("riskCategory")))
+
+    if severity:
+        score_deduction = severity_deduction(severity)
+        category = category or DEFAULT_CATEGORY
+    elif not has_severity_key:
+        # Old/legacy format: walang severity key. Gamitin ang kasalukuyang
+        # score_deduction. Ang warning ay walang nilalamang dokumento.
+        score_deduction = _parse_integer(
             item.get(
-                "scoreDeduction",
-                item.get("deduction"),
+                "score_deduction",
+                item.get(
+                    "scoreDeduction",
+                    item.get("deduction"),
+                ),
             ),
-        ),
-        minimum=1,
-        maximum=100,
-    )
-    if score_deduction is None:
-        return (
-            None,
-            f"findings[{index}].scoreDeduction must be from 1 to 100.",
+            minimum=1,
+            maximum=100,
+        )
+        if score_deduction is None:
+            return (
+                None,
+                f"findings[{index}].scoreDeduction must be from 1 to 100.",
+            )
+        logger.warning(
+            "findings[%s] uses the legacy score_deduction format without "
+            "severity; kept its numeric deduction.",
+            index,
+        )
+        category = category or DEFAULT_CATEGORY
+    else:
+        # Severity key ang pinasa pero invalid ang laman — fallback medium.
+        severity = DEFAULT_SEVERITY
+        score_deduction = severity_deduction(severity)
+        category = category or DEFAULT_CATEGORY
+        logger.warning(
+            "findings[%s] has an invalid severity value; applied the %r "
+            "severity fallback.",
+            index,
+            severity,
         )
 
     confidence = _parse_confidence(item.get("confidence"))
@@ -171,6 +218,11 @@ def _validate_finding(
         "scoreDeduction": score_deduction,
         "source": item.get("source", "llm"),
     }
+
+    # Internal lang: ginamit sa scoring/caps at category validation —
+    # tinatanggal bago mabuo ang API response (walang bagong key).
+    clean_finding["_severity"] = severity or ""
+    clean_finding["_category"] = category or ""
 
     source_chunk = _parse_integer(
         item.get("source_chunk", item.get("sourceChunk")),
@@ -259,6 +311,7 @@ def validate_llm_response(llm_data: dict) -> dict:
 
     clean_findings: List[dict] = []
     finding_keys = set()
+    finding_severities: List[str] = []
 
     for index, item in enumerate(raw_findings):
         if not isinstance(item, dict):
@@ -281,6 +334,15 @@ def validate_llm_response(llm_data: dict) -> dict:
             continue
 
         finding_keys.add(finding_key)
+
+        # Ang _severity/_category ay para lang sa deterministic scoring at
+        # validation — tinatanggal bago mabuo ang API response (walang
+        # bagong key).
+        severity = clean_finding.pop("_severity", "")
+        clean_finding.pop("_category", None)
+        if severity:
+            finding_severities.append(severity)
+
         clean_findings.append(clean_finding)
 
     raw_key_clauses = data.get("keyClauses", [])
@@ -330,6 +392,11 @@ def validate_llm_response(llm_data: dict) -> dict:
             finding["scoreDeduction"]
             for finding in clean_findings
         ),
+    )
+    # Task SC1: compound caps mula sa mga na-validate na severity.
+    calculated_score = apply_compound_caps(
+        calculated_score,
+        finding_severities,
     )
 
     if not clean_findings and raw_score is not None and explicit_score != 100:

@@ -9,7 +9,7 @@ import type {
 import { getApiIdentityHeaders } from './installId';
 
 
-const DEFAULT_BASE_URL = 'http://localhost:8000';
+const DEFAULT_BASE_URL = 'https://presuppurative-unconceitedly-peyton.ngrok-free.dev';
 const DEFAULT_TIMEOUT_MS = 90_000;
 const ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 

@@ -35,13 +35,25 @@
         {
           "android": {
             "extraParams": [
-              { "key": "android.useAndroidX", "value": "true" },
-              { "key": "android.enableJetifier", "value": "true" }
+              {
+                "key": "android.useAndroidX",
+                "value": "true"
+              },
+              {
+                "key": "android.enableJetifier",
+                "value": "true"
+              }
             ]
           }
         }
       ],
       "react-native-document-scanner-plugin"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "db93a656-4878-4a26-af2e-d13a850574f2"
+      }
+    },
+    "owner": "yingyangcode27"
   }
 }

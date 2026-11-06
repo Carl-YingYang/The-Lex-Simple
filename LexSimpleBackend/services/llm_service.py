@@ -1,4 +1,10 @@
-# LLM SERVICE VERSION: 6.3.25
+# LLM SERVICE VERSION: 6.4.0
+# Task SC1: hindi na ang LLM ang namimili ng numeric na bawas. Ibinabalik
+# na lang nito ang "severity" (critical|high|medium|low) at "category"
+# kada clause; ang numeric score_deduction at ang compound caps ay
+# kinakalkula ng backend (tingnan ang services/scoring.py). May fallback
+# pa rin ang lumang format na walang severity: gamitin ang score_deduction
+# nito at mag-log ng warning (walang nilalamang dokumento sa log).
 import hashlib
 import json
 import logging
@@ -19,6 +25,14 @@ from services.prompts import (
     get_explain_statutory_text_prompt,
 )
 from services.sanitizer import sanitize_legal_text
+from services.scoring import (
+    DEFAULT_CATEGORY,
+    DEFAULT_SEVERITY,
+    apply_compound_caps,
+    normalize_category,
+    normalize_severity,
+    severity_deduction,
+)
 
 
 _cost_logger = logging.getLogger("lex.cost")
@@ -50,7 +64,25 @@ LEGAL_CHUNK_JSON_SCHEMA = {
                     "clause_title": {"type": "string"},
                     "explanation": {"type": "string"},
                     "practical_advice": {"type": "string"},
-                    "score_deduction": {"type": "integer"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low"],
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "excessive_penalty",
+                            "automatic_termination",
+                            "unilateral_change",
+                            "entry_without_notice",
+                            "one_sided_liability",
+                            "waiver_of_rights",
+                            "hidden_or_open_ended_fees",
+                            "auto_renewal",
+                            "indefinite_obligation",
+                            "other",
+                        ],
+                    },
                     "original_text": {"type": "string"},
                     "confidence": {"type": "string"},
                 },
@@ -58,7 +90,8 @@ LEGAL_CHUNK_JSON_SCHEMA = {
                     "clause_title",
                     "explanation",
                     "practical_advice",
-                    "score_deduction",
+                    "severity",
+                    "category",
                     "original_text",
                     "confidence",
                 ],
@@ -204,16 +237,42 @@ def normalize_ai_keys(
             )
             continue
 
-        deduction = _safe_integer(
-            clause.get(
-                "score_deduction",
+        # Task SC1: ang severity ang pinagkukunan ng numeric na bawas.
+        severity = normalize_severity(clause.get("severity"))
+        category = normalize_category(clause.get("category")) or DEFAULT_CATEGORY
+
+        if severity:
+            deduction = severity_deduction(severity)
+        else:
+            # Old/legacy format: walang valid na severity. Gamitin ang
+            # kasalukuyang score_deduction; kung wala rin ito, safe na
+            # medium fallback. Ang warning ay walang nilalamang dokumento.
+            legacy_deduction = _safe_integer(
                 clause.get(
-                    "deduction",
-                    clause.get("points_deducted", 0),
+                    "score_deduction",
+                    clause.get(
+                        "deduction",
+                        clause.get("points_deducted", 0),
+                    ),
                 ),
-            ),
-            default=0,
-        )
+                default=0,
+            )
+            if legacy_deduction >= 1:
+                deduction = legacy_deduction
+                _service_logger.warning(
+                    "Chunk %s: clause has no valid severity; used legacy "
+                    "score_deduction fallback.",
+                    chunk_number,
+                )
+            else:
+                severity = DEFAULT_SEVERITY
+                deduction = severity_deduction(severity)
+                _service_logger.warning(
+                    "Chunk %s: clause has no severity or deduction; "
+                    "applied %r severity fallback.",
+                    chunk_number,
+                    severity,
+                )
 
         normalized.append(
             {
@@ -236,6 +295,12 @@ def normalize_ai_keys(
                         clause.get("advice", ""),
                     )
                 ).strip(),
+                # Internal rating fields — ginagamit sa scoring at caps.
+                # Inaalis sila ng validator bago umabot sa API response.
+                "severity": severity or DEFAULT_SEVERITY,
+                "category": category,
+                # Nanatili ang score_deduction (backend-computed mula sa
+                # severity) para hindi masira ang mobile app.
                 "score_deduction": deduction,
                 "original_text": exact_source_text,
                 "confidence": _parse_confidence(
@@ -623,7 +688,8 @@ Return ONLY one valid JSON object with this exact shape:
       "clause_title": "Short clause label",
       "explanation": "Clear Taglish explanation",
       "practical_advice": "Specific non-legal practical guidance",
-      "score_deduction": 1,
+      "severity": "critical",
+      "category": "excessive_penalty",
       "original_text": "Exact verbatim text copied from this OCR chunk",
       "confidence": "0-100%"
     }
@@ -636,6 +702,18 @@ Return ONLY one valid JSON object with this exact shape:
     }
   ]
 }
+
+"severity" must be one of: "critical", "high", "medium", "low".
+"category" must be one of: "excessive_penalty", "automatic_termination",
+"unilateral_change", "entry_without_notice", "one_sided_liability",
+"waiver_of_rights", "hidden_or_open_ended_fees", "auto_renewal",
+"indefinite_obligation", "other".
+Use the severity anchors: critical = penalty of 1% or more per day, or
+automatic eviction/termination without notice and no chance to pay;
+high = unilateral price increase or term change, entry without notice, or
+liability even without fault; medium = unbalanced but reasonably limited;
+low = minor inconvenience. Never output a numeric score_deduction: the
+backend computes the score from these labels.
 
 "clauses" is ONLY for possible risks. Do not invent a risk just to fill it.
 Summarize each chunk, including certificates and forms. Describe the purpose,
@@ -1022,6 +1100,17 @@ def _combine_chunk_results(
             for clause in unique_clauses
         ),
     )
+    raw_score = max(0, 100 - total_deduction) if unique_clauses else None
+    # Task SC1: deterministic compound caps mula sa severity ng mga clause.
+    # >=1 critical -> hindi tataas sa 49; >=3 high -> hindi tataas sa 59.
+    safety_score = apply_compound_caps(
+        raw_score,
+        (
+            clause.get("severity")
+            for clause in unique_clauses
+            if isinstance(clause.get("severity"), str)
+        ),
+    )
     page_numbers = {
         int(number)
         for number in PAGE_MARKER_PATTERN.findall(original_ocr_text)
@@ -1031,7 +1120,7 @@ def _combine_chunk_results(
         "documentTitle": document_title,
         "documentSummary": document_summary or None,
         # No findings is an absence of detected flags, not a perfect safety score.
-        "safety_score": max(0, 100 - total_deduction) if unique_clauses else None,
+        "safety_score": safety_score,
         "clauses": unique_clauses,
         "keyClauses": key_clauses,
         "analysisIncomplete": (
