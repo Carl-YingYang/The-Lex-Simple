@@ -97,12 +97,19 @@ def _chroma_document_count():
 def _llm_breaker_state() -> str:
     """Task P0 /ready: estado ng LLM circuit breaker.
 
-    Wala pang circuit breaker sa kasalukuyang bersyon, kaya "unknown" ang
-    ibinabalik at hindi ito nagpapa-fail ng /ready. Kapag nagkaroon na
-    (hal. sa services/llm_service.py), i-update dito:
-      "closed" = okay na ang LLM, "open" = may sira (i-fa-fail ang /ready).
+    Task P1: may totoong per-provider circuit breaker na sa
+    services/llm_providers.py. Ini-report dito ang estado ng primary
+    provider ("groq"):
+      "closed" = okay na ang LLM, "open" = may sira (i-fa-fail ang /ready),
+      "half_open" = nagsisubok nang gumaling pagkatapos ng cooldown,
+      "unknown" = wala pang tawag mula nang mag-start ang server.
     """
-    return "unknown"
+    try:
+        from services.llm_providers import provider_breaker_state
+
+        return provider_breaker_state("groq")
+    except Exception:
+        return "unknown"
 
 
 def _ready_checks() -> dict:
@@ -288,7 +295,9 @@ def ready_check():
     - usage_db: nasusulat ang SQLite usage DB (totoong write probe).
     - metadata_db: nasusulat ang metadata DB (totoong write probe).
     - chroma_collection: may laman ang lex_collection (count > 0).
-    - llm: breaker state ("unknown" kapag wala pa — hindi nagpapa-fail).
+    - llm: breaker state ng primary provider (Task P1: closed | open |
+      half_open mula sa services/llm_providers.py; "unknown" kapag wala
+      pang tawag — hindi nagpapa-fail).
 
     Kapag may pumalya: 503 na may listahan ng mga pumalyang check
     (mga pangalan lang — walang sensitibong detalye).

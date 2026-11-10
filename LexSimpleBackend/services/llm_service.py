@@ -1,4 +1,7 @@
 # LLM SERVICE VERSION: 6.4.0
+# Task P1: lahat ng LLM call (analysis, chat, explain) ay dumadaan na sa
+# services/llm_providers.chat_completion — iisang entry point na may
+# fail-closed privacy guard, per-provider circuit breaker, at failover.
 # Task SC1: hindi na ang LLM ang namimili ng numeric na bawas. Ibinabalik
 # na lang nito ang "severity" (critical|high|medium|low) at "category"
 # kada clause; ang numeric score_deduction at ang compound caps ay
@@ -14,12 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 from db.chroma_store import query_vector_db
 from db.sqlite_store import log_ai_transaction
-from services.llm_config import (
-    CHAT_MODEL,
-    EXTRACT_MODEL,
-    EXPLAIN_MODEL,
-    get_ai_client,
-)
+from services.llm_providers import chat_completion, model_for
 from services.prompts import (
     get_analyze_legal_text_prompt,
     get_explain_statutory_text_prompt,
@@ -361,26 +359,26 @@ def normalize_document_summary(value) -> str:
     return summary if 30 <= len(summary) <= 1_800 else ""
 
 
-def _request_summary(client, prompt: str) -> str:
+def _request_summary(prompt: str) -> str:
+    # Task P1: ang model at extra_body (gpt-oss reasoning) ay pinipili na
+    # ng services/llm_providers batay sa purpose="analysis".
+    messages = [
+        {"role": "system", "content": "Return exactly one JSON object."},
+        {"role": "user", "content": prompt},
+    ]
     for attempt in range(2):
-        options = {
-            "model": CHAT_MODEL,
-            "messages": [
-                {"role": "system", "content": "Return exactly one JSON object."},
-                {"role": "user", "content": prompt},
-            ],
+        request_kwargs = {
             "temperature": 0.0,
             "max_tokens": 1_000,
         }
-        if CHAT_MODEL.startswith("openai/gpt-oss-"):
-            options["extra_body"] = {
-                "reasoning_effort": "low",
-                "include_reasoning": False,
-            }
         if attempt == 0:
-            options["response_format"] = {"type": "json_object"}
+            request_kwargs["response_format"] = {"type": "json_object"}
         try:
-            completion = client.chat.completions.create(**options)
+            completion = chat_completion(
+                messages,
+                purpose="analysis",
+                **request_kwargs,
+            )
             _log_completion_cost(completion, endpoint="/simplify")
             raw = completion.choices[0].message.content or ""
             parsed = json.loads(extract_and_clean_json(raw))
@@ -393,7 +391,7 @@ def _request_summary(client, prompt: str) -> str:
 
 
 def _summarize_document(
-    client, summaries: List[str], source_chunks: List[str], original_ocr_text: str = ""
+    summaries: List[str], source_chunks: List[str], original_ocr_text: str = ""
 ) -> str:
     """Summarize every chunk, then combine its overview for the whole document."""
     instructions = (
@@ -417,14 +415,13 @@ def _summarize_document(
     # one-sentence overview is too short to represent the whole document.
     if original_ocr_text and len(original_ocr_text) <= 12_000:
         prompt = instructions + "SANITIZED OCR:\n" + original_ocr_text
-        summary = _request_summary(client, prompt)
+        summary = _request_summary(prompt)
         numbered_clauses = len(re.findall(
             r"(?m)^\s*\d{1,2}[.)]\s+", original_ocr_text
         ))
         numbered_points = len(re.findall(r"(?m)^\d+[.)]\s+", summary))
         if numbered_clauses >= 3 and numbered_points < min(6, numbered_clauses):
             retry = _request_summary(
-                client,
                 prompt + "\nRETRY: Cover each of the "
                 f"{min(6, numbered_clauses)} numbered clauses in a separate "
                 "numbered line. Do not collapse them into one sentence.",
@@ -439,7 +436,6 @@ def _summarize_document(
         if summary:
             continue
         summaries[index] = normalize_chunk_summary(_request_summary(
-            client,
             "Summarize this one scanned document part in 2 to 5 short Filipino "
             "sentences (max 900 characters). Return ONLY JSON with field "
             "documentSummary. Describe its purpose and important conditions. "
@@ -457,11 +453,11 @@ def _summarize_document(
 
     if sum(map(len, summaries)) > 18_000:
         partials = [
-            _summarize_document(client, summaries[index:index + 10], [])
+            _summarize_document(summaries[index:index + 10], [])
             for index in range(0, len(summaries), 10)
         ]
         return (
-            _summarize_document(client, partials, [])
+            _summarize_document(partials, [])
             if all(partials) else ""
         )
     prompt = (
@@ -471,7 +467,7 @@ def _summarize_document(
             for index, value in enumerate(summaries, start=1)
         )
     )
-    return _request_summary(client, prompt)
+    return _request_summary(prompt)
 
 
 def _split_long_text(
@@ -638,6 +634,16 @@ def _get_rag_context(source_chunk: str) -> str:
     )
 
 
+def _completion_model_name(completion, endpoint: str) -> str:
+    """Task P1: aktwal na model mula sa completion mismo (maaaring
+    nag-failover ang provider), may fallback sa configured model kung
+    wala itong model attribute (hal. fake completion sa tests)."""
+    model_used = str(getattr(completion, "model", "") or "").strip()
+    if model_used:
+        return model_used
+    return model_for("explain" if endpoint == "/explain" else "analysis")
+
+
 def _log_completion_cost(
     completion,
     endpoint: str,
@@ -650,7 +656,7 @@ def _log_completion_cost(
             "prompt_tokens=%s | completion_tokens=%s | "
             "total_tokens=%s | timestamp=%s",
             endpoint,
-            CHAT_MODEL if endpoint == "/simplify" else EXPLAIN_MODEL if endpoint == "/explain" else EXTRACT_MODEL,
+            _completion_model_name(completion, endpoint),
             chunk_number if chunk_number is not None else "n/a",
             usage.prompt_tokens,
             usage.completion_tokens,
@@ -662,7 +668,6 @@ def _log_completion_cost(
 
 
 def _analyze_chunk(
-    client,
     source_chunk: str,
     chunk_number: int,
     total_chunks: int,
@@ -726,7 +731,6 @@ obligations, or notice without claiming they are unfair. Keep the two arrays
 separate. Never invent original_text or copy RAG context into it.
 """
     parsed_response = _request_chunk_json(
-        client=client,
         prompt=prompt + strict_schema,
         chunk_number=chunk_number,
     )
@@ -779,7 +783,6 @@ separate. Never invent original_text or copy RAG context into it.
         # risk candidate that still cannot be matched to the scanned text.
         try:
             retry = _request_chunk_json(
-                client=client,
                 prompt=prompt + strict_schema + "\nRETRY: Some original_text values did not "
                 "match the OCR. Copy each original_text literally from the OCR "
                 "above, including typos. Preserve the risk clauses you identified.",
@@ -838,7 +841,6 @@ separate. Never invent original_text or copy RAG context into it.
 
 
 def _request_chunk_json(
-    client,
     prompt: str,
     chunk_number: int,
 ) -> dict:
@@ -850,7 +852,7 @@ def _request_chunk_json(
     """
     last_error = "unknown completion error"
 
-    if CHAT_MODEL in STRICT_JSON_MODELS:
+    if model_for("analysis") in STRICT_JSON_MODELS:
         structured_response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -874,42 +876,39 @@ def _request_chunk_json(
                 "the JSON object."
             )
 
-        request_options = {
-            "model": CHAT_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a legal-text analysis component. "
-                        "Return exactly one complete JSON object and no "
-                        "text outside that object."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt + retry_instruction,
-                },
-            ],
+        chunk_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a legal-text analysis component. "
+                    "Return exactly one complete JSON object and no "
+                    "text outside that object."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt + retry_instruction,
+            },
+        ]
+        request_kwargs = {
             "temperature": 0.0,
             "max_tokens": MAX_CHUNK_RESPONSE_TOKENS,
         }
 
         response_mode = "local_json_fallback"
         if not use_local_json_fallback:
-            request_options["response_format"] = (
+            request_kwargs["response_format"] = (
                 structured_response_format
             )
             response_mode = structured_response_format["type"]
 
-        if CHAT_MODEL.startswith("openai/gpt-oss-"):
-            request_options["extra_body"] = {
-                "reasoning_effort": "low",
-                "include_reasoning": False,
-            }
-
         try:
-            completion = client.chat.completions.create(
-                **request_options
+            # Task P1: ang model at extra_body (gpt-oss reasoning) ay
+            # pinipili na ng services/llm_providers — purpose="analysis".
+            completion = chat_completion(
+                chunk_messages,
+                purpose="analysis",
+                **request_kwargs,
             )
         except Exception as error:
             status_code = getattr(error, "status_code", None)
@@ -1172,13 +1171,11 @@ def analyze_legal_text(ocr_text: str):
                 "message": "No readable OCR chunks were created.",
             }
 
-        client = get_ai_client()
         chunk_results = []
 
         # Sequential calls avoid sudden rate-limit bursts on Groq.
         for chunk_number, source_chunk in enumerate(chunks, start=1):
             chunk_result = _analyze_chunk(
-                client=client,
                 source_chunk=source_chunk,
                 chunk_number=chunk_number,
                 total_chunks=len(chunks),
@@ -1187,7 +1184,7 @@ def analyze_legal_text(ocr_text: str):
 
         summaries = [result.get("chunkSummary", "") for result in chunk_results]
         document_summary = _summarize_document(
-            client, summaries, chunks, normalized_ocr
+            summaries, chunks, normalized_ocr
         )
         combined_result = _combine_chunk_results(
             chunk_results,
@@ -1227,14 +1224,13 @@ def explain_raw_statutory_text(title: str, raw_text: str):
     """Explain the selected legal excerpt using the active Groq dictionary model."""
     try:
         prompt = get_explain_statutory_text_prompt(title, raw_text)
-        client = get_ai_client()
-        completion = client.chat.completions.create(
-            model=EXPLAIN_MODEL,
-            messages=[{"role": "user", "content": prompt}],
+        # Task P1: ang model at extra_body (gpt-oss reasoning) ay pinipili
+        # na ng services/llm_providers batay sa purpose="explain".
+        completion = chat_completion(
+            [{"role": "user", "content": prompt}],
+            purpose="explain",
             temperature=0.2,
             max_tokens=900,
-            extra_body={"reasoning_effort": "low", "include_reasoning": False}
-            if EXPLAIN_MODEL.startswith("openai/gpt-oss-") else {},
         )
         _log_completion_cost(completion, endpoint="/explain")
         content = (completion.choices[0].message.content or "").strip()
@@ -1255,7 +1251,7 @@ def explain_raw_statutory_text(title: str, raw_text: str):
         status_code = getattr(error, "status_code", None)
         _service_logger.exception(
             "Statutory explanation failed: model=%s status=%s type=%s",
-            EXPLAIN_MODEL, status_code, type(error).__name__,
+            model_for("explain"), status_code, type(error).__name__,
         )
         name = type(error).__name__.lower()
         if status_code == 429:

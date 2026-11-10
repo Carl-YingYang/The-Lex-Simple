@@ -14,8 +14,9 @@ document_only prompt.
     static na score explanation sa services/prompts.py at tugma sa
     severity-based scoring ng Task SC1.)
 
-Walang tunay na LLM call sa mga test na ito — mock ang LLM client sa
-services.chat_service.get_ai_client. I-stub din ang mga mabibigat na
+Walang tunay na LLM call sa mga test na ito — mock ang OpenAI client sa
+services.llm_providers._get_client (Task P1: doon na kumukuha ang
+chat_completion ng client bawat provider). I-stub din ang mga mabibigat na
 dependencies bago ang import (pareho ng teknik ng test_pipeline_outcomes.py).
 
 Run (mula sa LexSimpleBackend folder):
@@ -224,7 +225,7 @@ class DeterministicScoreReplyTests(unittest.TestCase):
     def test_a_score_question_with_score_gets_deterministic_template(self):
         fake_client, _captured = _make_fake_llm_client("dapat hindi ito ang sagot")
         with patch(
-            "services.chat_service.get_ai_client", return_value=fake_client
+            "services.llm_providers._get_client", return_value=fake_client
         ) as mock_client:
             response = chat_with_ai(
                 Mock(),
@@ -249,7 +250,7 @@ class DeterministicScoreReplyTests(unittest.TestCase):
     def test_b_missing_score_question_gets_score_status_reason(self):
         fake_client, _captured = _make_fake_llm_client("dapat hindi ito ang sagot")
         with patch(
-            "services.chat_service.get_ai_client", return_value=fake_client
+            "services.llm_providers._get_client", return_value=fake_client
         ) as mock_client:
             response = chat_with_ai(
                 Mock(),
@@ -284,7 +285,7 @@ class DeterministicScoreReplyTests(unittest.TestCase):
         ]
 
         with patch(
-            "services.chat_service.get_ai_client", return_value=fake_client
+            "services.llm_providers._get_client", return_value=fake_client
         ):
             response = chat_with_ai(
                 Mock(),
@@ -368,7 +369,7 @@ class ScoreShortEdgeCaseTests(unittest.TestCase):
     def test_missing_score_question_without_attachment_uses_fallback(self):
         fake_client, _captured = _make_fake_llm_client("dapat hindi ito ang sagot")
         with patch(
-            "services.chat_service.get_ai_client", return_value=fake_client
+            "services.llm_providers._get_client", return_value=fake_client
         ) as mock_client:
             response = chat_with_ai(
                 Mock(),
@@ -394,7 +395,7 @@ class ScoreShortEdgeCaseTests(unittest.TestCase):
             "ano ibig sabihin ng penalty na 8%?"
         )
         with patch(
-            "services.chat_service.get_ai_client", return_value=fake_client
+            "services.llm_providers._get_client", return_value=fake_client
         ):
             response = chat_with_ai(
                 Mock(),

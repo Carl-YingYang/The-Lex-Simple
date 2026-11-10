@@ -3,7 +3,7 @@ from typing import List, Dict, Optional, Any
 
 from db.chroma_store import query_vector_db
 from services.prompts import get_chat_reply_prompt
-from services.llm_config import get_ai_client, CHAT_MODEL
+from services.llm_providers import chat_completion
 
 
 # ============================================================
@@ -708,19 +708,15 @@ def generate_chat_reply(
         # 5. CALL LLM
         # ====================================================
 
-        client = get_ai_client()
-
         # Task CH2: ang document_only chat ay naka-lock sa 0.2 temperature
         # para hindi malikhain ang mga sagot tungkol sa dokumento.
-        completion = client.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages,
+        # Task P1: ang model at extra_body (gpt-oss reasoning) ay pinipili
+        # na ng llm_providers batay sa purpose — walang model sa tawag.
+        completion = chat_completion(
+            messages,
+            purpose="chat",
             temperature=0.2,
             max_tokens=950,
-            extra_body={
-                "reasoning_effort": "low",
-                "include_reasoning": False,
-            } if CHAT_MODEL.startswith("openai/gpt-oss-") else {},
         )
 
         # ====================================================
@@ -749,15 +745,11 @@ def generate_chat_reply(
                            "walang table o Markdown. Tapusin ang bawat pangungusap.",
             })
             try:
-                shorter = client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=messages,
+                shorter = chat_completion(
+                    messages,
+                    purpose="chat",
                     temperature=0.1,
                     max_tokens=950,
-                    extra_body={
-                        "reasoning_effort": "low",
-                        "include_reasoning": False,
-                    } if CHAT_MODEL.startswith("openai/gpt-oss-") else {},
                 )
                 if shorter.choices and shorter.choices[0].message.content:
                     response = shorter.choices[0].message.content

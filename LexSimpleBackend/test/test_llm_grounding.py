@@ -64,7 +64,7 @@ The Provider will correct reproduciblle defects reported within thirty days.
         with patch.object(llm_service, "_get_rag_context", return_value=""), \
              patch.object(llm_service, "get_analyze_legal_text_prompt", return_value="prompt"), \
              patch.object(llm_service, "_request_chunk_json", side_effect=responses) as request:
-            chunk = llm_service._analyze_chunk(None, self.SOURCE, 1, 1)
+            chunk = llm_service._analyze_chunk(self.SOURCE, 1, 1)
         self.assertEqual(request.call_count, 2)
         self.assertEqual(chunk["keyClauses"][0]["foundText"], literal_quote)
         self.assertFalse(chunk["chunkUnusable"])
@@ -90,7 +90,7 @@ The Provider will correct reproduciblle defects reported within thirty days.
         with patch.object(llm_service, "_get_rag_context", return_value=""), \
              patch.object(llm_service, "get_analyze_legal_text_prompt", return_value="prompt"), \
              patch.object(llm_service, "_request_chunk_json", side_effect=responses) as request:
-            chunk = llm_service._analyze_chunk(None, self.SOURCE, 1, 1)
+            chunk = llm_service._analyze_chunk(self.SOURCE, 1, 1)
         self.assertEqual(request.call_count, 2)
         self.assertEqual(chunk["droppedFindingCount"], 1)
         self.assertTrue(llm_service._combine_chunk_results(

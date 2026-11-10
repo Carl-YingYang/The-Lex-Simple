@@ -1,9 +1,10 @@
 """General (off-database) chat reply — Task C2 (Chat Phase).
 
 Ginagamit kapag ang tanong ay "general" intent — hindi kayang sagutin
-ng verified na knowledge base. Kapareho ng chat_service.generate_chat_reply
-ang client/model/extra_body pattern (get_ai_client + CHAT_MODEL +
-reasoning_effort na extra_body kung gpt-oss ang model).
+ng verified na knowledge base. Task P1: dumadaan na sa iisang entry
+point na services.llm_providers.chat_completion (purpose="general") ang
+tawag — doon na nagmumula ang client, model, at ang reasoning_effort
+na extra_body kapag gpt-oss ang model.
 
 Patakaran ng sagot: pangkalahatang impormasyon lang tungkol sa legal na
 konsepto at kontrata sa Pilipinas — WALANG partikular na batas, Article o
@@ -18,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from services.llm_config import get_ai_client, CHAT_MODEL
+from services.llm_providers import chat_completion
 
 MAX_HISTORY_MESSAGES = 15
 MAX_REPLY_TOKENS = 450  # kaya ng ~150 salita na may buo
@@ -107,22 +108,18 @@ def generate_general_reply(question: str, history: Optional[List[dict]] = None) 
     ng /chat) — hindi nito nilulunok ang error para makita ng catch sa
     taas ang totoong sanhi.
     """
-    client = get_ai_client()
-
     messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for msg in _normalize_history(history):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    completion = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=messages,
+    # Task P1: ang model at extra_body (gpt-oss reasoning) ay pinipili na
+    # ng llm_providers batay sa purpose — wala nang model sa tawag dito.
+    completion = chat_completion(
+        messages,
+        purpose="general",
         temperature=0.4,
         max_tokens=MAX_REPLY_TOKENS,
-        extra_body={
-            "reasoning_effort": "low",
-            "include_reasoning": False,
-        } if CHAT_MODEL.startswith("openai/gpt-oss-") else {},
     )
 
     reply = (completion.choices[0].message.content or "").strip()
