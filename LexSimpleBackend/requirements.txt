@@ -1,14 +1,18 @@
-fastapi==0.115.*
-uvicorn[standard]==0.34.*
-python-dotenv==1.*
-openai==1.*
-chromadb==0.5.*
-sentence-transformers==3.*
-langchain-text-splitters==0.3.*
-PyMuPDF==1.24.*
-pdfplumber==0.11.*
-python-docx==1.*
-pydantic==2.*
-slowapi==0.1.*
-
-pytesseract
+# Task P0: lahat ng bersyon ay eksakto na (walang wildcard ==1.* atbp.),
+# base sa pip freeze ng gumaganang venv. Kapag mag-a-update ng kahit isa,
+# patakbuhin muna ang buong test suite bago i-commit.
+# Ang dev-only deps (pytest, httpx) ay nasa requirements-dev.txt.
+fastapi==0.115.14
+uvicorn[standard]==0.34.3
+python-dotenv==1.2.4
+openai==1.109.1
+chromadb==0.5.23
+sentence-transformers==3.4.1
+langchain-text-splitters==0.3.11
+PyMuPDF==1.24.14
+pdfplumber==0.11.10
+python-docx==1.2.0
+pydantic==2.14.3
+slowapi==0.1.10
+python-multipart==0.0.33
+pytesseract==0.3.13
