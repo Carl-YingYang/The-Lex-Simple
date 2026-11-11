@@ -1,5 +1,5 @@
 # services/llm_providers.py
-# LLM PROVIDER ROUTING VERSION: 1.0.0 (Task P1)
+# LLM PROVIDER ROUTING VERSION: 1.1.0 (Task P1 + fallback JSON-format guard)
 #
 # Isang entry point lang para sa LAHAT ng LLM call ng server
 # (analysis, chat, explain, general): chat_completion(messages, purpose).
@@ -16,6 +16,15 @@
 #      config/request error ay hindi nagfa-failover — itinataas agad.
 #   4. extra_body (reasoning_effort, include_reasoning) ay nilalagay LANG
 #      kapag ang model name ay nagsisimula sa "openai/gpt-oss".
+#   4b. Task P1.1: ang response_format (json_schema/json_object) ay
+#      tinatanggal bago ang tawag KAPAG fallback provider ang magseserve at
+#      hindi gpt-oss ang model nito. Ang ibang provider ay nagbabalik ng
+#      400 sa hindi suportadong response_format, at ang 400 ay hindi
+#      nagfa-failover — isang hindi suportadong response_format ang sapat
+#      para mabigo ang buong analysis kahit gumagana ang fallback. Ligtas
+#      itong tanggalin dahil ang local JSON parser at validator ng mga
+#      caller (llm_service) ang laging huling bantay sa JSON shape. Ang
+#      primary provider ay hindi ginalaw — walang pagbabago sa .env.
 #   5. Log: provider name, purpose, latency, at success/fail lang. Hindi
 #      kailanman naka-log ang laman ng tanong, dokumento, o sagot.
 #   6. Ang mga EVAL_* env ay para lang sa eval scripts — hindi binabasa
@@ -48,6 +57,11 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 # Task P1: extra_body LANG kapag ganito ang simula ng model name.
 OSS_MODEL_PREFIX = "openai/gpt-oss"
+
+# Task P1.1: mga response_format type na maaaring hindi suportado ng
+# fallback provider. Tanging mga gpt-oss model ang certified na tumatanggap
+# nito (kapareho ng STRICT_JSON_MODELS sa services/llm_service.py).
+_JSON_FORMAT_TYPES = ("json_schema", "json_object")
 
 # Purpose -> aling model field ng ProviderConfig ang gagamitin.
 PURPOSE_MODEL_FIELDS = {
@@ -430,6 +444,26 @@ def chat_completion(messages, purpose: str, **kwargs):
         model = provider.model_for(purpose)
         request_kwargs = dict(kwargs)
         attempted_providers += 1
+
+        # Task P1.1: fallback JSON-format guard. Kapag fallback provider
+        # ang magseserve at hindi gpt-oss ang model nito, tanggalin ang
+        # response_format bago ang tawag. Tingnan ang tala sa header (4b).
+        if (
+            provider is not providers[0]
+            and not model.startswith(OSS_MODEL_PREFIX)
+        ):
+            response_format = request_kwargs.get("response_format")
+            if (
+                isinstance(response_format, dict)
+                and response_format.get("type") in _JSON_FORMAT_TYPES
+            ):
+                request_kwargs.pop("response_format")
+                PROVIDER_LOGGER.info(
+                    "response_format dropped | provider=%s | purpose=%s "
+                    "| model=%s",
+                    provider.name, purpose, model,
+                )
+
         extra_body = _extra_body_for(model)
         if extra_body is not None:
             merged = dict(kwargs.get("extra_body") or {})

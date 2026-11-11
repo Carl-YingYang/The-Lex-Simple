@@ -2,10 +2,13 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple
 
-# OCR QUALITY VERSION: 2.0.0
-# Questionable numbers and detached tables remain visible as warnings;
-# they cannot be silently corrected by the model. Mixed documents still
-# require separate requests to avoid combining unrelated contracts.
+# OCR QUALITY VERSION: 2.1.0
+# Questionable numbers stay visible as warnings; they cannot be silently
+# corrected by the model. Detached table columns are blocking: once the
+# columns separate, the row-to-value pairing is destroyed and even valid-
+# looking amounts cannot be trusted without the original image. Mixed
+# documents still require separate requests to avoid combining unrelated
+# contracts.
 
 PAGE_MARKER_PATTERN = re.compile(r"(?m)^--- Page (\d+) ---\s*$")
 
@@ -138,7 +141,7 @@ def assess_ocr_quality(text: str) -> dict:
                             "table_columns_detached"
                             if broken_columns else "table_layout_requires_review"
                         ),
-                severity="warning",
+                        severity="blocking" if broken_columns else "warning",
                         page_number=page_number,
                         message=(
                             f"{('Magkakahiwalay ang mga hanay ng talaan' if broken_columns else 'May talaan ng halaga')} "

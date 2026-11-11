@@ -1,4 +1,4 @@
-"""Offline cards for every active law excerpt, v6.3.12.
+"""Offline cards for every active law excerpt, v6.3.13.
 
 This read-only view splits long passages for the phone. It never changes the
 stored RAG chunks. The original legal wording stays available offline;
@@ -117,13 +117,17 @@ def _split_provision(content: str, label: str) -> list[tuple[str, str]]:
     spans: list[tuple[str, str]] = []
     if matches:
         introduction = content[:matches[0].start()].strip()
-        if introduction:
-            spans.append((label, introduction))
         for index, match in enumerate(matches):
             end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
             term = " ".join(match.group(2).split()).strip(" -")
             spans.append((term if len(term.split()) <= 10 else label,
                           content[match.start():end].strip()))
+        if introduction:
+            # The lead-in ("SEC. 3. As used in this Act, the term—") is not a
+            # term of its own; keep it inside the first definition card so no
+            # heading like "SECTION 3" ever shows up as a dictionary term.
+            first_title, first_text = spans[0]
+            spans[0] = (first_title, f"{introduction} {first_text}")
     else:
         term = label
         if label.upper().startswith("ARTICLE"):

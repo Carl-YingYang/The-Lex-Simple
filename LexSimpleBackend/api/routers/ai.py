@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from db.chroma_store import query_vector_db
 from orchestrator.pipeline import Orchestrator, ProcessRequest
 from services.chat_service import generate_chat_reply
+from services.lexie_identity import resolve_identity_reply
 from services.score_chat import resolve_score_reply
 from services.llm_service import explain_raw_statutory_text
 from core.database import get_db_connection
@@ -813,6 +814,14 @@ def chat_with_ai(request: Request, payload: ChatRequest):
         score_shortcut_reply = resolve_score_reply(payload.message, history)
         if score_shortcut_reply is not None:
             return {"status": "success", "reply": score_shortcut_reply}
+
+        # Task LX1 (UPL guard): ang mga tanong tungkol kay Lexie mismo
+        # ("sino ka?", "anong model ka?", "abogado ka ba?", "legal advice
+        # ba ito?") ay may deterministikong sagot — walang LLM call, walang
+        # quota, at laging pareho kahit Groq o fallback provider ang gamit.
+        identity_reply = resolve_identity_reply(payload.message)
+        if identity_reply is not None:
+            return {"status": "success", "reply": identity_reply}
 
         has_document = (
             "[ATTACHED DOCUMENT CONTEXT:" in payload.message
