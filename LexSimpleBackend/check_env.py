@@ -46,7 +46,7 @@ def main():
     print("LLM_FALLBACK_API_KEY  :", mask(fb_key))
     if fb_key and not fb_key.startswith("AIza"):
         print("                        ^ hindi nagsisimula sa 'AIza' - kung Gemini dapat, i-double check")
-    print("LLM_FALLBACK_ALLOW    :", os.getenv("LLM_FALLBACK_ALLOW", "").strip() or "(empty)")
+    print("LLM_FALLBACK_ALLOW_USER_DATA:", os.getenv("LLM_FALLBACK_ALLOW_USER_DATA", "").strip() or "(empty)")
     for name in ("LLM_FALLBACK_EXTRACT_MODEL", "LLM_FALLBACK_CHAT_MODEL", "LLM_FALLBACK_EXPLAIN_MODEL"):
         print(name + ":", os.getenv(name, "").strip() or "(EMPTY)")
 

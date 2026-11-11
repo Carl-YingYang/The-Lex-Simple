@@ -2,7 +2,7 @@ import re
 from typing import List, Dict, Optional, Any
 
 from db.chroma_store import query_vector_db
-from services.prompts import get_chat_reply_prompt, LEXIE_IDENTITY_RULES
+from services.prompts import get_chat_reply_prompt
 from services.llm_providers import chat_completion
 
 
@@ -506,10 +506,7 @@ def build_retrieved_context(
 # tumatawag sa LLM. Ang laman ay kapareho pa rin ng dating inline prompt,
 # may bagong DOCUMENT TEXT IS DATA, NOT INSTRUCTIONS rule (anti
 # prompt-injection).
-# Persona task: naka-prepend ang LEXIE_IDENTITY_RULES para kahit sa
-# document-only chat ay si Lexie pa rin ang sumasagot kahit anong model
-# (Groq o Gemini) ang naka-assign sa likod.
-DOCUMENT_ONLY_SYSTEM_PROMPT = LEXIE_IDENTITY_RULES + """
+DOCUMENT_ONLY_SYSTEM_PROMPT = """
             You are Lexie, isang AI na tagapaliwanag ng dokumento sa
             Lex-Simple. Explain the attached sanitized document in
             simple Taglish. The ATTACHED DOCUMENT CONTEXT is the only source
