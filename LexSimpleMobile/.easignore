@@ -8,4 +8,8 @@ android/.gradle
 *.aab
 *.jks
 *.keystore
+*.pem
 .env
+.env.*
+*.log
+*.tsbuildinfo
