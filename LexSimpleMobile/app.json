@@ -8,9 +8,9 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/Lex-Simpe-Logo.png",
+      "image": "./assets/splash-blank.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "<LIGHT_BG_HEX>"
     },
     "ios": {
       "supportsTablet": true
@@ -54,6 +54,12 @@
         "projectId": "db93a656-4878-4a26-af2e-d13a850574f2"
       }
     },
-    "owner": "yingyangcode27"
+    "owner": "yingyangcode27",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/db93a656-4878-4a26-af2e-d13a850574f2"
+    }
   }
 }

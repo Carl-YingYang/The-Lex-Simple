@@ -171,7 +171,7 @@ export const analyzeUploadedDocument = async (
     // (4) Privacy block — huwag ipadala ang kahit ano sa AI.
     if (safe.blocked) {
         throw new Error(
-            `May hindi nalinis na text sa pahina ${safe.blockedPageNumbers.join(', ')}. Tingnan ang sanitized text at kunan ulit kung kulang o malabo ang dokumento.`
+            `Privacy check ang humarang sa pahina ${safe.blockedPageNumbers.join(', ')} — may natirang sensitibong label sa sanitized text. Hindi ito problema ng scan; hindi makakatulong ang pagkunan ulit. Tingnan ang sanitized text ng pahinang tinutukoy.`
         );
     }
 

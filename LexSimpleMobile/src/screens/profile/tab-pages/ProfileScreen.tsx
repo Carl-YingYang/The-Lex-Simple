@@ -549,37 +549,6 @@ export default function ProfileScreen({ navigation }: any) {
         {/* PRIVACY — flat rows card (spec: 1.5px border, walang shadow) */}
         <NeoSectionHeader title="Privacy" marker={false} style={[styles.sectionGap, styles.supportGap]} />
 
-        <View style={[styles.privacyCard, { backgroundColor: T.card, borderColor: T.ink }]}>
-          <View style={styles.privacyRow}>
-            <View style={[styles.menuIcon, { backgroundColor: T.brandVivid, borderColor: T.ink }]}>
-              <Ionicons name="analytics-outline" size={20} color={T.brandText} />
-            </View>
-            <View style={styles.privacyCopy}>
-              <Text style={[styles.privacyTitle, { color: T.text }]}>Anonymous analytics</Text>
-              <Text style={[styles.privacyDescription, { color: T.subText }]}> Bilang ng scans lang ang naka-tabay sa server, at naka-hash ang install ID. Naka-off = hindi ka mabibilang sa usage stats; may daily limit pa rin.
-              </Text>
-            </View>
-            <Switch
-              value={analyticsOn}
-              onValueChange={(value) => { void toggleAnalytics(value); }}
-              trackColor={{ false: T.border, true: T.brand }}
-              thumbColor={T.card}
-            />
-          </View>
-
-          <View style={[styles.privacyDivider, { backgroundColor: T.border }]} />
-
-          <View style={styles.privacyRow}>
-            <View style={[styles.menuIcon, { backgroundColor: T.bg, borderColor: T.ink }]}>
-              <Ionicons name="information-circle-outline" size={20} color={T.subText} />
-            </View>
-            <View style={styles.privacyCopy}>
-              <Text style={[styles.privacyTitle, { color: T.text }]}>App version</Text>
-            </View>
-            <Text style={[styles.privacyValue, { color: T.subText }]}>{APP_VERSION}</Text>
-          </View>
-        </View>
-
         <MenuItem
           title="Privacy Policy"
           description="Basahin kung ano lang ang kinokolekta at paano ito ginagamit."

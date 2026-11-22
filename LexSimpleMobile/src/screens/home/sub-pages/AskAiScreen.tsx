@@ -75,7 +75,7 @@ const DEFAULT_WELCOME_MESSAGE: Message = {
     id: 'lexie-welcome',
     sender: 'ai',
     text:
-        'Hi, ako si Lexie, ang Legal Text Guide ng Lex-Simple. Tutulungan kitang unawain ang legal terms at document text sa mas simpleng paraan. Hindi ito legal advice o kapalit ng abogado.',
+        'Hi, ako si Lexie, ang Legal Text Guide ng Lex-Simple. Tutulungan kitang intindihin ang mga legal terms at document text sa mas simpleng paraan. Hindi ito legal advice o kapalit ng abogado.',
 };
 
 const DEFAULT_PROMPTS = [

@@ -650,7 +650,7 @@ export default function BatchEditScreen({
                 );
                 if (safe.blocked) {
                     throw new Error(
-                        `Dokumento ${index + 1}: Kulang o may hindi nalinis na text sa pahina ${safe.blockedPageNumbers.join(', ')}. Kunan ulit ang pahina.`
+                        `Dokumento ${index + 1}: Privacy check ang humarang sa pahina ${safe.blockedPageNumbers.join(', ')} — may natirang sensitibong label sa sanitized text. Hindi kailangang kunan ulit; tingnan ang nabasang text.`
                     );
                 }
                 prepared.push({

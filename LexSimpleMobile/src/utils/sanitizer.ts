@@ -121,6 +121,24 @@ const normalizeOcrDigits = (value: string): string => {
         .replace(/[Qq]/g, '9');
 };
 
+/**
+ * v2.8.0 — Label + value ba ang pares, o narrative mention lang?
+ * Tinutugma ang label, tapos hinahanap ang totoong numero
+ * (digitsNeeded+ digits, OCR-tolerant separators) sa loob ng
+ * value window pagkatapos ng label, sa parehong linya.
+ */
+const labelAdjacentToNumber = (
+    text: string,
+    labelPattern: RegExp,
+    digitsNeeded = 9,
+    valueWindow = 80
+): boolean => {
+    const rx = new RegExp(
+        `${labelPattern.source}[^\\n]{0,${valueWindow}}(?:\\d[\\s.,-]*){${digitsNeeded},}`,
+        'iu'
+    );
+    return rx.test(text);
+};
 
 /**
  * Collect person names only from strong legal-document contexts.
@@ -1168,21 +1186,61 @@ export const containsPotentialSensitiveData = (
 
 
     /*
-     * Explicit sensitive labels
+     * v2.8.0 — Explicit sensitive labels, context-aware na.
+     *
+     * Ang mga document label (bank account, passport, atbp.) ay
+     * normal na lumalabas sa narrative ng lease (hal. "keep the
+     * security deposit in a bank account") kaya hindi na sapat na
+     * ang mismong salita ang trigger — kailangang may kaakibat na
+     * numero sa tabi nito. Ang financial/Government-ID labels ay
+     * nangangailangan ng 9+ digits (totoong account/TIN/SSS number),
+     * at ang identity-document labels ay 6+ digits sa mas maikling
+     * window (maliit ang passport/license number). Ang mga tunay na
+     * numero na walang katabing label ay haharangin pa rin ng
+     * long-number rule sa taas — walang nababawas sa privacy.
      */
     const sensitiveLabels = [
-        /\b(?:password|passcode|pin)\b/iu,
-        /\b(?:credit\s*card|debit\s*card)\b/iu,
-        /\b(?:bank\s*account|account\s*number)\b/iu,
-        /\b(?:sss|gsis|philhealth|pag[\s-]?ibig|hdmf)\b/iu,
-        /\b(?:tin|taxpayer\s*identification)\b/iu,
-        /\b(?:passport|driver'?s?\s*license|national\s*id|philid|philsys|umid)\b/iu,
+        {
+            pattern: /\b(?:credit\s*card|debit\s*card)\b/iu,
+            digitsNeeded: 9,
+            valueWindow: 80,
+        },
+        {
+            pattern: /\b(?:bank\s*account|account\s*number)\b/iu,
+            digitsNeeded: 9,
+            valueWindow: 80,
+        },
+        {
+            pattern: /\b(?:sss|gsis|philhealth|pag[\s-]?ibig|hdmf)\b/iu,
+            digitsNeeded: 9,
+            valueWindow: 80,
+        },
+        {
+            pattern: /\b(?:tin|taxpayer\s*identification)\b/iu,
+            digitsNeeded: 9,
+            valueWindow: 80,
+        },
+        {
+            pattern:
+                /\b(?:passport|driver'?s?\s*license|national\s*id|philid|philsys|umid)\b/iu,
+            digitsNeeded: 6,
+            valueWindow: 30,
+        },
     ];
 
-    for (const pattern of sensitiveLabels) {
-        if (pattern.test(normalized)) {
+    for (const { pattern, digitsNeeded, valueWindow } of sensitiveLabels) {
+        if (labelAdjacentToNumber(normalized, pattern, digitsNeeded, valueWindow)) {
             return true;
         }
+    }
+
+    /*
+     * Password / passcode / pin: mananatiling unconditional —
+     * walang lehitimong dahilan para lumabas ang mga ito sa
+     * dokumentong ipapadala sa AI.
+     */
+    if (/\b(?:password|passcode|pin)\b/iu.test(normalized)) {
+        return true;
     }
 
 

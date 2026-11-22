@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
+    Animated,
+    Easing,
     Image,
     LogBox,
     Pressable,
@@ -43,7 +44,7 @@ import SanitizedOcrScreen from '../screens/home/sub-pages/SanitizedOcrScreen';
 import AboutScreen from '../screens/profile/sub-pages/AboutScreen';
 import LegalAidScreen from '../screens/profile/sub-pages/LegalAidScreen';
 import BatchEditScreen from '../screens/home/sub-pages/BatchEditScreen';
-
+import { LexLoader } from '../components/LexLoader';
 // APP NAVIGATOR VERSION: 3.1.0 — PURPLE NEO-BRUTALISM SPEC
 // (Routing, startup sequence, tab structure, at screen registry 1:1 pa
 // rin — UI lang ang binago.)
@@ -78,6 +79,8 @@ const TAB_ICONS: Record<string, any> = {
     Scan: require('../../assets/icons/scan.png'),
     Profile: require('../../assets/icons/profile.png'),
 };
+
+const BOOT_LOGO = require('../../assets/Lex-Simpe-Logo.png');
 
 const TabBarButton = ({
     children,
@@ -185,6 +188,29 @@ function NavigationContent() {
     const [startupPhase, setStartupPhase] = useState<'loading' | 'ready' | 'error'>('loading');
     const mountedRef = useRef(true);
 
+    const logoPulse = useRef(new Animated.Value(0)).current;
+
+useEffect(() => {
+    const loop = Animated.loop(
+        Animated.sequence([
+            Animated.timing(logoPulse, {
+                toValue: 1,
+                duration: 850,
+                easing: Easing.inOut(Easing.quad),
+                useNativeDriver: true,
+            }),
+            Animated.timing(logoPulse, {
+                toValue: 0,
+                duration: 850,
+                easing: Easing.inOut(Easing.quad),
+                useNativeDriver: true,
+            }),
+        ]),
+    );
+    loop.start();
+    return () => loop.stop();
+}, [logoPulse]);
+
     useEffect(() => {
         mountedRef.current = true;
         return () => {
@@ -212,9 +238,33 @@ function NavigationContent() {
         return (
             <View style={[styles.prepare, { backgroundColor: T.bg }]}>
                 <Text style={[styles.prepareEyebrow, { color: T.brand }]}>LEX-SIMPLE</Text>
-                <View style={[styles.prepareIconBox, { backgroundColor: T.card, borderColor: T.ink }]}>
-                    <ActivityIndicator color={T.brand} size="small" />
-                </View>
+                <Animated.View
+                    style={[
+                        styles.prepareIconBox,
+                        styles.prepareLogoBox,
+                        { backgroundColor: T.card, borderColor: T.ink },
+                        {
+                            opacity: logoPulse.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.7, 1],
+                            }),
+                            transform: [
+                                {
+                                    scale: logoPulse.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [0.94, 1.05],
+                                    }),
+                                },
+                            ],
+                        },
+                    ]}
+                >
+                    <Image
+                        source={BOOT_LOGO}
+                        style={styles.prepareLogo}
+                        resizeMode="contain"
+                    />
+                </Animated.View>
                 <Text style={[styles.prepareText, { color: T.text }]}>
                     Inihahanda ang saved scans…
                 </Text>
@@ -312,6 +362,8 @@ const styles = StyleSheet.create({
     prepare: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     prepareEyebrow: { fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 2.5, marginBottom: 22 },
     prepareIconBox: { width: 56, height: 56, borderWidth: BORDER.thin, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    prepareLogoBox: { width: 96, height: 96 },
+    prepareLogo: { width: 64, height: 64 },
     prepareText: { fontSize: 13, lineHeight: 19, fontWeight: '700', textAlign: 'center', maxWidth: 280 },
     retryButton: { minHeight: 44, marginTop: 18, borderWidth: BORDER.thin, borderRadius: RADIUS.md, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center' },
     retryText: { fontSize: 13, fontWeight: '800' },
