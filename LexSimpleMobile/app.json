@@ -10,17 +10,18 @@
     "splash": {
       "image": "./assets/splash-blank.png",
       "resizeMode": "contain",
-      "backgroundColor": "<LIGHT_BG_HEX>"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yingyangcode27.lexsimple"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/Lex-Simpe-Logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.anonymous.lexsimple"
+      "package": "com.yingyangcode27.lexsimple"
     },
     "edgeToEdgeEnabled": true,
     "predictiveBackGestureEnabled": false,
@@ -30,23 +31,6 @@
     "plugins": [
       "expo-asset",
       "expo-sqlite",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "extraParams": [
-              {
-                "key": "android.useAndroidX",
-                "value": "true"
-              },
-              {
-                "key": "android.enableJetifier",
-                "value": "true"
-              }
-            ]
-          }
-        }
-      ],
       "react-native-document-scanner-plugin"
     ],
     "extra": {
@@ -55,9 +39,7 @@
       }
     },
     "owner": "yingyangcode27",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/db93a656-4878-4a26-af2e-d13a850574f2"
     }
