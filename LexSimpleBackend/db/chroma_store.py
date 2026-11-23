@@ -24,7 +24,8 @@ def add_to_vector_db(text_chunk: str, metadata: dict) -> str:
     return chunk_id
 
 
-def query_vector_db(query_text: str, n_results: int = 3) -> dict:
+def query_vector_db(query_text: str, n_results: int = 3,
+                    law_id: str | None = None) -> dict:
     from services.knowledge_catalog import ensure_schema
 
     ensure_schema()
@@ -42,10 +43,18 @@ def query_vector_db(query_text: str, n_results: int = 3) -> dict:
     # vectors could hide a newer law when the archive grows.
     selected_files = (active_files[0] if len(active_files) == 1
                       else {"$in": active_files})
+    where_filter: dict = {"knowledge_file_id": selected_files}
+    if law_id:
+        # Law-scoped search: kunin lang ang mga chunk ng binanggit na batas
+        # (hal. "RA 7394" sa tanong ng user) sa loob mismo ng vector query.
+        where_filter = {"$and": [
+            {"knowledge_file_id": selected_files},
+            {"law_id": law_id},
+        ]}
     result = collection.query(
         query_embeddings=[get_embedding(query_text)],
         n_results=min(total, max(n_results * 6, 30)),
-        where={"knowledge_file_id": selected_files},
+        where=where_filter,
         include=["documents", "metadatas"],
     )
     ids = (result.get("ids") or [[]])[0]

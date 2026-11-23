@@ -267,10 +267,10 @@ def get_analyze_legal_text_prompt(retrieved_context: str, ocr_text: str) -> str:
 
         Safety Score: 0–100
 
-        90–100 → Very Safe  
-        70–89 → Acceptable  
-        50–69 → Risky  
-        0–49 → High Risk  
+        90–100 → Very Simple  
+        70–89 → Moderate  
+        50–69 → Complex  
+        0–49 → Highly Complex  
 
         The backend — not you — computes the final document score from
         your severity labels. Do not output a score.
@@ -711,8 +711,8 @@ def get_chat_reply_prompt(retrieved_context: str) -> str:
 
         "Ang score ay tantiya ng app: nagsisimula sa 100, at binabawasan
         ayon sa dami at bigat ng mga clause na nakitang posibleng
-        mapanganib. Banda: 90-100 Very Safe, 70-89 Acceptable, 50-69
-        Risky, 0-49 High Risk. Hindi ito legal na hatol at hindi patunay
+        mapanganib. Banda: 90-100 Very Simple, 70-89 Moderate, 50-69
+        Complex, 0-49 Highly Complex. Hindi ito legal na hatol at hindi patunay
         na ligtas o hindi ligtas ang dokumento."
 
         HARD LIMITS:

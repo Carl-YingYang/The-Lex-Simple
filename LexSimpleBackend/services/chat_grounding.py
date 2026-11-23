@@ -33,26 +33,38 @@ class Evidence:
     missing_reply: str = NO_SOURCE
 
 
+_LAW_NUMBER = re.compile(
+    r"\b(republic\s+act|r\.?\s?a\.?|presidential\s+decree|p\.?\s?d\.?|"
+    r"bsp\s+circular)\s*(?:no\.?\s*)?(\d{1,6})\b",
+    re.I,
+)
+
+
 def _reference(message: str) -> tuple[str | None, str | None]:
-    law = re.search(
-        r"\b(?:RA|R\.?A\.?|Republic Act(?: No\.?)?)\s*(\d{1,6})\b",
-        message,
-        re.I,
-    )
+    law = _LAW_NUMBER.search(message)
+    if law:
+        # Ang law_id sa DB ay "RA 3765", "PD 442", "BSP CIRCULAR 1160" —
+        # eksakto ito para gumana ang law-scoped search.
+        name = law.group(1).upper()
+        if name.startswith("P"):
+            law_id = f"PD {law.group(2)}"
+        elif name.startswith("B"):
+            law_id = f"BSP CIRCULAR {law.group(2)}"
+        else:
+            law_id = f"RA {law.group(2)}"
+    else:
+        # Users may call RA 386 by its familiar name, "Civil Code".
+        law_id = (
+            "RA 386"
+            if re.search(r"\b(?:the\s+)?civil\s+code\b", message, re.I)
+            else None
+        )
+
     provision = re.search(
         r"\b(article|art\.?|section|sec\.?)\s+([0-9]+[a-z]?)\b",
         message,
         re.I,
     )
-
-    law_id = f"RA {law.group(1)}" if law else None
-
-    # Users may call RA 386 by its familiar name, "Civil Code".
-    # Keep an explicitly stated RA number if both names appear.
-    if law_id is None and re.search(
-        r"\b(?:the\s+)?civil\s+code\b", message, re.I
-    ):
-        law_id = "RA 386"
 
     label = None
     if provision:
@@ -65,6 +77,12 @@ def _reference(message: str) -> tuple[str | None, str | None]:
 
     return law_id, label
 
+def mentions_law(message: str) -> bool:
+    """True kapag may sanggunian sa batas (RA/PD/BSP number, Civil Code,
+    o article/section). Buong tanong na ito ang sarili nitong retrieval
+    context — hindi na kailangang haluan ng dating tanong."""
+    law_id, provision = _reference(message)
+    return bool(law_id or provision)
 
 def _official_url(value: str) -> bool:
     parsed = urlparse(value)
@@ -160,6 +178,25 @@ def prepare_chat_evidence(
             for doc, src in hits
             if src.law_id.upper() == law_id
         ]
+        if not hits:
+            # Ang binanggit na batas ang mismong hanapin sa sarili niyang
+            # mga chunks. Hindi sapat ang "global ranking tapos i-filter" —
+            # kapag Taglish ang tanong, maaaring walang chunk ng RA 7394 sa
+            # top-5 ng lahat ng batas kahit 187 chunks ang nasa DB.
+            hits = _vector_hits(
+                vector_lookup(query, n_results=5, law_id=law_id)
+            )
+            hits = [
+                (doc, src)
+                for doc, src in hits
+                if src.law_id.upper() == law_id
+            ]
+        if not hits:
+            return Evidence(
+                "",
+                (),
+                f"Wala pa sa naaprubahang database ang {law_id}.",
+            )
 
     if provision:
         hits = [

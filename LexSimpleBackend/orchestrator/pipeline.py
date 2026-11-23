@@ -76,12 +76,12 @@ def _normalize_for_comparison(value: str) -> str:
 
 def _risk_level_from_score(score: int) -> str:
     if score >= 90:
-        return "Very Safe"
+        return "Very Simple"
     if score >= 70:
-        return "Acceptable"
+        return "Moderate"
     if score >= 50:
-        return "Risky"
-    return "High Risk"
+        return "Complex"
+    return "Highly Complex"
 
 
 def _error_payload(
@@ -495,7 +495,7 @@ class Orchestrator:
                 self._safe_deduction(match.score_deduction)
                 for match in rule_matches
             )
-            # A confirmed risky rule finding must not produce Very Safe.
+            # A confirmed risky rule finding must not produce Very Simple.
             rule_score = min(89, max(0, 100 - rule_deduction))
             final_score = min(llm_score, rule_score)
         else:

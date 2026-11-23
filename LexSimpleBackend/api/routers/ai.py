@@ -42,7 +42,7 @@ from services.dictionary_repository import get_dictionary_entry
 from services.knowledge_catalog import find_verified_reference_context
 from services.chat_grounding import (
     prepare_chat_evidence, append_verified_sources, remove_unsupported_examples,
-    sources_mentioned_in_reply, clean_chat_reply,
+    sources_mentioned_in_reply, clean_chat_reply, mentions_law,
 )
 
 
@@ -726,7 +726,31 @@ def normalize_chat_history(history: list, limit: int = 15) -> list:
 
 
 def is_follow_up(message: str) -> bool:
+    # Buong tanong na may sanggunian sa batas (RA/PD/BSP number o
+    # article/section): self-contained na ito. Ang paghalo ng dating tanong
+    # sa retrieval query nito ay nagpapalito sa ranking (hal. tanong tungkol
+    # sa RA 7394 pagkatapos ng tanong tungkol sa RA 3765).
+    if mentions_law(message):
+        return False
+
     message_lower = message.lower()
+    indicators = (
+        "bakit", "paano", "ano", "yun", "ganon", "ganyan",
+        "exception", "applicable", "meaning", "ibig sabihin",
+        "example", "bawal", "what if", "so", "eh",
+        "meron", "mayroon", "kapag", "kung",
+    )
+
+    if len(message.split()) <= 4:
+        return True
+
+    # Word-boundary matching: salita ang hanapin, hindi bahagi ng salita
+    # (hal. "kapag" sa loob ng "nakapagbayad") para hindi maling matawag
+    # na follow-up ang bagong tanong.
+    pattern = r"\b(?:" + "|".join(
+        re.escape(word).replace(r"\ ", r"\s+") for word in indicators
+    ) + r")\b"
+    return bool(re.search(pattern, message_lower))
     indicators = (
         "bakit",
         "paano",

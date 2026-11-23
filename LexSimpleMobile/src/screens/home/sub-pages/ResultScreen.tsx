@@ -167,15 +167,15 @@ const getRiskLabel = (score: number | null): string => {
         return 'REVIEW REQUIRED';
     }
     if (score >= 90) {
-        return 'VERY SAFE';
+        return 'VERY SIMPLE';     // o 'EASY TO READ'
     }
     if (score >= 70) {
-        return 'ACCEPTABLE';
+        return 'MODERATE';        // pamalit sa 'ACCEPTABLE'
     }
     if (score >= 50) {
-        return 'RISKY';
+        return 'COMPLEX';         // pamalit sa 'RISKY'
     }
-    return 'HIGH RISK';
+    return 'HIGHLY COMPLEX';      // pamalit sa 'HIGH RISK'
 };
 
 // DATING: module-level hex constants (blue #66A0FF para sa acceptable/
@@ -195,7 +195,7 @@ const getRiskConfig = (score: number | null, colors: ThemeColors): RiskConfig =>
             mainColor: colors.success,
             icon: 'shield-checkmark-outline',
             label: getRiskLabel(score),
-            shortLabel: 'Mababang risk',
+            shortLabel: 'Madaling intindihin',
         };
     }
 
@@ -204,7 +204,7 @@ const getRiskConfig = (score: number | null, colors: ThemeColors): RiskConfig =>
             mainColor: colors.brandVivid,
             icon: 'checkmark-circle-outline',
             label: getRiskLabel(score),
-            shortLabel: 'Katanggap-tanggap',
+            shortLabel: 'Katamtaman ang lalim',
         };
     }
 
@@ -213,7 +213,7 @@ const getRiskConfig = (score: number | null, colors: ThemeColors): RiskConfig =>
             mainColor: colors.warning,
             icon: 'warning-outline',
             label: getRiskLabel(score),
-            shortLabel: 'May dapat suriin',
+            shortLabel: 'Medyo malalim',
         };
     }
 

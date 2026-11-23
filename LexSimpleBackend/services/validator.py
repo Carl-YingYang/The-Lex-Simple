@@ -52,12 +52,12 @@ def _validation_error(code: str, message: str) -> dict:
 
 def _risk_level_from_score(score: int) -> str:
     if score >= 90:
-        return "Very Safe"
+        return "Very Simple"
     if score >= 70:
-        return "Acceptable"
+        return "Moderate"
     if score >= 50:
-        return "Risky"
-    return "High Risk"
+        return "Complex"
+    return "Highly Complex"
 
 
 def _parse_integer(
@@ -278,7 +278,7 @@ def validate_llm_response(llm_data: dict) -> dict:
     Strictly validate the complete chunked LLM analysis.
 
     Missing or malformed values are errors. They must never be converted to
-    a 100 / Very Safe result merely because a field was absent.
+    a 100 / Very Simple result merely because a field was absent.
     """
     if not isinstance(llm_data, dict):
         return _validation_error(

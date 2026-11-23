@@ -134,7 +134,7 @@ const getRiskConfig = (score: number | null): RiskConfig => {
         return {
             tone: 'success',
             icon: 'shield-checkmark-outline',
-            label: 'VERY SAFE',
+            label: 'VERY SIMPLE',
         };
     }
 
@@ -142,7 +142,7 @@ const getRiskConfig = (score: number | null): RiskConfig => {
         return {
             tone: 'info',
             icon: 'checkmark-circle-outline',
-            label: 'ACCEPTABLE',
+            label: 'MODERATE',
         };
     }
 
@@ -150,14 +150,14 @@ const getRiskConfig = (score: number | null): RiskConfig => {
         return {
             tone: 'warning',
             icon: 'warning-outline',
-            label: 'RISKY',
+            label: 'COMPLEX',
         };
     }
 
     return {
         tone: 'danger',
         icon: 'alert-circle-outline',
-        label: 'HIGH RISK',
+        label: 'HIGHLY COMPLEX',
     };
 };
 
